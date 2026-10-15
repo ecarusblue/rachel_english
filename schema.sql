@@ -253,7 +253,11 @@ declare
   v_to       integer;
   v_target   date;
   v_inserted integer := 0;
+  v_updated  integer := 0;
+  v_unchanged integer := 0;
   v_skipped  integer := 0;
+  v_existing uuid;
+  v_same     boolean;
   v_errors   jsonb := '[]'::jsonb;
 begin
   select t.owner into v_owner from public.api_tokens t where t.token_hash = v_hash and t.revoked_at is null;
@@ -291,23 +295,44 @@ begin
       end if;
       v_target := coalesce((v_item->>'target_date')::date, (now() at time zone 'Asia/Seoul')::date);
 
+      -- 같은 학생·교재·수업일: 이미 처리된(채택/수정/거절) 기록이 있으면 건너뜀, '제안'이면 최신 내용으로 갱신, 없으면 추가
       if exists (select 1 from public.recommendations r
                   where r.student_id = v_student and r.textbook_id = v_book.id
-                    and r.target_date = v_target and r.status = '제안') then
+                    and r.target_date = v_target and r.status <> '제안') then
         v_skipped := v_skipped + 1;
       else
-        insert into public.recommendations (owner, student_id, textbook_id, target_date, from_unit, to_unit, rationale, model, status)
-        values (v_owner, v_student, v_book.id, v_target, v_from, v_to,
-                left(nullif(trim(coalesce(v_item->>'rationale', '')), ''), 600),
-                left(coalesce(p_model, 'Claude'), 100), '제안');
-        v_inserted := v_inserted + 1;
+        select r.id, (r.from_unit = v_from and r.to_unit = v_to
+                      and r.rationale is not distinct from left(nullif(trim(coalesce(v_item->>'rationale', '')), ''), 600))
+          into v_existing, v_same
+          from public.recommendations r
+         where r.student_id = v_student and r.textbook_id = v_book.id
+           and r.target_date = v_target and r.status = '제안'
+         order by r.created_at desc limit 1;
+
+        if v_existing is null then
+          insert into public.recommendations (owner, student_id, textbook_id, target_date, from_unit, to_unit, rationale, model, status)
+          values (v_owner, v_student, v_book.id, v_target, v_from, v_to,
+                  left(nullif(trim(coalesce(v_item->>'rationale', '')), ''), 600),
+                  left(coalesce(p_model, 'Claude'), 100), '제안');
+          v_inserted := v_inserted + 1;
+        elsif v_same then
+          v_unchanged := v_unchanged + 1;
+        else
+          update public.recommendations
+             set from_unit = v_from, to_unit = v_to,
+                 rationale = left(nullif(trim(coalesce(v_item->>'rationale', '')), ''), 600),
+                 model = left(coalesce(p_model, 'Claude'), 100),
+                 created_at = now()
+           where id = v_existing and status = '제안';
+          v_updated := v_updated + 1;
+        end if;
       end if;
     exception when others then
       v_errors := v_errors || jsonb_build_array(jsonb_build_object('alias', v_item->>'alias', 'error', sqlerrm));
     end;
   end loop;
 
-  return jsonb_build_object('inserted', v_inserted, 'skipped', v_skipped, 'errors', v_errors);
+  return jsonb_build_object('inserted', v_inserted, 'updated', v_updated, 'unchanged', v_unchanged, 'skipped', v_skipped, 'errors', v_errors);
 end;
 $$;
 

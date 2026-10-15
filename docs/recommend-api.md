@@ -55,9 +55,13 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   -d '{"model":"Claude(예약 작업)","items":[{"alias":"S01","textbook_id":"…","from_unit":8,"to_unit":9,"target_date":"2026-10-20","rationale":"최근 시험 90점, 숙제 안정적이라 기준 속도 유지"}]}' \
   https://.../api/recommendations
 ```
-응답: `{"ok":true,"data":{"inserted":1,"skipped":0,"errors":[]}}`
+응답: `{"ok":true,"data":{"inserted":1,"updated":0,"unchanged":0,"skipped":0,"errors":[]}}`
 - `alias`, `textbook_id` 는 읽기 응답의 값을 그대로 씁니다. `target_date` 는 생략하면 오늘(한국 시간)입니다.
-- 같은 학생·교재·수업일에 이미 '제안' 상태가 있으면 `skipped` 로 건너뜁니다.
+- **있으면 수정, 없으면 추가(upsert)**: 같은 학생·교재·수업일(`target_date`)을 기준으로 처리합니다.
+  - 없음 → 새로 저장 (`inserted`)
+  - '제안' 상태가 있고 내용이 다름 → 최신 내용으로 수정 (`updated`)
+  - '제안' 상태가 있고 내용이 같음 → 그대로 둠 (`unchanged`)
+  - 이미 채택·수정·거절로 처리된 기록이 있음 → 덮어쓰지 않고 건너뜀 (`skipped`)
 - 단원 범위가 1~전체 단원을 벗어나거나 배정되지 않은 교재면 그 항목만 `errors` 에 담기고 나머지는 저장됩니다.
 - 한 번에 최대 100개, 본문 100KB 까지입니다.
 
@@ -73,5 +77,5 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
    - 안정적이면 기준을 유지하고, 매우 좋으면 1단원 늘릴 수 있습니다.
    - from_unit 은 1 이상, to_unit 은 from_unit 이상이며 total_units 를 넘기지 않습니다.
 3. 결과를 POST /api/recommendations 로 보냅니다. items 의 각 항목은 alias, textbook_id, from_unit, to_unit, target_date(다음 수업 예정일을 알면), rationale(한국어 1~3문장).
-4. 응답의 inserted / skipped / errors 를 요약해서 보고합니다. 학생 실명은 알 수 없으며 추측하지 않습니다.
+4. 응답의 inserted / updated / unchanged / skipped / errors 를 요약해서 보고합니다. 학생 실명은 알 수 없으며 추측하지 않습니다.
 ```
