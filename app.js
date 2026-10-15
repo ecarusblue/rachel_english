@@ -815,13 +815,29 @@ async function init() {
     $("#login-form button").disabled = true;
     return;
   }
+  // 이메일만 이 브라우저에 저장합니다 (비밀번호는 저장하지 않음).
+  const EMAIL_KEY = "study-room-email";
+  try {
+    const saved = localStorage.getItem(EMAIL_KEY);
+    if (saved) {
+      $("#login-form").elements.email.value = saved;
+      $("#remember-email").checked = true;
+    }
+  } catch {}
+
   $("#login-form").onsubmit = async (e) => {
     e.preventDefault();
     $("#login-err").textContent = "";
     const f = e.target;
-    const { error } = await db.auth.signInWithPassword({ email: f.email.value.trim(), password: f.password.value });
+    const { error } = await db.auth.signInWithPassword({ email: f.elements.email.value.trim(), password: f.elements.password.value });
     if (error) $("#login-err").textContent = "로그인에 실패했습니다. 이메일과 비밀번호를 확인하세요.";
-    else f.password.value = "";
+    else {
+      f.elements.password.value = "";
+      try {
+        if ($("#remember-email").checked) localStorage.setItem(EMAIL_KEY, f.elements.email.value.trim());
+        else localStorage.removeItem(EMAIL_KEY);
+      } catch {}
+    }
   };
 
   $("#btn-forgot").onclick = async () => {
