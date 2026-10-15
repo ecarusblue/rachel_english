@@ -11,7 +11,9 @@ const state = {
   progress: [],          // 전체 학생의 교재 진도
   recentLessons: [],     // 최근 30일 (전체 현황용)
   recentTests: [],       // 최근 90일 (전체 현황용)
-  view: "overview",      // overview | summary | student
+  view: "overview",      // overview | summary | recs | student
+  pendingRecs: 0,
+  allRecs: [],
   summary: { range: "thisWeek", start: "", end: "", data: null, loading: false, failed: false },
   studentId: null,
   tab: "progress",       // progress | lessons | tests | report
@@ -170,6 +172,12 @@ async function loadCore() {
   state.progress = progress;
   state.recentLessons = lessons;
   state.recentTests = tests;
+  try {
+    const pend = await run(db.from("recommendations").select("id").eq("status", "제안").limit(500));
+    state.pendingRecs = pend.length;
+  } catch {
+    state.pendingRecs = 0;
+  }
 }
 
 async function loadDetail(studentId) {
@@ -211,12 +219,17 @@ function render() {
   renderSidebar();
   if (state.view === "student") renderStudent();
   else if (state.view === "summary") renderSummary();
+  else if (state.view === "recs") renderAllRecs();
   else renderOverview();
 }
 
 function renderSidebar() {
   $("#nav-overview").classList.toggle("active", state.view === "overview");
   $("#nav-summary").classList.toggle("active", state.view === "summary");
+  $("#nav-recs").classList.toggle("active", state.view === "recs");
+  const rb = $("#recs-badge");
+  rb.hidden = !state.pendingRecs;
+  rb.textContent = state.pendingRecs;
   const list = state.students.filter((s) => s.active || state.showInactive);
   $("#student-list").innerHTML = list.length
     ? list
@@ -830,6 +843,63 @@ function renderRecsTab(s) {
   });
 }
 
+/* ---------- 수업 추천 (전체 학생) ---------- */
+async function loadAllRecs() {
+  state.allRecs = await run(db.from("recommendations").select("*").order("created_at", { ascending: false }).limit(500));
+}
+
+function renderAllRecs() {
+  const recs = state.allRecs;
+  const name = (id) => (state.students.find((s) => s.id === id) || {}).name || "(삭제된 학생)";
+  const pending = recs.filter((r) => r.status === "제안");
+  const done = recs.filter((r) => r.status !== "제안").slice(0, 30);
+  const row = (r) => {
+    const b = state.textbooks.find((x) => x.id === r.textbook_id);
+    const pr = b ? state.progress.find((x) => x.student_id === r.student_id && x.textbook_id === b.id) : null;
+    const cls = r.status === "거절" ? "bad" : r.status === "제안" ? "warn" : "";
+    return `<tr data-rid="${esc(r.id)}">
+      <td><strong>${esc(name(r.student_id))}</strong></td>
+      <td>${esc(b ? b.title + rangeText(b, r) : r.from_unit + "–" + r.to_unit + "단원")}${pr && b ? `<div class="muted" style="font-size:.8rem">현재 ${esc(b.unit_label)} ${pr.current_unit}/${b.total_units}</div>` : ""}</td>
+      <td style="white-space:nowrap">${r.target_date ? fmtDate(r.target_date) : "-"}</td>
+      <td class="memo-cell">${esc(r.rationale || "")}</td>
+      <td style="white-space:nowrap"><span class="badge ${cls}">${esc(r.status)}</span>
+        ${r.status === "제안" ? `<div class="book-actions" style="margin-top:.4rem"><button class="btn small primary" data-rec-use="${esc(r.id)}" type="button">반영</button><button class="btn small danger" data-rec-no="${esc(r.id)}" type="button">거절</button></div>` : ""}</td></tr>`;
+  };
+  const table = (rows) => `<div class="card table-wrap"><table>
+    <thead><tr><th>학생</th><th>추천 교재 · 범위</th><th>수업 예정일</th><th>근거</th><th>상태</th></tr></thead>
+    <tbody>${rows.map(row).join("")}</tbody></table></div>`;
+  $("#main").innerHTML = `
+    <div class="page-head"><h2>수업 추천</h2><span class="muted">Claude 예약 작업이 저장한 학생별 다음 수업 진도 추천</span></div>
+    ${pending.length ? `<h3>확인할 추천 (${pending.length})</h3>${table(pending)}` : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
+    ${done.length ? `<h3 style="margin-top:1.2rem">최근 처리한 추천</h3>${table(done)}` : ""}
+    <p class="muted" style="font-size:.85rem;margin-top:.8rem">"반영"을 누르면 그 학생의 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록되고, 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`;
+
+  $("#main").querySelectorAll("[data-rec-use]").forEach((b) => {
+    b.onclick = async () => {
+      const rec = recs.find((r) => r.id === b.dataset.recUse);
+      const s = state.students.find((x) => x.id === rec.student_id);
+      if (!s) return toast("학생 정보를 찾을 수 없습니다");
+      await selectStudent(s.id);
+      state.tab = "recs";
+      render();
+      lessonForm(s, null, state.detail.recs.find((r) => r.id === rec.id) || rec);
+    };
+  });
+  $("#main").querySelectorAll("[data-rec-no]").forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm("이 추천을 거절로 기록할까요?")) return;
+      try {
+        await run(db.from("recommendations").update({ status: "거절", decided_at: new Date().toISOString() }).eq("id", b.dataset.recNo));
+        await loadAllRecs();
+        await loadCore();
+        render();
+      } catch (err) {
+        fail(err);
+      }
+    };
+  });
+}
+
 /* ---------- 학생 / 교재 관리 ---------- */
 const studentFields = [
   { name: "name", label: "이름", required: true, maxlength: 50 },
@@ -1140,6 +1210,16 @@ function bindEvents() {
     state.studentId = null;
     state.summary.data = null;
     state.summary.failed = false;
+    render();
+  };
+  $("#nav-recs").onclick = async () => {
+    state.view = "recs";
+    state.studentId = null;
+    try {
+      await loadAllRecs();
+    } catch (e) {
+      return fail(e);
+    }
     render();
   };
   $("#student-list").onclick = (e) => {
