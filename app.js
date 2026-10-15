@@ -1149,8 +1149,6 @@ function bindEvents() {
   };
   $("#btn-add-student").onclick = addStudent;
   $("#btn-textbooks").onclick = manageTextbooks;
-  $("#btn-backup").onclick = backup;
-  $("#btn-print").onclick = () => window.print();
   document.querySelectorAll(".js-logout").forEach((b) => {
     b.onclick = async () => {
       await db.auth.signOut();
