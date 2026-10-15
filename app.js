@@ -493,8 +493,11 @@ function buildReport(studentId, start, end) {
   return { lessons, attended, att, hw, books, tests, testAvg, prevAvg, nextPlan, hasData: lessons.length + tests.length > 0 };
 }
 
+const ACADEMY_NAME = "레이첼잉글리쉬";
+
 function buildMessage(s, label, start, end, r, comment) {
   const out = [];
+  out.push(`[${ACADEMY_NAME}]`);
   out.push(`[${label} 영어 학습 리포트] ${shortDate(start)} ~ ${shortDate(end)}`);
   out.push(`${s.name} 학생`);
   out.push("");
