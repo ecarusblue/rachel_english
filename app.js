@@ -563,7 +563,7 @@ function renderReportTab(s) {
           </div>`
         : `<div class="card empty">이 기간에는 수업·시험 기록이 없습니다.</div>`
     }
-    <div class="card" style="margin-top:1rem">
+    <div class="card draft-card" style="margin-top:1rem">
       <h3>학부모 안내문 초안</h3>
       <label>선생님 한마디 (선택)
         <textarea id="rp-comment" maxlength="500" placeholder="예: 단어 암기가 많이 좋아졌어요. 집에서 복습 한 번만 확인해 주세요.">${esc(rp.comment)}</textarea>
@@ -571,10 +571,15 @@ function renderReportTab(s) {
       <label>안내문 (직접 고쳐도 됩니다. 기간·한마디를 바꾸면 다시 만들어집니다)
         <textarea id="rp-draft" class="report-draft"></textarea>
       </label>
-      <div class="toolbar"><button class="btn primary" id="rp-copy" type="button">안내문 복사</button><span class="muted" id="rp-copied"></span></div>
-    </div>`;
+      <div class="toolbar"><button class="btn primary" id="rp-copy" type="button">안내문 복사</button><button class="btn" id="rp-print" type="button">인쇄 / PDF 저장</button><span class="muted" id="rp-copied"></span></div>
+    </div>
+    <div class="print-only" id="rp-print-view"></div>`;
   const draft = $("#rp-draft");
+  const syncPrint = () => { $("#rp-print-view").textContent = draft.value; };
   draft.value = buildMessage(s, range.label, range.start, range.end, r, rp.comment);
+  syncPrint();
+  draft.oninput = syncPrint;
+  $("#rp-print").onclick = () => { syncPrint(); window.print(); };
 
   $("#rp-range").onchange = (e) => {
     rp.range = e.target.value;
@@ -590,6 +595,7 @@ function renderReportTab(s) {
   $("#rp-comment").onchange = (e) => {
     rp.comment = e.target.value;
     draft.value = buildMessage(s, range.label, range.start, range.end, r, rp.comment);
+    syncPrint();
   };
   $("#rp-copy").onclick = async () => {
     try {
