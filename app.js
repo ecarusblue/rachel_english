@@ -13,6 +13,7 @@ const state = {
   recentTests: [],       // 최근 90일 (전체 현황용)
   view: "overview",      // overview | summary | recs | student
   pendingRecs: 0,
+  recFilter: { range: "all", start: "", end: "" },
   allRecs: [],
   summary: { range: "thisWeek", start: "", end: "", data: null, loading: false, failed: false },
   studentId: null,
@@ -800,9 +801,46 @@ function renderSummary() {
   };
 }
 
+/* ---------- 수업 추천 공통: 기간 필터 + 인쇄 ---------- */
+function recFilterRange() {
+  const f = state.recFilter;
+  return f.range === "all" ? null : periodRange(f.range, f.start, f.end);
+}
+function recDate(r) {
+  return r.target_date || (r.created_at || "").slice(0, 10);
+}
+function filterRecs(recs) {
+  const rg = recFilterRange();
+  return rg ? recs.filter((r) => recDate(r) >= rg.start && recDate(r) <= rg.end) : recs;
+}
+function recFilterHtml() {
+  const f = state.recFilter;
+  const rg = recFilterRange();
+  const opts = [["all", "전체 기간"], ["thisWeek", "이번 주"], ["lastWeek", "지난 주"], ["thisMonth", "이번 달"], ["lastMonth", "지난 달"], ["custom", "직접 선택"]];
+  return `<div class="card report-controls">
+      <label>기간<select id="rf-range">${opts.map(([v, t]) => `<option value="${v}" ${f.range === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+      <label>시작일<input type="date" id="rf-start" value="${esc(rg ? rg.start : "")}" ${f.range === "custom" ? "" : "disabled"}></label>
+      <label>종료일<input type="date" id="rf-end" value="${esc(rg ? rg.end : "")}" ${f.range === "custom" ? "" : "disabled"}></label>
+      <div style="align-self:end"><button class="btn" id="rf-print" type="button">인쇄 / PDF 저장</button></div>
+    </div>`;
+}
+function recPrintHead(title) {
+  const rg = recFilterRange();
+  return `<div class="print-head"><h2>[${esc(ACADEMY_NAME)}] ${esc(title)}</h2><p>${rg ? `기간: ${shortDate(rg.start)} ~ ${shortDate(rg.end)}` : "기간: 전체"} · 출력일 ${shortDate(todayStr())}</p></div>`;
+}
+function bindRecFilter(rerender) {
+  const f = state.recFilter;
+  $("#rf-range").onchange = (e) => { f.range = e.target.value; rerender(); };
+  const onDate = () => { f.start = $("#rf-start").value; f.end = $("#rf-end").value; rerender(); };
+  $("#rf-start").onchange = onDate;
+  $("#rf-end").onchange = onDate;
+  $("#rf-print").onclick = () => window.print();
+}
+
 /* ---------- 수업 추천 (Claude 예약 작업이 저장한 제안을 확인) ---------- */
 function renderRecsTab(s) {
-  const recs = state.detail.recs || [];
+  const allForStudent = state.detail.recs || [];
+  const recs = filterRecs(allForStudent);
   const pending = recs.filter((r) => r.status === "제안");
   const done = recs.filter((r) => r.status !== "제안");
   const card = (r) => {
@@ -821,11 +859,12 @@ function renderRecsTab(s) {
       <div class="muted" style="font-size:.8rem;margin-top:.3rem">${pr && b ? `현재 진도 ${esc(b.unit_label)} ${pr.current_unit}/${b.total_units} · ` : ""}${fmtDate((r.created_at || "").slice(0, 10))} 생성${r.model ? " · " + esc(r.model) : ""}${r.decided_at ? " · " + fmtDate(r.decided_at.slice(0, 10)) + " 처리" : ""}</div>
     </div>`;
   };
-  $("#tab-body").innerHTML = recs.length
+  $("#tab-body").innerHTML = recFilterHtml() + recPrintHead(`${s.name} 수업 추천`) + (recs.length
     ? `${pending.length ? `<h3>확인할 추천 (${pending.length})</h3>${pending.map(card).join("")}` : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
        ${done.length ? `<h3 style="margin-top:1.2rem">지난 추천</h3>${done.map(card).join("")}` : ""}
        <p class="muted" style="font-size:.85rem">"수업 기록에 반영"을 누르면 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록됩니다. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`
-    : `<div class="card empty">아직 추천이 없습니다. Claude 예약 작업이 실행되면 여기에 표시됩니다.</div>`;
+    : `<div class="card empty">${allForStudent.length ? "이 기간에는 추천이 없습니다." : "아직 추천이 없습니다. Claude 예약 작업이 실행되면 여기에 표시됩니다."}</div>`);
+  bindRecFilter(() => renderRecsTab(s));
 
   $("#tab-body").querySelectorAll("[data-rec-use]").forEach((b) => {
     b.onclick = () => lessonForm(s, null, recs.find((r) => r.id === b.dataset.recUse));
@@ -849,7 +888,7 @@ async function loadAllRecs() {
 }
 
 function renderAllRecs() {
-  const recs = state.allRecs;
+  const recs = filterRecs(state.allRecs);
   const name = (id) => (state.students.find((s) => s.id === id) || {}).name || "(삭제된 학생)";
   const pending = recs.filter((r) => r.status === "제안");
   const done = recs.filter((r) => r.status !== "제안").slice(0, 30);
@@ -869,11 +908,13 @@ function renderAllRecs() {
     <thead><tr><th>학생</th><th>추천 교재 · 범위</th><th>수업 예정일</th><th>근거</th><th>상태</th></tr></thead>
     <tbody>${rows.map(row).join("")}</tbody></table></div>`;
   $("#main").innerHTML = `
-    <div class="page-head"><h2>수업 추천</h2><span class="muted">Claude 예약 작업이 저장한 학생별 다음 수업 진도 추천</span></div>
-    ${pending.length ? `<h3>확인할 추천 (${pending.length})</h3>${table(pending)}` : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
+    <div class="page-head screen-only"><h2>수업 추천</h2><span class="muted">Claude 예약 작업이 저장한 학생별 다음 수업 진도 추천</span></div>
+    ${recFilterHtml()}${recPrintHead("수업 추천")}
+    ${pending.length ? `<h3>확인할 추천 (${pending.length})</h3>${table(pending)}` : `<div class="card empty">${state.allRecs.length && !recs.length ? "이 기간에는 추천이 없습니다." : "확인할 새 추천이 없습니다."}</div>`}
     ${done.length ? `<h3 style="margin-top:1.2rem">최근 처리한 추천</h3>${table(done)}` : ""}
     <p class="muted" style="font-size:.85rem;margin-top:.8rem">"반영"을 누르면 그 학생의 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록되고, 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`;
 
+  bindRecFilter(renderAllRecs);
   $("#main").querySelectorAll("[data-rec-use]").forEach((b) => {
     b.onclick = async () => {
       const rec = recs.find((r) => r.id === b.dataset.recUse);

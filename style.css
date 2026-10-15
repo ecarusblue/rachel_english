@@ -188,6 +188,7 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .report-controls label { margin: 0; }
 .report-draft { min-height: 20rem; line-height: 1.6; }
 .print-only { display: none; }
+.print-head { display: none; }
 
 /* 다이얼로그 */
 dialog { border: 1px solid var(--border); border-radius: 12px; padding: 0; width: min(460px, 94vw); background: var(--surface); color: var(--text); }
@@ -216,6 +217,10 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
   .main { max-width: none; padding: 0; }
   .card { break-inside: avoid; border-color: #bbb; }
   .report-controls, .draft-card { display: none !important; }
+  .print-head { display: block; margin-bottom: 1rem; }
+  .print-head h2 { margin: 0 0 .2rem; }
+  .print-head p { margin: 0; color: #444; }
+  .screen-only { display: none !important; }
   .print-only { display: block; white-space: pre-wrap; line-height: 1.7; font-size: 12pt; border: 1px solid #bbb; border-radius: 8px; padding: 1rem 1.2rem; margin-top: 1rem; }
   .bar { border: 1px solid #999; background: #fff; }
   .bar > span { background: #555 !important; }
