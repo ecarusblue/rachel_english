@@ -888,7 +888,7 @@ async function loadAllRecs() {
 }
 
 function renderAllRecs() {
-  const recs = filterRecs(state.allRecs);
+  const recs = state.allRecs;
   const name = (id) => (state.students.find((s) => s.id === id) || {}).name || "(삭제된 학생)";
   const pending = recs.filter((r) => r.status === "제안");
   const done = recs.filter((r) => r.status !== "제안").slice(0, 30);
@@ -908,13 +908,11 @@ function renderAllRecs() {
     <thead><tr><th>학생</th><th>추천 교재 · 범위</th><th>수업 예정일</th><th>근거</th><th>상태</th></tr></thead>
     <tbody>${rows.map(row).join("")}</tbody></table></div>`;
   $("#main").innerHTML = `
-    <div class="page-head screen-only"><h2>수업 추천</h2><span class="muted">Claude 예약 작업이 저장한 학생별 다음 수업 진도 추천</span></div>
-    ${recFilterHtml()}${recPrintHead("수업 추천")}
-    ${pending.length ? `<h3>확인할 추천 (${pending.length})</h3>${table(pending)}` : `<div class="card empty">${state.allRecs.length && !recs.length ? "이 기간에는 추천이 없습니다." : "확인할 새 추천이 없습니다."}</div>`}
+    <div class="page-head"><h2>수업 추천</h2><span class="muted">Claude 예약 작업이 저장한 학생별 다음 수업 진도 추천</span></div>
+    ${pending.length ? `<h3>확인할 추천 (${pending.length})</h3>${table(pending)}` : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
     ${done.length ? `<h3 style="margin-top:1.2rem">최근 처리한 추천</h3>${table(done)}` : ""}
     <p class="muted" style="font-size:.85rem;margin-top:.8rem">"반영"을 누르면 그 학생의 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록되고, 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`;
 
-  bindRecFilter(renderAllRecs);
   $("#main").querySelectorAll("[data-rec-use]").forEach((b) => {
     b.onclick = async () => {
       const rec = recs.find((r) => r.id === b.dataset.recUse);
