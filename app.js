@@ -88,7 +88,7 @@ function fieldHtml(f, value) {
   } else if (f.type === "checkbox") {
     return `<label class="check"><input type="checkbox" name="${name}" ${v ? "checked" : ""}> ${label}</label>`;
   } else {
-    const extra = [f.min != null ? `min="${f.min}"` : "", f.max != null ? `max="${f.max}"` : "", f.step ? `step="${f.step}"` : "", f.maxlength ? `maxlength="${f.maxlength}"` : ""].join(" ");
+    const extra = [f.min != null ? `min="${f.min}"` : "", f.max != null ? `max="${f.max}"` : "", f.step ? `step="${f.step}"` : "", f.maxlength ? `maxlength="${f.maxlength}"` : "", f.minlength ? `minlength="${f.minlength}"` : ""].join(" ");
     control = `<input type="${f.type || "text"}" name="${name}" value="${esc(v)}" ${req} ${extra}>`;
   }
   return `<label>${label}${control}</label>`;
@@ -135,6 +135,7 @@ function openForm({ title, fields, values = {}, submitLabel = "저장", onSubmit
       if (!el) continue;
       if (f.type === "checkbox") data[f.name] = el.checked;
       else if (f.type === "number") data[f.name] = el.value === "" ? null : Number(el.value);
+      else if (f.type === "password") data[f.name] = el.value;
       else data[f.name] = el.value.trim() === "" ? null : el.value.trim();
     }
     $("#dlg-submit").disabled = true;
@@ -714,9 +715,12 @@ function bindEvents() {
   $("#btn-textbooks").onclick = manageTextbooks;
   $("#btn-backup").onclick = backup;
   $("#btn-print").onclick = () => window.print();
-  $("#btn-logout").onclick = async () => {
-    await db.auth.signOut();
-  };
+  document.querySelectorAll(".js-logout").forEach((b) => {
+    b.onclick = async () => {
+      await db.auth.signOut();
+    };
+  });
+  $("#btn-password").onclick = changePassword;
 
   $("#main").addEventListener("click", async (e) => {
     const row = e.target.closest("tr[data-id]");
@@ -763,6 +767,25 @@ function bindEvents() {
   });
 }
 
+/* ---------- 비밀번호 ---------- */
+function changePassword(title = "비밀번호 변경") {
+  openForm({
+    title: typeof title === "string" ? title : "비밀번호 변경",
+    submitLabel: "변경",
+    fields: [
+      { name: "pw", label: "새 비밀번호 (8자 이상)", type: "password", required: true, minlength: 8 },
+      { name: "pw2", label: "새 비밀번호 확인", type: "password", required: true },
+    ],
+    onSubmit: async (d) => {
+      if (!d.pw || d.pw.length < 8) throw new Error("비밀번호는 8자 이상으로 입력하세요.");
+      if (d.pw !== d.pw2) throw new Error("두 비밀번호가 다릅니다.");
+      const { error } = await db.auth.updateUser({ password: d.pw });
+      if (error) throw error;
+      toast("비밀번호를 변경했습니다");
+    },
+  });
+}
+
 /* ---------- 시작 ---------- */
 function showLogin() {
   $("#app-view").hidden = true;
@@ -772,6 +795,10 @@ function showLogin() {
 async function showApp() {
   $("#login-view").hidden = true;
   $("#app-view").hidden = false;
+  try {
+    const { data } = await db.auth.getUser();
+    $("#user-email").textContent = data?.user?.email || "";
+  } catch {}
   try {
     await loadCore();
     render();
@@ -797,8 +824,21 @@ async function init() {
     else f.password.value = "";
   };
 
+  $("#btn-forgot").onclick = async () => {
+    const email = $("#login-form").elements.email.value.trim();
+    const err = $("#login-err");
+    err.classList.remove("login-msg");
+    if (!email) {
+      err.textContent = "위 칸에 이메일을 입력한 뒤 다시 눌러 주세요.";
+      return;
+    }
+    const { error } = await db.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    err.textContent = error ? "메일을 보내지 못했습니다. 잠시 후 다시 시도하세요." : "재설정 메일을 보냈습니다. 메일의 링크를 열어 주세요.";
+  };
+
   let appShown = false;
   db.auth.onAuthStateChange((event, session) => {
+    if (event === "PASSWORD_RECOVERY") setTimeout(() => changePassword("새 비밀번호 설정"), 400);
     // 콜백 안에서 바로 supabase 호출을 await 하면 교착될 수 있어 다음 틱으로 넘깁니다.
     setTimeout(() => {
       if (session && !appShown) {

@@ -22,6 +22,7 @@
       </label>
       <p id="login-err" class="error" role="alert"></p>
       <button class="btn primary" type="submit">로그인</button>
+      <button class="btn ghost" type="button" id="btn-forgot">비밀번호를 잊으셨나요?</button>
     </form>
   </section>
 
@@ -30,6 +31,7 @@
     <aside class="sidebar">
       <div class="sidebar-head">
         <strong>공부방 진도표</strong>
+        <button class="btn small ghost js-logout" type="button">로그아웃</button>
       </div>
       <button class="nav-btn" id="nav-overview">전체 현황</button>
       <div class="sidebar-title">
@@ -44,11 +46,18 @@
         <button class="btn small" id="btn-textbooks">교재 관리</button>
         <button class="btn small" id="btn-backup">백업(JSON)</button>
         <button class="btn small" id="btn-print">인쇄</button>
-        <button class="btn small ghost" id="btn-logout">로그아웃</button>
       </div>
     </aside>
 
-    <main id="main" class="main" tabindex="-1"></main>
+    <div class="content">
+      <header class="topbar">
+        <span class="muted">로그인: <strong id="user-email"></strong></span>
+        <span class="spacer"></span>
+        <button class="btn small" type="button" id="btn-password">비밀번호 변경</button>
+        <button class="btn small js-logout" type="button">로그아웃</button>
+      </header>
+      <main id="main" class="main" tabindex="-1"></main>
+    </div>
   </div>
 
   <!-- 공용 입력 다이얼로그 -->
