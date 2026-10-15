@@ -2,7 +2,7 @@
 // 환경변수 SUPABASE_URL, SUPABASE_KEY 로 dist/config.js 를 생성해 키를 저장소에 올리지 않게 합니다.
 //
 // 사용: SUPABASE_URL="https://xxxx.supabase.co" SUPABASE_KEY="공개용키" node build.mjs
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 function die(msg) {
   console.error("빌드 실패: " + msg);
@@ -40,5 +40,14 @@ for (const f of ["index.html", "app.js", "style.css", "_headers"]) copyFileSync(
 writeFileSync(
   "dist/config.js",
   `window.APP_CONFIG = ${JSON.stringify({ SUPABASE_URL: url, SUPABASE_KEY: key }, null, 2)};\n`
+);
+// 추천 API 용 Worker (공개용 값만 넣어 build/worker.js 생성)
+rmSync("build", { recursive: true, force: true });
+mkdirSync("build");
+writeFileSync(
+  "build/worker.js",
+  readFileSync("src/worker.js", "utf8")
+    .replace('"__SUPABASE_URL__"', JSON.stringify(url))
+    .replace('"__SUPABASE_KEY__"', JSON.stringify(key))
 );
 console.log("dist/ 생성 완료 (index.html, app.js, style.css, config.js, _headers)");

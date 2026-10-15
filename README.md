@@ -71,9 +71,15 @@ GitHub 저장소를 연결하면 push 할 때마다 자동 배포됩니다.
 | `config.js` | 자리표시자(저장소용). 배포 때는 `build.mjs` 가 `dist/config.js` 를 새로 만듭니다 |
 | `build.mjs` | 환경변수로 `dist/` 생성 (secret 키 차단) |
 | `_headers` | Cloudflare Pages 보안 헤더 |
-| `schema.sql` | DB 테이블 + RLS 정책 (students, textbooks, progress, lessons, tests, recommendations, report_logs) |
+| `schema.sql` | DB 테이블 + RLS 정책 + 추천 API 함수 |
+| `src/worker.js` | 추천 API (`/api/ping`, `/api/progress`, `/api/recommendations`). 빌드 때 `build/worker.js` 로 만들어짐 |
+| `wrangler.jsonc` | Cloudflare 배포 설정 (Worker + dist 정적 파일) |
 
 `recommendations` 테이블은 AI 추천 이력 저장용으로 DB에만 준비되어 있고, 현재 화면(`app.js`)에서는 아직 사용하지 않습니다.
+
+## 진도 추천 API
+
+Claude 예약 작업이 현재 진도를 읽고 추천을 저장하는 API 입니다. 설정과 사용법은 [docs/recommend-api.md](docs/recommend-api.md) 를 보세요.
 
 ## 나중에 확장하기 (선택)
 
