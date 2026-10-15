@@ -15,32 +15,41 @@
 2. 왼쪽 메뉴 **SQL Editor** 에서 `schema.sql` 전체를 붙여넣고 **Run** 합니다. 테이블과 접근 제한(RLS)이 한 번에 만들어집니다.
 3. **Authentication → Users** 에서 선생님 계정(이메일 + 비밀번호)을 직접 추가합니다. 이메일 확인 단계는 건너뛰도록(auto confirm) 체크하세요.
 4. **중요: 외부 가입 막기.** Authentication 설정(Sign In / Providers 등)에서 **새 사용자 가입 허용(Allow new users to sign up)을 끕니다.** 켜 둔 채로 두면 누구나 계정을 만들 수 있습니다. 메뉴 이름은 버전에 따라 조금 다를 수 있습니다.
-5. **Project Settings → API** 에서 Project URL 과 공개용 키(anon 또는 publishable)를 복사해 `config.js` 에 붙여넣습니다.
-   - `service_role` / secret 키는 절대 넣지 마세요.
+5. **Project Settings → API** 에서 Project URL 과 공개용 키(anon 또는 publishable)를 복사해 둡니다. 3단계에서 Cloudflare 환경변수로 넣습니다.
+   - `service_role` / secret 키는 절대 쓰지 마세요. 빌드 스크립트가 거부합니다.
    - 공개용 키는 브라우저에 노출돼도 되도록 설계된 키이며, 실제 보호는 RLS가 담당합니다.
+   - 키를 코드에 직접 적지 않으므로 저장소가 공개 상태여도 키가 올라가지 않습니다.
 
 **이미 예전 `schema.sql` 을 실행했다면:** 새 `schema.sql` 을 SQL Editor 에서 다시 실행하면 됩니다. 기존 데이터는 그대로 두고 수업 진도 컬럼(`lessons` 테이블)과 `recommendations` 테이블만 추가됩니다.
 
 ## 2. 내 컴퓨터에서 먼저 확인
 
 ```
-cd study-room-tracker
-python3 -m http.server 8000
+SUPABASE_URL="https://xxxx.supabase.co" SUPABASE_KEY="공개용키" node build.mjs
+cd dist && python3 -m http.server 8000
 ```
 
-브라우저에서 `http://localhost:8000` 을 열고 로그인해 보세요.
+(Windows PowerShell 은 `$env:SUPABASE_URL="..."; $env:SUPABASE_KEY="..."; node build.mjs`)
+
+브라우저에서 `http://localhost:8000` 을 열고 로그인해 보세요. 만들어진 `dist/` 는 `.gitignore` 로 제외됩니다.
 순서는 **교재 관리 → 학생 추가 → 교재 배정 → 수업 기록/시험 입력** 이 편합니다.
 
 ## 3. Cloudflare Pages 배포 (무료)
 
-가장 쉬운 방법은 폴더 업로드입니다.
+GitHub 저장소를 연결하면 push 할 때마다 자동 배포됩니다.
 
-1. Cloudflare 대시보드 → **Workers & Pages → Create → Pages → Upload assets (직접 업로드)**
-2. 프로젝트 이름을 정하고 이 폴더(`index.html`, `app.js`, `style.css`, `config.js`)를 올립니다. `schema.sql` 과 `README.md` 는 올리지 않아도 됩니다.
-3. 발급된 `*.pages.dev` 주소로 접속합니다.
+1. Cloudflare 대시보드 → **Workers & Pages → Create → Pages → Connect to Git** 에서 이 저장소를 고릅니다.
+2. 빌드 설정:
+   - Framework preset: **None**
+   - Build command: `node build.mjs`
+   - Build output directory: `dist`
+3. **Environment variables (Production)** 에 두 개를 추가합니다.
+   - `SUPABASE_URL` = Supabase Project URL
+   - `SUPABASE_KEY` = 공개용(anon / publishable) 키
+4. **Save and Deploy** 후 발급된 `*.pages.dev` 주소로 접속해 로그인합니다.
 
-GitHub 저장소와 연결하면 push 할 때마다 자동 배포됩니다. 이 경우 Framework preset 은 None, 빌드 명령은 비우고, 출력 디렉터리는 루트(`/`)로 둡니다.
-`config.js` 에 들어가는 값은 공개용 키라 저장소에 올려도 되지만, 가입을 막고 RLS 를 적용한 상태인지 꼭 확인하세요.
+환경변수를 바꾸면 다시 배포해야 반영됩니다. `_headers` 파일이 보안 헤더(CSP 포함)를 자동으로 적용하고, 검색 엔진 색인도 막습니다.
+가입을 막고 RLS 를 적용한 상태인지(1단계 3~4번) 꼭 확인하세요.
 
 ## 운영할 때 알아둘 점
 
@@ -57,7 +66,9 @@ GitHub 저장소와 연결하면 push 할 때마다 자동 배포됩니다. 이 
 | `index.html` | 화면 뼈대 |
 | `style.css` | 스타일 (다크 모드, 인쇄 지원) |
 | `app.js` | 앱 로직 |
-| `config.js` | Supabase URL / 공개 키 입력 |
+| `config.js` | 자리표시자(저장소용). 배포 때는 `build.mjs` 가 `dist/config.js` 를 새로 만듭니다 |
+| `build.mjs` | 환경변수로 `dist/` 생성 (secret 키 차단) |
+| `_headers` | Cloudflare Pages 보안 헤더 |
 | `schema.sql` | DB 테이블 + RLS 정책 (students, textbooks, progress, lessons, tests, recommendations) |
 
 `recommendations` 테이블은 AI 추천 이력 저장용으로 DB에만 준비되어 있고, 현재 화면(`app.js`)에서는 아직 사용하지 않습니다.
