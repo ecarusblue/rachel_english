@@ -11,7 +11,8 @@ const state = {
   progress: [],          // 전체 학생의 교재 진도
   recentLessons: [],     // 최근 30일 (전체 현황용)
   recentTests: [],       // 최근 90일 (전체 현황용)
-  view: "overview",      // overview | student
+  view: "overview",      // overview | summary | student
+  summary: { range: "thisWeek", start: "", end: "", data: null, loading: false, failed: false },
   studentId: null,
   tab: "progress",       // progress | lessons | tests | report
   report: { range: "thisWeek", start: "", end: "", comment: "" },
@@ -203,11 +204,13 @@ async function refresh() {
 function render() {
   renderSidebar();
   if (state.view === "student") renderStudent();
+  else if (state.view === "summary") renderSummary();
   else renderOverview();
 }
 
 function renderSidebar() {
   $("#nav-overview").classList.toggle("active", state.view === "overview");
+  $("#nav-summary").classList.toggle("active", state.view === "summary");
   const list = state.students.filter((s) => s.active || state.showInactive);
   $("#student-list").innerHTML = list.length
     ? list
@@ -454,8 +457,8 @@ function periodRange(kind, customStart, customEnd) {
   return { start, end, label: "기간" };
 }
 
-function buildReport(studentId, start, end) {
-  const lessons = state.detail.lessons
+function buildReport(studentId, start, end, src = state.detail) {
+  const lessons = src.lessons
     .filter((l) => l.lesson_date >= start && l.lesson_date <= end)
     .sort((a, b) => a.lesson_date.localeCompare(b.lesson_date));
   const attended = lessons.filter((l) => l.attendance !== "결석");
@@ -484,17 +487,17 @@ function buildReport(studentId, start, end) {
     })
     .filter(Boolean);
 
-  const tests = state.detail.tests
+  const tests = src.tests
     .filter((t) => t.test_date >= start && t.test_date <= end)
     .sort((a, b) => a.test_date.localeCompare(b.test_date));
   const testAvg = avg(tests.map((t) => pct(t.score, t.max_score)));
   const days = Math.round((parseD(end) - parseD(start)) / 86400000) + 1;
   const prevEnd = addDays(start, -1);
   const prevStart = addDays(start, -days);
-  const prevTests = state.detail.tests.filter((t) => t.test_date >= prevStart && t.test_date <= prevEnd);
+  const prevTests = src.tests.filter((t) => t.test_date >= prevStart && t.test_date <= prevEnd);
   const prevAvg = avg(prevTests.map((t) => pct(t.score, t.max_score)));
 
-  const withNext = [...state.detail.lessons].filter((l) => l.next_plan && l.lesson_date <= end).sort((a, b) => b.lesson_date.localeCompare(a.lesson_date));
+  const withNext = [...src.lessons].filter((l) => l.next_plan && l.lesson_date <= end).sort((a, b) => b.lesson_date.localeCompare(a.lesson_date));
   const nextPlan = withNext.length ? withNext[0].next_plan : null;
 
   const hwNotes = attended.filter((l) => l.homework_note).map((l) => ({ date: l.lesson_date, note: l.homework_note, status: l.homework }));
@@ -653,6 +656,126 @@ function renderReportTab(s) {
     }
     $("#rp-copied").textContent = "복사했습니다";
     toast("안내문을 복사했습니다");
+  };
+}
+
+/* ---------- 주간·월간 요약 (전체 학생) ---------- */
+async function loadSummary() {
+  const sm = state.summary;
+  const range = periodRange(sm.range, sm.start, sm.end);
+  const days = Math.round((parseD(range.end) - parseD(range.start)) / 86400000) + 1;
+  const from = addDays(range.start, -days);
+  sm.loading = true;
+  sm.failed = false;
+  renderSummary();
+  try {
+    const [lessons, tests] = await Promise.all([
+      run(db.from("lessons").select("*").gte("lesson_date", from).lte("lesson_date", range.end).limit(5000)),
+      run(db.from("tests").select("*").gte("test_date", from).lte("test_date", range.end).limit(5000)),
+    ]);
+    let logs = [];
+    try {
+      logs = await run(db.from("report_logs").select("*").eq("period_start", range.start).eq("period_end", range.end).limit(2000));
+    } catch {
+      logs = null; // 발송 기록 테이블 없음
+    }
+    sm.data = { range, lessons, tests, logs };
+  } catch (e) {
+    sm.data = null;
+    sm.failed = true;
+    fail(e, "요약을 불러오지 못했습니다");
+  }
+  sm.loading = false;
+  if (state.view === "summary") renderSummary();
+}
+
+function renderSummary() {
+  const sm = state.summary;
+  const opts = [["thisWeek", "이번 주"], ["lastWeek", "지난 주"], ["thisMonth", "이번 달"], ["lastMonth", "지난 달"], ["custom", "직접 선택"]];
+  const range = periodRange(sm.range, sm.start, sm.end);
+  const head = `<div class="page-head"><h2>주간·월간 요약</h2><span class="muted">${shortDate(range.start)} ~ ${shortDate(range.end)}</span></div>
+    <div class="card report-controls">
+      <label>기간<select id="sm-range">${opts.map(([v, t]) => `<option value="${v}" ${sm.range === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+      <label>시작일<input type="date" id="sm-start" value="${esc(range.start)}" ${sm.range === "custom" ? "" : "disabled"}></label>
+      <label>종료일<input type="date" id="sm-end" value="${esc(range.end)}" ${sm.range === "custom" ? "" : "disabled"}></label>
+    </div>`;
+  const bind = () => {
+    $("#sm-range").onchange = (e) => { sm.range = e.target.value; loadSummary(); };
+    const onDate = () => { sm.start = $("#sm-start").value; sm.end = $("#sm-end").value; loadSummary(); };
+    $("#sm-start").onchange = onDate;
+    $("#sm-end").onchange = onDate;
+  };
+  const main = $("#main");
+  const d = sm.data;
+  if (sm.loading || !d) {
+    main.innerHTML = head + `<div class="card empty">${sm.loading ? "불러오는 중..." : sm.failed ? "요약을 불러오지 못했습니다. 기간을 다시 선택해 보세요." : "불러오는 중..."}</div>`;
+    bind();
+    if (!sm.loading && !d && !sm.failed) loadSummary();
+    return;
+  }
+  // 요약은 불러온 기간과 선택한 기간이 같을 때만 표시
+  if (d.range.start !== range.start || d.range.end !== range.end) {
+    main.innerHTML = head + `<div class="card empty">불러오는 중...</div>`;
+    bind();
+    if (!sm.loading) loadSummary();
+    return;
+  }
+  const students = state.students.filter((s) => s.active);
+  const rows = students.map((s) => {
+    const src = { lessons: d.lessons.filter((l) => l.student_id === s.id), tests: d.tests.filter((t) => t.student_id === s.id) };
+    const r = buildReport(s.id, range.start, range.end, src);
+    const log = d.logs ? d.logs.filter((g) => g.student_id === s.id).sort((a, b) => b.sent_at.localeCompare(a.sent_at))[0] : null;
+    return { s, r, log };
+  });
+  const noRecord = rows.filter((x) => !x.r.lessons.length).length;
+  const unsent = d.logs ? rows.filter((x) => x.r.hasData && !x.log).length : null;
+  const totalLessons = rows.reduce((n, x) => n + x.r.lessons.length, 0);
+  const body = rows
+    .map(({ s, r, log }) => {
+      const hwTotal = r.hw.완료 + r.hw.일부 + r.hw.미제출;
+      const books = r.books.length
+        ? r.books.map(({ book, from, to }) => `<div>${esc(book.title)}${from != null && to != null ? ` <span class="muted">${esc(book.unit_label)} ${from === to ? from : from + "–" + to}</span>` : ""}</div>`).join("")
+        : '<span class="muted">-</span>';
+      const diff = r.testAvg != null && r.prevAvg != null ? Math.round(r.testAvg - r.prevAvg) : null;
+      const sent = d.logs === null
+        ? '<span class="muted">-</span>'
+        : log
+        ? `<span class="badge">${fmtDate(log.sent_at.slice(0, 10))} 발송</span>`
+        : r.hasData
+        ? '<span class="badge warn">미발송</span>'
+        : '<span class="muted">-</span>';
+      return `<tr class="clickable" data-sid="${esc(s.id)}">
+        <td><strong>${esc(s.name)}</strong><div class="muted">${esc(s.grade || "")}</div></td>
+        <td class="num">${r.lessons.length ? `${r.lessons.length}회` : '<span class="badge warn">기록 없음</span>'}${r.att.결석 ? `<div class="att-결석" style="font-size:.8rem">결석 ${r.att.결석}</div>` : ""}</td>
+        <td>${books}</td>
+        <td class="num">${hwTotal ? Math.round((r.hw.완료 / hwTotal) * 100) + "%" : "-"}</td>
+        <td class="num">${r.tests.length ? r.testAvg.toFixed(0) + "점" : "-"}${diff != null ? `<div class="muted" style="font-size:.8rem">${diff > 0 ? "+" : ""}${diff}</div>` : ""}</td>
+        <td>${r.nextPlan ? esc(r.nextPlan) : '<span class="muted">-</span>'}</td>
+        <td>${sent}</td></tr>`;
+    })
+    .join("");
+  main.innerHTML = head + (students.length
+    ? `<div class="summary">
+        <div class="card"><strong>${students.length}명</strong><span>재원생</span></div>
+        <div class="card"><strong>${totalLessons}회</strong><span>전체 수업 횟수</span></div>
+        <div class="card"><strong>${noRecord}명</strong><span>수업 기록 없음</span></div>
+        <div class="card"><strong>${unsent == null ? "-" : unsent + "명"}</strong><span>안내문 미발송</span></div>
+      </div>
+      <div class="card table-wrap"><table>
+        <thead><tr><th>학생</th><th class="num">수업</th><th>학습 교재 · 범위</th><th class="num">숙제 완료율</th><th class="num">시험 평균</th><th>다음 수업 예정</th><th>안내문</th></tr></thead>
+        <tbody>${body}</tbody></table></div>
+      <p class="muted" style="margin-top:.8rem;font-size:.85rem">학생 행을 누르면 그 학생의 리포트(안내문 초안)로 이동합니다. 시험 평균 아래 숫자는 직전 같은 길이 기간 대비 변화입니다.${d.logs === null ? " 안내문 발송 기록을 보려면 최신 schema.sql 을 실행하세요." : ""}</p>`
+    : `<div class="card empty">재원 중인 학생이 없습니다.</div>`);
+  bind();
+  $("#main tbody").onclick = async (e) => {
+    const tr = e.target.closest("tr[data-sid]");
+    if (!tr) return;
+    state.report.range = sm.range;
+    state.report.start = range.start;
+    state.report.end = range.end;
+    await selectStudent(tr.dataset.sid);
+    state.tab = "report";
+    render();
   };
 }
 
@@ -947,6 +1070,13 @@ function bindEvents() {
   $("#nav-overview").onclick = () => {
     state.view = "overview";
     state.studentId = null;
+    render();
+  };
+  $("#nav-summary").onclick = () => {
+    state.view = "summary";
+    state.studentId = null;
+    state.summary.data = null;
+    state.summary.failed = false;
     render();
   };
   $("#student-list").onclick = (e) => {
