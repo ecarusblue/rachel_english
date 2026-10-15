@@ -1,0 +1,822 @@
+/* 공부방 진도표 - 바닐라 JS + Supabase (빌드 과정 없음) */
+"use strict";
+
+const cfg = window.APP_CONFIG || {};
+const configured = cfg.SUPABASE_URL && !cfg.SUPABASE_URL.includes("YOUR-PROJECT") && cfg.SUPABASE_KEY && !cfg.SUPABASE_KEY.includes("YOUR-ANON");
+const db = configured ? window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_KEY) : null;
+
+const state = {
+  students: [],
+  textbooks: [],
+  progress: [],          // 전체 학생의 교재 진도
+  recentLessons: [],     // 최근 30일 (전체 현황용)
+  recentTests: [],       // 최근 90일 (전체 현황용)
+  view: "overview",      // overview | student
+  studentId: null,
+  tab: "progress",       // progress | lessons | tests
+  detail: { lessons: [], tests: [] },
+  showInactive: false,
+};
+
+const $ = (sel, root = document) => root.querySelector(sel);
+
+/* ---------- 유틸 ---------- */
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function todayStr() {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+function daysAgoStr(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+function daysBetween(dateStr) {
+  if (!dateStr) return null;
+  const a = new Date(dateStr + "T00:00:00");
+  const b = new Date(todayStr() + "T00:00:00");
+  return Math.round((b - a) / 86400000);
+}
+function fmtDate(s) {
+  if (!s) return "-";
+  const [y, m, d] = s.split("-");
+  return `${y.slice(2)}.${m}.${d}`;
+}
+function pct(score, max) {
+  return max > 0 ? (score / max) * 100 : 0;
+}
+function avg(arr) {
+  return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+}
+let toastTimer;
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+function fail(err, prefix = "오류") {
+  console.error(err);
+  toast(`${prefix}: ${err?.message || err}`);
+}
+async function run(promise) {
+  const { data, error } = await promise;
+  if (error) throw error;
+  return data;
+}
+
+/* ---------- 공용 입력 다이얼로그 ---------- */
+function fieldHtml(f, value) {
+  const v = value ?? f.default ?? "";
+  const req = f.required ? "required" : "";
+  const label = esc(f.label);
+  const name = esc(f.name);
+  let control;
+  if (f.type === "select") {
+    control = `<select name="${name}" ${req}>${f.options
+      .map(([val, text]) => `<option value="${esc(val)}" ${String(val) === String(v) ? "selected" : ""}>${esc(text)}</option>`)
+      .join("")}</select>`;
+  } else if (f.type === "textarea") {
+    control = `<textarea name="${name}" ${req} maxlength="${f.maxlength || 2000}">${esc(v)}</textarea>`;
+  } else if (f.type === "checkbox") {
+    return `<label class="check"><input type="checkbox" name="${name}" ${v ? "checked" : ""}> ${label}</label>`;
+  } else {
+    const extra = [f.min != null ? `min="${f.min}"` : "", f.max != null ? `max="${f.max}"` : "", f.step ? `step="${f.step}"` : "", f.maxlength ? `maxlength="${f.maxlength}"` : ""].join(" ");
+    control = `<input type="${f.type || "text"}" name="${name}" value="${esc(v)}" ${req} ${extra}>`;
+  }
+  return `<label>${label}${control}</label>`;
+}
+
+function openForm({ title, fields, values = {}, submitLabel = "저장", onSubmit, onDelete }) {
+  const dlg = $("#dlg");
+  const form = $("#dlg-form");
+  $("#dlg-title").textContent = title;
+  $("#dlg-err").textContent = "";
+  $("#dlg-submit").textContent = submitLabel;
+
+  // 2열 배치: row 속성이 같은 필드를 묶음
+  let html = "";
+  for (let i = 0; i < fields.length; i++) {
+    const f = fields[i];
+    if (f.half && fields[i + 1]?.half) {
+      html += `<div class="dlg-row">${fieldHtml(f, values[f.name])}${fieldHtml(fields[i + 1], values[fields[i + 1].name])}</div>`;
+      i++;
+    } else {
+      html += fieldHtml(f, values[f.name]);
+    }
+  }
+  $("#dlg-body").innerHTML = html;
+
+  const delBtn = $("#dlg-delete");
+  delBtn.hidden = !onDelete;
+  delBtn.onclick = async () => {
+    if (!confirm("정말 삭제할까요? 되돌릴 수 없습니다.")) return;
+    try {
+      await onDelete();
+      dlg.close();
+    } catch (e) {
+      $("#dlg-err").textContent = e.message || String(e);
+    }
+  };
+  $("#dlg-cancel").onclick = () => dlg.close();
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const data = {};
+    for (const f of fields) {
+      const el = form.elements[f.name];
+      if (!el) continue;
+      if (f.type === "checkbox") data[f.name] = el.checked;
+      else if (f.type === "number") data[f.name] = el.value === "" ? null : Number(el.value);
+      else data[f.name] = el.value.trim() === "" ? null : el.value.trim();
+    }
+    $("#dlg-submit").disabled = true;
+    try {
+      await onSubmit(data);
+      dlg.close();
+    } catch (err) {
+      $("#dlg-err").textContent = err.message || String(err);
+    } finally {
+      $("#dlg-submit").disabled = false;
+    }
+  };
+
+  dlg.showModal();
+  const first = form.querySelector("input, select, textarea");
+  if (first) first.focus();
+}
+
+/* ---------- 데이터 로딩 ---------- */
+async function loadCore() {
+  const [students, textbooks, progress, lessons, tests] = await Promise.all([
+    run(db.from("students").select("*").order("name")),
+    run(db.from("textbooks").select("*").order("title")),
+    run(db.from("progress").select("*").limit(5000)),
+    run(db.from("lessons").select("student_id, lesson_date, attendance, textbook_id, from_unit, to_unit, next_plan").gte("lesson_date", daysAgoStr(30)).limit(5000)),
+    run(db.from("tests").select("student_id, test_date, score, max_score").gte("test_date", daysAgoStr(90)).limit(5000)),
+  ]);
+  state.students = students;
+  state.textbooks = textbooks;
+  state.progress = progress;
+  state.recentLessons = lessons;
+  state.recentTests = tests;
+}
+
+async function loadDetail(studentId) {
+  const [lessons, tests] = await Promise.all([
+    run(db.from("lessons").select("*").eq("student_id", studentId).order("lesson_date", { ascending: false }).limit(300)),
+    run(db.from("tests").select("*").eq("student_id", studentId).order("test_date", { ascending: false }).limit(300)),
+  ]);
+  state.detail = { lessons, tests };
+}
+
+async function refresh() {
+  await loadCore();
+  if (state.view === "student" && state.studentId) {
+    if (!state.students.some((s) => s.id === state.studentId)) {
+      state.view = "overview";
+      state.studentId = null;
+    } else {
+      await loadDetail(state.studentId);
+    }
+  }
+  render();
+}
+
+/* ---------- 렌더링 ---------- */
+function render() {
+  renderSidebar();
+  if (state.view === "student") renderStudent();
+  else renderOverview();
+}
+
+function renderSidebar() {
+  $("#nav-overview").classList.toggle("active", state.view === "overview");
+  const list = state.students.filter((s) => s.active || state.showInactive);
+  $("#student-list").innerHTML = list.length
+    ? list
+        .map(
+          (s) => `<li><button data-id="${esc(s.id)}" class="${s.id === state.studentId && state.view === "student" ? "active" : ""} ${s.active ? "" : "inactive"}">
+            ${esc(s.name)}<span class="sub">${esc(s.grade || "")}</span></button></li>`
+        )
+        .join("")
+    : `<li class="muted" style="padding:.5em .7em;font-size:.85rem">학생을 추가하세요.</li>`;
+}
+
+function bookProgressFor(studentId) {
+  return state.progress
+    .filter((p) => p.student_id === studentId)
+    .map((p) => ({ p, book: state.textbooks.find((b) => b.id === p.textbook_id) }))
+    .filter((x) => x.book);
+}
+
+function rangeText(book, l) {
+  const lab = book.unit_label;
+  if (l.from_unit != null && l.to_unit != null) return l.from_unit === l.to_unit ? ` ${lab} ${l.from_unit}` : ` ${lab} ${l.from_unit}–${l.to_unit}`;
+  if (l.to_unit != null) return ` ${lab} ~${l.to_unit}`;
+  if (l.from_unit != null) return ` ${lab} ${l.from_unit}~`;
+  return "";
+}
+
+function coverText(l) {
+  if (!l || !l.textbook_id) return "";
+  const book = state.textbooks.find((b) => b.id === l.textbook_id);
+  return book ? book.title + rangeText(book, l) : "";
+}
+
+function renderOverview() {
+  const main = $("#main");
+  const students = state.students.filter((s) => s.active);
+  if (!students.length) {
+    main.innerHTML = `<div class="page-head"><h2>전체 현황</h2></div>
+      <div class="card empty">아직 학생이 없습니다. 왼쪽의 <strong>+ 추가</strong>로 학생을 등록하고, <strong>교재 관리</strong>에서 교재를 먼저 만들어 보세요.</div>`;
+    return;
+  }
+
+  const rows = students.map((s) => {
+    const lessons = state.recentLessons.filter((l) => l.student_id === s.id);
+    const last = lessons.reduce((m, l) => (l.lesson_date > m ? l.lesson_date : m), "");
+    const sortedL = [...lessons].sort((a, b) => b.lesson_date.localeCompare(a.lesson_date));
+    const lastCovered = sortedL.find((l) => l.textbook_id);
+    const nextPlan = (sortedL.find((l) => l.next_plan) || {}).next_plan || "";
+    const attended = lessons.filter((l) => l.attendance !== "결석").length;
+    const tests = state.recentTests.filter((t) => t.student_id === s.id);
+    const avgPct = avg(tests.map((t) => pct(t.score, t.max_score)));
+    const books = bookProgressFor(s.id);
+    return { s, last, lessonCount: lessons.length, attended, avgPct, testCount: tests.length, books, lastCovered, nextPlan };
+  });
+
+  const stale = rows.filter((r) => !r.last).length;
+  const body = rows
+    .map((r) => {
+      const gap = r.last ? daysBetween(r.last) : null;
+      const lastCell = r.last
+        ? `${fmtDate(r.last)} <span class="muted">(${gap === 0 ? "오늘" : gap + "일 전"})</span>`
+        : `<span class="badge warn">30일간 기록 없음</span>`;
+      const books = r.books.length
+        ? `<div class="mini-books">${r.books
+            .map(({ p, book }) => {
+              const ratio = Math.min(100, Math.round((p.current_unit / book.total_units) * 100));
+              return `<div class="row"><span>${esc(book.title)}</span><span class="muted">${p.current_unit}/${book.total_units}</span>
+                <div class="bar ${ratio >= 100 ? "done" : ""}"><span style="width:${ratio}%"></span></div></div>`;
+            })
+            .join("")}</div>`
+        : `<span class="muted">배정된 교재 없음</span>`;
+      return `<tr class="clickable" data-id="${esc(r.s.id)}">
+        <td><strong>${esc(r.s.name)}</strong><div class="muted">${esc(r.s.grade || "")}</div></td>
+        <td>${books}</td>
+        <td>${lastCell}</td>
+        <td>${r.lastCovered && coverText(r.lastCovered) ? esc(coverText(r.lastCovered)) + `<div class="muted">${fmtDate(r.lastCovered.lesson_date)}</div>` : '<span class="muted">-</span>'}${r.nextPlan ? `<div class="next-plan">다음: ${esc(r.nextPlan)}</div>` : ""}</td>
+        <td class="num">${r.lessonCount ? `${r.attended}/${r.lessonCount}회` : "-"}</td>
+        <td class="num">${r.avgPct == null ? "-" : r.avgPct.toFixed(0) + "점"}<div class="muted">${r.testCount ? r.testCount + "회" : ""}</div></td>
+      </tr>`;
+    })
+    .join("");
+
+  main.innerHTML = `
+    <div class="page-head"><h2>전체 현황</h2><span class="muted">재원생 ${students.length}명</span>
+      ${stale ? `<span class="badge warn">30일간 수업 기록이 없는 학생 ${stale}명</span>` : ""}</div>
+    <div class="card table-wrap">
+      <table>
+        <thead><tr><th>학생</th><th>교재 진도</th><th>최근 수업</th><th>수업 진도 · 다음 예정</th><th class="num">30일 출석</th><th class="num">90일 시험 평균</th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    <p class="muted" style="margin-top:.8rem;font-size:.85rem">행을 누르면 학생 상세로 이동합니다. 시험 평균은 점수를 100점 만점으로 환산한 값입니다.</p>`;
+}
+
+function renderStudent() {
+  const s = state.students.find((x) => x.id === state.studentId);
+  if (!s) return renderOverview();
+  const main = $("#main");
+  main.innerHTML = `
+    <div class="page-head">
+      <h2>${esc(s.name)}</h2>
+      ${s.grade ? `<span class="badge">${esc(s.grade)}</span>` : ""}
+      ${s.active ? "" : `<span class="badge bad">퇴원/휴원</span>`}
+      <span class="spacer"></span>
+      <button class="btn small" id="btn-edit-student">정보 수정</button>
+    </div>
+    ${s.memo ? `<p class="card muted memo-cell" style="margin:0 0 1rem">${esc(s.memo)}</p>` : ""}
+    <div class="tabs" role="tablist">
+      ${[["progress", "교재 진도"], ["lessons", "수업 기록"], ["tests", "시험·단어"]]
+        .map(([k, t]) => `<button class="tab ${state.tab === k ? "active" : ""}" role="tab" data-tab="${k}">${t}</button>`)
+        .join("")}
+    </div>
+    <div id="tab-body"></div>`;
+  if (state.tab === "progress") renderProgressTab(s);
+  else if (state.tab === "lessons") renderLessonsTab(s);
+  else renderTestsTab(s);
+}
+
+function renderProgressTab(s) {
+  const items = bookProgressFor(s.id);
+  const assignedIds = new Set(items.map((x) => x.book.id));
+  const available = state.textbooks.filter((b) => !assignedIds.has(b.id));
+  const nextLesson = state.detail.lessons.find((l) => l.next_plan);
+  const cards = items
+    .map(({ p, book }) => {
+      const ratio = Math.min(100, Math.round((p.current_unit / book.total_units) * 100));
+      const recent = state.detail.lessons.find((l) => l.textbook_id === book.id);
+      return `<div class="card book-card" data-pid="${esc(p.id)}">
+        <h3>${esc(book.title)}</h3>
+        <div class="stat"><strong>${esc(book.unit_label)} ${p.current_unit} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong><span class="badge ${ratio >= 100 ? "" : "warn"}">${ratio}%</span></div>
+        <div class="bar ${ratio >= 100 ? "done" : ""}"><span style="width:${ratio}%"></span></div>
+        ${recent ? `<div style="font-size:.85rem;margin-top:.5rem">최근 수업 <span class="muted">${fmtDate(recent.lesson_date)}</span> ·${esc(rangeText(book, recent) || " 범위 미입력")}</div>` : ""}
+        <div class="muted" style="font-size:.8rem;margin-top:.4rem">진도 갱신 ${fmtDate((p.updated_at || "").slice(0, 10))}</div>
+        <div class="book-actions">
+          <button class="btn small" data-act="dec">-1</button>
+          <button class="btn small primary" data-act="inc">+1</button>
+          <button class="btn small" data-act="set">직접 입력</button>
+          <button class="btn small danger" data-act="unassign">배정 해제</button>
+        </div>
+      </div>`;
+    })
+    .join("");
+  $("#tab-body").innerHTML = `
+    ${nextLesson ? `<div class="card next-card"><strong>다음 수업 예정</strong><div>${esc(nextLesson.next_plan)}</div><span class="muted">${fmtDate(nextLesson.lesson_date)} 수업 기록 기준</span></div>` : ""}
+    <div class="toolbar"><button class="btn primary" id="btn-assign" ${available.length ? "" : "disabled"}>+ 교재 배정</button>
+      ${state.textbooks.length ? "" : `<span class="muted">먼저 왼쪽 아래 <strong>교재 관리</strong>에서 교재를 만드세요.</span>`}</div>
+    ${cards ? `<div class="grid">${cards}</div>` : `<div class="card empty">배정된 교재가 없습니다.</div>`}`;
+}
+
+function renderLessonsTab(s) {
+  const rows = state.detail.lessons;
+  $("#tab-body").innerHTML = `
+    <div class="toolbar"><button class="btn primary" id="btn-add-lesson">+ 수업 기록</button></div>
+    ${
+      rows.length
+        ? `<div class="card table-wrap"><table>
+            <thead><tr><th>날짜</th><th>출결</th><th>수업 진도</th><th>숙제</th><th>메모 · 다음 수업</th></tr></thead>
+            <tbody>${rows
+              .map(
+                (l) => `<tr class="clickable" data-lid="${esc(l.id)}">
+                  <td style="white-space:nowrap">${fmtDate(l.lesson_date)}</td>
+                  <td class="att-${esc(l.attendance)}">${esc(l.attendance)}</td>
+                  <td>${esc(coverText(l)) || '<span class="muted">-</span>'}${l.topic ? `<div class="muted">${esc(l.topic)}</div>` : ""}</td>
+                  <td>${esc(l.homework || "-")}</td>
+                  <td class="memo-cell">${esc(l.memo || "")}${l.next_plan ? `<div class="next-plan">다음: ${esc(l.next_plan)}</div>` : ""}</td></tr>`
+              )
+              .join("")}</tbody></table></div>
+          <p class="muted" style="font-size:.85rem;margin-top:.6rem">행을 누르면 수정·삭제할 수 있습니다. 최근 300건까지 표시됩니다.</p>`
+        : `<div class="card empty">수업 기록이 없습니다.</div>`
+    }`;
+}
+
+function trendSvg(tests) {
+  const pts = [...tests].sort((a, b) => a.test_date.localeCompare(b.test_date)).slice(-15);
+  if (pts.length < 2) return `<p class="muted" style="margin:0">추이 그래프는 시험이 2회 이상 쌓이면 표시됩니다.</p>`;
+  const W = 600, H = 150, L = 28, R = 10, T = 12, B = 22;
+  const x = (i) => L + (i * (W - L - R)) / (pts.length - 1);
+  const y = (v) => T + ((100 - Math.min(100, v)) * (H - T - B)) / 100;
+  const vals = pts.map((t) => pct(t.score, t.max_score));
+  const path = vals.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const grid = [0, 50, 100].map((g) => `<line class="axis" x1="${L}" x2="${W - R}" y1="${y(g)}" y2="${y(g)}"/><text x="2" y="${y(g) + 3}">${g}</text>`).join("");
+  const dots = vals.map((v, i) => `<circle class="dot" cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3"><title>${fmtDate(pts[i].test_date)} ${v.toFixed(0)}점</title></circle>`).join("");
+  const labels = [0, pts.length - 1].map((i) => `<text x="${x(i)}" y="${H - 6}" text-anchor="${i ? "end" : "start"}">${fmtDate(pts[i].test_date)}</text>`).join("");
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="시험 점수 추이(100점 만점 환산)">${grid}<path class="line" d="${path}"/>${dots}${labels}</svg>`;
+}
+
+function renderTestsTab(s) {
+  const rows = state.detail.tests;
+  const pcts = rows.map((t) => pct(t.score, t.max_score));
+  const recent = pcts.slice(0, 5);
+  $("#tab-body").innerHTML = `
+    <div class="toolbar"><button class="btn primary" id="btn-add-test">+ 시험 점수</button></div>
+    ${
+      rows.length
+        ? `<div class="summary">
+            <div class="card"><strong>${avg(pcts).toFixed(0)}점</strong><span>전체 평균</span></div>
+            <div class="card"><strong>${avg(recent).toFixed(0)}점</strong><span>최근 ${recent.length}회 평균</span></div>
+            <div class="card"><strong>${Math.max(...pcts).toFixed(0)}점</strong><span>최고점</span></div>
+            <div class="card"><strong>${rows.length}회</strong><span>누적 시험</span></div>
+          </div>
+          <div class="card" style="margin-bottom:1rem">${trendSvg(rows)}</div>
+          <div class="card table-wrap"><table>
+            <thead><tr><th>날짜</th><th>종류</th><th>이름</th><th class="num">점수</th><th class="num">환산</th></tr></thead>
+            <tbody>${rows
+              .map(
+                (t) => `<tr class="clickable" data-tid="${esc(t.id)}">
+                  <td style="white-space:nowrap">${fmtDate(t.test_date)}</td><td>${esc(t.kind)}</td><td>${esc(t.title || "")}</td>
+                  <td class="num">${t.score}/${t.max_score}</td><td class="num">${pct(t.score, t.max_score).toFixed(0)}점</td></tr>`
+              )
+              .join("")}</tbody></table></div>`
+        : `<div class="card empty">시험 기록이 없습니다.</div>`
+    }`;
+}
+
+/* ---------- 학생 / 교재 관리 ---------- */
+const studentFields = [
+  { name: "name", label: "이름", required: true, maxlength: 50 },
+  { name: "grade", label: "학년 (예: 초5, 중2)", half: true, maxlength: 20 },
+  { name: "started_on", label: "등록일", type: "date", half: true },
+  { name: "memo", label: "메모 (민감한 개인정보는 가급적 적지 마세요)", type: "textarea" },
+  { name: "active", label: "재원 중", type: "checkbox", default: true },
+];
+
+function addStudent() {
+  openForm({
+    title: "학생 추가",
+    fields: studentFields,
+    values: { active: true, started_on: todayStr() },
+    onSubmit: async (d) => {
+      const row = await run(db.from("students").insert(d).select().single());
+      state.view = "student";
+      state.studentId = row.id;
+      state.tab = "progress";
+      await refresh();
+      toast("학생을 추가했습니다");
+    },
+  });
+}
+
+function editStudent(s) {
+  openForm({
+    title: "학생 정보 수정",
+    fields: studentFields,
+    values: s,
+    onSubmit: async (d) => {
+      await run(db.from("students").update(d).eq("id", s.id));
+      await refresh();
+      toast("저장했습니다");
+    },
+    onDelete: async () => {
+      await run(db.from("students").delete().eq("id", s.id));
+      state.view = "overview";
+      state.studentId = null;
+      await refresh();
+      toast("학생과 관련 기록을 삭제했습니다");
+    },
+  });
+}
+
+function manageTextbooks() {
+  const dlg = $("#dlg");
+  $("#dlg-title").textContent = "교재 관리";
+  $("#dlg-err").textContent = "";
+  $("#dlg-delete").hidden = true;
+  $("#dlg-submit").hidden = true;
+  $("#dlg-cancel").textContent = "닫기";
+  $("#dlg-cancel").onclick = () => dlg.close();
+  $("#dlg-form").onsubmit = (e) => e.preventDefault();
+  const paint = () => {
+    $("#dlg-body").innerHTML = `
+      <div class="toolbar"><button type="button" class="btn primary small" id="tb-add">+ 교재 추가</button></div>
+      ${
+        state.textbooks.length
+          ? `<ul style="list-style:none;margin:0;padding:0">${state.textbooks
+              .map(
+                (b) => `<li style="display:flex;gap:.5rem;align-items:center;padding:.45rem 0;border-bottom:1px solid var(--border)">
+                  <span style="flex:1"><strong>${esc(b.title)}</strong> <span class="muted">${b.total_units} ${esc(b.unit_label)}</span></span>
+                  <button type="button" class="btn small" data-edit="${esc(b.id)}">수정</button></li>`
+              )
+              .join("")}</ul>`
+          : `<p class="muted">등록된 교재가 없습니다.</p>`
+      }`;
+  };
+  paint();
+  const restore = () => {
+    $("#dlg-submit").hidden = false;
+    $("#dlg-cancel").textContent = "취소";
+    dlg.removeEventListener("close", restore);
+  };
+  dlg.addEventListener("close", restore);
+  $("#dlg-body").onclick = (e) => {
+    if (e.target.id === "tb-add") {
+      dlg.close();
+      editTextbook(null);
+    }
+    const id = e.target.dataset?.edit;
+    if (id) {
+      dlg.close();
+      editTextbook(state.textbooks.find((b) => b.id === id));
+    }
+  };
+  dlg.showModal();
+}
+
+function editTextbook(book) {
+  openForm({
+    title: book ? "교재 수정" : "교재 추가",
+    fields: [
+      { name: "title", label: "교재명", required: true, maxlength: 100 },
+      { name: "total_units", label: "전체 단원 수", type: "number", min: 1, max: 500, required: true, half: true },
+      { name: "unit_label", label: "단위 이름 (Unit, Lesson 등)", required: true, half: true, maxlength: 20 },
+    ],
+    values: book || { total_units: 20, unit_label: "Unit" },
+    onSubmit: async (d) => {
+      if (book) await run(db.from("textbooks").update(d).eq("id", book.id));
+      else await run(db.from("textbooks").insert(d));
+      await refresh();
+      manageTextbooks();
+    },
+    onDelete: book
+      ? async () => {
+          await run(db.from("textbooks").delete().eq("id", book.id));
+          await refresh();
+          manageTextbooks();
+        }
+      : null,
+  });
+}
+
+/* ---------- 학생 상세 동작 ---------- */
+async function setProgress(pid, unit) {
+  const p = state.progress.find((x) => x.id === pid);
+  const book = state.textbooks.find((b) => b.id === p.textbook_id);
+  const next = Math.max(0, Math.min(book.total_units, unit));
+  await run(db.from("progress").update({ current_unit: next, updated_at: new Date().toISOString() }).eq("id", pid));
+  p.current_unit = next;
+  p.updated_at = new Date().toISOString();
+  renderStudent();
+}
+
+function assignBook(s) {
+  const assigned = new Set(bookProgressFor(s.id).map((x) => x.book.id));
+  const options = state.textbooks.filter((b) => !assigned.has(b.id)).map((b) => [b.id, `${b.title} (${b.total_units} ${b.unit_label})`]);
+  openForm({
+    title: "교재 배정",
+    fields: [
+      { name: "textbook_id", label: "교재", type: "select", options, required: true },
+      { name: "current_unit", label: "현재 진도 (이미 나간 단원 수)", type: "number", min: 0, default: 0 },
+    ],
+    onSubmit: async (d) => {
+      await run(db.from("progress").insert({ student_id: s.id, textbook_id: d.textbook_id, current_unit: d.current_unit || 0 }));
+      await refresh();
+      toast("교재를 배정했습니다");
+    },
+  });
+}
+
+function lessonForm(s, lesson) {
+  const assigned = bookProgressFor(s.id).map((x) => x.book);
+  const rest = state.textbooks.filter((b) => !assigned.some((a) => a.id === b.id));
+  const bookOptions = [["", "(교재 없음)"], ...assigned.map((b) => [b.id, b.title]), ...rest.map((b) => [b.id, `${b.title} (미배정)`])];
+
+  let values = lesson;
+  if (!lesson) {
+    values = { lesson_date: todayStr(), attendance: "출석" };
+    const lastBookId = (state.detail.lessons.find((l) => l.textbook_id) || {}).textbook_id || (assigned[0] && assigned[0].id);
+    const book = state.textbooks.find((b) => b.id === lastBookId);
+    if (book) {
+      values.textbook_id = book.id;
+      const pr = state.progress.find((x) => x.student_id === s.id && x.textbook_id === book.id);
+      if (pr && pr.current_unit < book.total_units) values.from_unit = pr.current_unit + 1;
+    }
+  }
+
+  const fields = [
+    { name: "lesson_date", label: "날짜", type: "date", required: true, half: true },
+    { name: "attendance", label: "출결", type: "select", options: ["출석", "지각", "결석", "보강"].map((x) => [x, x]), half: true },
+    { name: "textbook_id", label: "수업 교재", type: "select", options: bookOptions },
+    { name: "from_unit", label: "시작 단원", type: "number", min: 0, half: true },
+    { name: "to_unit", label: "종료 단원", type: "number", min: 0, half: true },
+    { name: "topic", label: "학습 내용 (예: 현재완료, 본문 읽기)", maxlength: 200 },
+    { name: "homework", label: "숙제", type: "select", options: [["", "-"], ["완료", "완료"], ["일부", "일부"], ["미제출", "미제출"]] },
+    { name: "memo", label: "수업 메모", type: "textarea" },
+    { name: "next_plan", label: "다음 수업 예정 진도", maxlength: 200 },
+  ];
+  if (!lesson) fields.push({ name: "sync_progress", label: "저장할 때 교재 진도도 종료 단원으로 갱신 (결석은 제외)", type: "checkbox", default: true });
+
+  openForm({
+    title: lesson ? "수업 기록 수정" : "수업 기록",
+    fields,
+    values,
+    onSubmit: async (d) => {
+      const { sync_progress, ...data } = d;
+      const book = state.textbooks.find((b) => b.id === data.textbook_id);
+      if (!book && (data.from_unit != null || data.to_unit != null)) throw new Error("단원 범위를 입력하려면 교재를 선택하세요.");
+      if (book) {
+        if (data.from_unit != null && data.to_unit != null && data.from_unit > data.to_unit) throw new Error("시작 단원이 종료 단원보다 클 수 없습니다.");
+        if ((data.from_unit || 0) > book.total_units || (data.to_unit || 0) > book.total_units) throw new Error(`이 교재의 전체 단원 수는 ${book.total_units}입니다.`);
+      }
+      const row = { ...data, textbook_id: data.textbook_id || null, homework: data.homework || null };
+      if (lesson) await run(db.from("lessons").update(row).eq("id", lesson.id));
+      else await run(db.from("lessons").insert({ ...row, student_id: s.id }));
+
+      let synced = false;
+      if (!lesson && sync_progress && book && data.to_unit != null && data.attendance !== "결석") {
+        const pr = state.progress.find((x) => x.student_id === s.id && x.textbook_id === book.id);
+        if (!pr) {
+          await run(db.from("progress").insert({ student_id: s.id, textbook_id: book.id, current_unit: data.to_unit }));
+          synced = true;
+        } else if (data.to_unit > pr.current_unit) {
+          await run(db.from("progress").update({ current_unit: data.to_unit, updated_at: new Date().toISOString() }).eq("id", pr.id));
+          synced = true;
+        }
+      }
+      await refresh();
+      toast(synced ? "저장했습니다. 교재 진도도 갱신했어요" : "저장했습니다");
+    },
+    onDelete: lesson
+      ? async () => {
+          await run(db.from("lessons").delete().eq("id", lesson.id));
+          await refresh();
+        }
+      : null,
+  });
+}
+
+function testForm(s, test) {
+  openForm({
+    title: test ? "시험 점수 수정" : "시험 점수",
+    fields: [
+      { name: "test_date", label: "날짜", type: "date", required: true, half: true },
+      { name: "kind", label: "종류", type: "select", options: ["단어시험", "단원평가", "모의고사", "기타"].map((x) => [x, x]), half: true },
+      { name: "title", label: "시험 이름 (예: Unit 5 단어)", maxlength: 100 },
+      { name: "score", label: "점수", type: "number", min: 0, step: "any", required: true, half: true },
+      { name: "max_score", label: "만점", type: "number", min: 1, step: "any", required: true, half: true },
+    ],
+    values: test || { test_date: todayStr(), kind: "단어시험", max_score: 100 },
+    onSubmit: async (d) => {
+      if (d.score > d.max_score) throw new Error("점수가 만점보다 클 수 없습니다.");
+      if (test) await run(db.from("tests").update(d).eq("id", test.id));
+      else await run(db.from("tests").insert({ ...d, student_id: s.id }));
+      await refresh();
+      toast("저장했습니다");
+    },
+    onDelete: test
+      ? async () => {
+          await run(db.from("tests").delete().eq("id", test.id));
+          await refresh();
+        }
+      : null,
+  });
+}
+
+/* ---------- 백업 ---------- */
+async function fetchAll(table) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    const rows = await run(db.from(table).select("*").order("created_at").range(from, from + 999));
+    out.push(...rows);
+    if (rows.length < 1000) break;
+  }
+  return out;
+}
+
+async function backup() {
+  try {
+    toast("백업 파일을 만드는 중...");
+    const tables = ["students", "textbooks", "progress", "lessons", "tests"];
+    const data = { exported_at: new Date().toISOString(), version: 1 };
+    for (const t of tables) data[t] = await fetchAll(t);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `study-room-backup-${todayStr()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast("백업 파일을 저장했습니다. 안전한 곳에 보관하세요.");
+  } catch (e) {
+    fail(e, "백업 실패");
+  }
+}
+
+/* ---------- 이벤트 ---------- */
+async function selectStudent(id) {
+  state.view = "student";
+  state.studentId = id;
+  state.tab = "progress";
+  try {
+    await loadDetail(id);
+  } catch (e) {
+    return fail(e);
+  }
+  render();
+  $("#main").focus();
+}
+
+function bindEvents() {
+  $("#nav-overview").onclick = () => {
+    state.view = "overview";
+    state.studentId = null;
+    render();
+  };
+  $("#student-list").onclick = (e) => {
+    const b = e.target.closest("button[data-id]");
+    if (b) selectStudent(b.dataset.id);
+  };
+  $("#show-inactive").onchange = (e) => {
+    state.showInactive = e.target.checked;
+    renderSidebar();
+  };
+  $("#btn-add-student").onclick = addStudent;
+  $("#btn-textbooks").onclick = manageTextbooks;
+  $("#btn-backup").onclick = backup;
+  $("#btn-print").onclick = () => window.print();
+  $("#btn-logout").onclick = async () => {
+    await db.auth.signOut();
+  };
+
+  $("#main").addEventListener("click", async (e) => {
+    const row = e.target.closest("tr[data-id]");
+    if (row) return selectStudent(row.dataset.id);
+
+    const s = state.students.find((x) => x.id === state.studentId);
+    if (!s) return;
+
+    if (e.target.closest("#btn-edit-student")) return editStudent(s);
+    const tab = e.target.closest("[data-tab]");
+    if (tab) {
+      state.tab = tab.dataset.tab;
+      return renderStudent();
+    }
+    if (e.target.closest("#btn-assign")) return assignBook(s);
+    if (e.target.closest("#btn-add-lesson")) return lessonForm(s, null);
+    if (e.target.closest("#btn-add-test")) return testForm(s, null);
+
+    const lrow = e.target.closest("tr[data-lid]");
+    if (lrow) return lessonForm(s, state.detail.lessons.find((l) => l.id === lrow.dataset.lid));
+    const trow = e.target.closest("tr[data-tid]");
+    if (trow) return testForm(s, state.detail.tests.find((t) => t.id === trow.dataset.tid));
+
+    const act = e.target.closest("[data-act]");
+    if (act) {
+      const pid = act.closest("[data-pid]").dataset.pid;
+      const p = state.progress.find((x) => x.id === pid);
+      const book = state.textbooks.find((b) => b.id === p.textbook_id);
+      try {
+        if (act.dataset.act === "inc") await setProgress(pid, p.current_unit + 1);
+        else if (act.dataset.act === "dec") await setProgress(pid, p.current_unit - 1);
+        else if (act.dataset.act === "set") {
+          const v = prompt(`현재 진도를 입력하세요 (0~${book.total_units})`, String(p.current_unit));
+          if (v !== null && v.trim() !== "" && !Number.isNaN(Number(v))) await setProgress(pid, Math.round(Number(v)));
+        } else if (act.dataset.act === "unassign") {
+          if (!confirm("이 교재 배정을 해제할까요? 진도 기록이 사라집니다.")) return;
+          await run(db.from("progress").delete().eq("id", pid));
+          await refresh();
+        }
+      } catch (err) {
+        fail(err);
+      }
+    }
+  });
+}
+
+/* ---------- 시작 ---------- */
+function showLogin() {
+  $("#app-view").hidden = true;
+  $("#login-view").hidden = false;
+}
+
+async function showApp() {
+  $("#login-view").hidden = true;
+  $("#app-view").hidden = false;
+  try {
+    await loadCore();
+    render();
+  } catch (e) {
+    fail(e, "데이터를 불러오지 못했습니다");
+  }
+}
+
+async function init() {
+  bindEvents();
+  if (!configured) {
+    showLogin();
+    $("#login-err").textContent = "config.js 에 Supabase URL과 키를 먼저 입력하세요.";
+    $("#login-form button").disabled = true;
+    return;
+  }
+  $("#login-form").onsubmit = async (e) => {
+    e.preventDefault();
+    $("#login-err").textContent = "";
+    const f = e.target;
+    const { error } = await db.auth.signInWithPassword({ email: f.email.value.trim(), password: f.password.value });
+    if (error) $("#login-err").textContent = "로그인에 실패했습니다. 이메일과 비밀번호를 확인하세요.";
+    else f.password.value = "";
+  };
+
+  let appShown = false;
+  db.auth.onAuthStateChange((event, session) => {
+    // 콜백 안에서 바로 supabase 호출을 await 하면 교착될 수 있어 다음 틱으로 넘깁니다.
+    setTimeout(() => {
+      if (session && !appShown) {
+        appShown = true;
+        showApp();
+      } else if (!session) {
+        appShown = false;
+        state.students = [];
+        state.progress = [];
+        state.view = "overview";
+        state.studentId = null;
+        showLogin();
+      }
+    }, 0);
+  });
+
+  const { data } = await db.auth.getSession();
+  if (!data.session) showLogin();
+}
+
+init();

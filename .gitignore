@@ -1,0 +1,17 @@
+# 비밀값 / 로컬 설정
+.env
+.env.*
+*.local
+
+# OS / 편집기
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 의존성 / 빌드 결과
+node_modules/
+dist/
+
+# 백업 파일(학생 정보 포함 가능) - 절대 커밋하지 않음
+study-room-backup-*.json

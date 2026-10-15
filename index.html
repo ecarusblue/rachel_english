@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>공부방 진도표</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- 로그인 화면 -->
+  <section id="login-view" class="login" hidden>
+    <form id="login-form" class="card login-card" autocomplete="on">
+      <h1>공부방 진도표</h1>
+      <p class="muted">선생님 계정으로 로그인하세요.</p>
+      <label>이메일
+        <input type="email" name="email" autocomplete="username" required>
+      </label>
+      <label>비밀번호
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <p id="login-err" class="error" role="alert"></p>
+      <button class="btn primary" type="submit">로그인</button>
+    </form>
+  </section>
+
+  <!-- 메인 앱 -->
+  <div id="app-view" class="app" hidden>
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <strong>공부방 진도표</strong>
+      </div>
+      <button class="nav-btn" id="nav-overview">전체 현황</button>
+      <div class="sidebar-title">
+        <span>학생</span>
+        <button class="btn small" id="btn-add-student">+ 추가</button>
+      </div>
+      <label class="check small-check">
+        <input type="checkbox" id="show-inactive"> 퇴원/휴원 학생 보기
+      </label>
+      <ul id="student-list" class="student-list"></ul>
+      <div class="sidebar-foot">
+        <button class="btn small" id="btn-textbooks">교재 관리</button>
+        <button class="btn small" id="btn-backup">백업(JSON)</button>
+        <button class="btn small" id="btn-print">인쇄</button>
+        <button class="btn small ghost" id="btn-logout">로그아웃</button>
+      </div>
+    </aside>
+
+    <main id="main" class="main" tabindex="-1"></main>
+  </div>
+
+  <!-- 공용 입력 다이얼로그 -->
+  <dialog id="dlg">
+    <form id="dlg-form" method="dialog" class="dlg-form">
+      <h2 id="dlg-title"></h2>
+      <div id="dlg-body"></div>
+      <p id="dlg-err" class="error" role="alert"></p>
+      <div class="dlg-actions">
+        <button type="button" class="btn danger" id="dlg-delete" hidden>삭제</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" id="dlg-cancel">취소</button>
+        <button type="submit" class="btn primary" id="dlg-submit">저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
