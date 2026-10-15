@@ -183,6 +183,11 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .att-결석 { color: var(--bad); font-weight: 600; }
 .att-지각 { color: var(--warn); font-weight: 600; }
 
+/* 리포트 */
+.report-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .7rem; margin-bottom: 1rem; }
+.report-controls label { margin: 0; }
+.report-draft { min-height: 20rem; line-height: 1.6; }
+
 /* 다이얼로그 */
 dialog { border: 1px solid var(--border); border-radius: 12px; padding: 0; width: min(460px, 94vw); background: var(--surface); color: var(--text); }
 dialog::backdrop { background: rgba(0, 0, 0, .45); }
