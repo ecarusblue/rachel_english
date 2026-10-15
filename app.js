@@ -16,7 +16,7 @@ const state = {
   studentId: null,
   tab: "progress",       // progress | lessons | tests | report
   report: { range: "thisWeek", start: "", end: "", comment: "" },
-  detail: { lessons: [], tests: [], logs: [], logsMissing: false },
+  detail: { lessons: [], tests: [], logs: [], logsMissing: false, recs: [] },
   showInactive: false,
 };
 
@@ -184,7 +184,13 @@ async function loadDetail(studentId) {
   } catch {
     logsMissing = true; // schema.sql 업그레이드 전이면 발송 기록 테이블이 없음
   }
-  state.detail = { lessons, tests, logs, logsMissing };
+  let recs = [];
+  try {
+    recs = await run(db.from("recommendations").select("*").eq("student_id", studentId).order("created_at", { ascending: false }).limit(50));
+  } catch {
+    recs = [];
+  }
+  state.detail = { lessons, tests, logs, logsMissing, recs };
 }
 
 async function refresh() {
@@ -308,6 +314,7 @@ function renderStudent() {
   const s = state.students.find((x) => x.id === state.studentId);
   if (!s) return renderOverview();
   const main = $("#main");
+  const pendingRecs = (state.detail.recs || []).filter((r) => r.status === "제안").length;
   main.innerHTML = `
     <div class="page-head">
       <h2>${esc(s.name)}</h2>
@@ -318,14 +325,15 @@ function renderStudent() {
     </div>
     ${s.memo ? `<p class="card muted memo-cell" style="margin:0 0 1rem">${esc(s.memo)}</p>` : ""}
     <div class="tabs" role="tablist">
-      ${[["progress", "교재 진도"], ["lessons", "수업 기록"], ["tests", "시험·단어"], ["report", "리포트"]]
-        .map(([k, t]) => `<button class="tab ${state.tab === k ? "active" : ""}" role="tab" data-tab="${k}">${t}</button>`)
+      ${[["progress", "교재 진도"], ["lessons", "수업 기록"], ["tests", "시험·단어"], ["report", "리포트"], ["recs", "수업 추천"]]
+        .map(([k, t]) => `<button class="tab ${state.tab === k ? "active" : ""}" role="tab" data-tab="${k}">${t}${k === "recs" && pendingRecs ? ` <span class="badge warn">${pendingRecs}</span>` : ""}</button>`)
         .join("")}
     </div>
     <div id="tab-body"></div>`;
   if (state.tab === "progress") renderProgressTab(s);
   else if (state.tab === "lessons") renderLessonsTab(s);
   else if (state.tab === "report") renderReportTab(s);
+  else if (state.tab === "recs") renderRecsTab(s);
   else renderTestsTab(s);
 }
 
@@ -779,6 +787,49 @@ function renderSummary() {
   };
 }
 
+/* ---------- 수업 추천 (Claude 예약 작업이 저장한 제안을 확인) ---------- */
+function renderRecsTab(s) {
+  const recs = state.detail.recs || [];
+  const pending = recs.filter((r) => r.status === "제안");
+  const done = recs.filter((r) => r.status !== "제안");
+  const card = (r) => {
+    const b = state.textbooks.find((x) => x.id === r.textbook_id);
+    const pr = b ? state.progress.find((x) => x.student_id === s.id && x.textbook_id === b.id) : null;
+    const cls = r.status === "거절" ? "bad" : r.status === "제안" ? "warn" : "";
+    return `<div class="card" style="margin-bottom:.7rem">
+      <div class="toolbar" style="margin:0">
+        <span class="badge ${cls}">${esc(r.status)}</span>
+        <strong>${esc(b ? b.title + rangeText(b, r) : r.from_unit + "–" + r.to_unit + "단원")}</strong>
+        ${r.target_date ? `<span class="muted">${fmtDate(r.target_date)} 수업 예정</span>` : ""}
+        <span class="spacer"></span>
+        ${r.status === "제안" ? `<button class="btn small primary" data-rec-use="${esc(r.id)}" type="button">수업 기록에 반영</button><button class="btn small danger" data-rec-no="${esc(r.id)}" type="button">거절</button>` : ""}
+      </div>
+      ${r.rationale ? `<div class="memo-cell" style="margin-top:.4rem">${esc(r.rationale)}</div>` : ""}
+      <div class="muted" style="font-size:.8rem;margin-top:.3rem">${pr && b ? `현재 진도 ${esc(b.unit_label)} ${pr.current_unit}/${b.total_units} · ` : ""}${fmtDate((r.created_at || "").slice(0, 10))} 생성${r.model ? " · " + esc(r.model) : ""}${r.decided_at ? " · " + fmtDate(r.decided_at.slice(0, 10)) + " 처리" : ""}</div>
+    </div>`;
+  };
+  $("#tab-body").innerHTML = recs.length
+    ? `${pending.length ? `<h3>확인할 추천 (${pending.length})</h3>${pending.map(card).join("")}` : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
+       ${done.length ? `<h3 style="margin-top:1.2rem">지난 추천</h3>${done.map(card).join("")}` : ""}
+       <p class="muted" style="font-size:.85rem">"수업 기록에 반영"을 누르면 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록됩니다. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`
+    : `<div class="card empty">아직 추천이 없습니다. Claude 예약 작업이 실행되면 여기에 표시됩니다.</div>`;
+
+  $("#tab-body").querySelectorAll("[data-rec-use]").forEach((b) => {
+    b.onclick = () => lessonForm(s, null, recs.find((r) => r.id === b.dataset.recUse));
+  });
+  $("#tab-body").querySelectorAll("[data-rec-no]").forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm("이 추천을 거절로 기록할까요?")) return;
+      try {
+        await run(db.from("recommendations").update({ status: "거절", decided_at: new Date().toISOString() }).eq("id", b.dataset.recNo));
+        await refresh();
+      } catch (err) {
+        fail(err);
+      }
+    };
+  });
+}
+
 /* ---------- 학생 / 교재 관리 ---------- */
 const studentFields = [
   { name: "name", label: "이름", required: true, maxlength: 50 },
@@ -922,7 +973,7 @@ function assignBook(s) {
   });
 }
 
-function lessonForm(s, lesson) {
+function lessonForm(s, lesson, rec = null) {
   const assigned = bookProgressFor(s.id).map((x) => x.book);
   const rest = state.textbooks.filter((b) => !assigned.some((a) => a.id === b.id));
   const bookOptions = [["", "(교재 없음)"], ...assigned.map((b) => [b.id, b.title]), ...rest.map((b) => [b.id, `${b.title} (미배정)`])];
@@ -937,6 +988,10 @@ function lessonForm(s, lesson) {
       const pr = state.progress.find((x) => x.student_id === s.id && x.textbook_id === book.id);
       if (pr && pr.current_unit < book.total_units) values.from_unit = pr.current_unit + 1;
     }
+  }
+
+  if (!lesson && rec) {
+    values = { ...values, textbook_id: rec.textbook_id || values.textbook_id, from_unit: rec.from_unit, to_unit: rec.to_unit, lesson_date: rec.target_date || values.lesson_date };
   }
 
   const fields = [
@@ -968,8 +1023,16 @@ function lessonForm(s, lesson) {
       const row = { ...data, textbook_id: data.textbook_id || null, homework: data.homework || null };
       // 숙제 내용 칸이 비어 있고 기존 기록에도 없으면 컬럼을 보내지 않음(스키마 업그레이드 전에도 저장되도록)
       if (row.homework_note == null && !(lesson && "homework_note" in lesson)) delete row.homework_note;
+      let newId = null;
       if (lesson) await run(db.from("lessons").update(row).eq("id", lesson.id));
-      else await run(db.from("lessons").insert({ ...row, student_id: s.id }));
+      else {
+        const ins = await run(db.from("lessons").insert({ ...row, student_id: s.id }).select("id").single());
+        newId = ins && ins.id;
+      }
+      if (rec && newId) {
+        const same = data.textbook_id === rec.textbook_id && data.from_unit === rec.from_unit && data.to_unit === rec.to_unit;
+        await run(db.from("recommendations").update({ status: same ? "채택" : "수정", applied_lesson_id: newId, decided_at: new Date().toISOString() }).eq("id", rec.id));
+      }
 
       let synced = false;
       if (!lesson && sync_progress && book && data.to_unit != null && data.attendance !== "결석") {
