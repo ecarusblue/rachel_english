@@ -1,0 +1,9 @@
+{
+  // Cloudflare Workers(정적 자산) 배포 설정: build.mjs 가 만든 dist 폴더를 올립니다.
+  // name 은 Cloudflare 프로젝트(Worker) 이름과 같아야 합니다.
+  "name": "rachel-english",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist"
+  }
+}
