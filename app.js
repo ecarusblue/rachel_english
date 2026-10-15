@@ -15,7 +15,7 @@ const state = {
   studentId: null,
   tab: "progress",       // progress | lessons | tests | report
   report: { range: "thisWeek", start: "", end: "", comment: "" },
-  detail: { lessons: [], tests: [] },
+  detail: { lessons: [], tests: [], logs: [], logsMissing: false },
   showInactive: false,
 };
 
@@ -176,7 +176,14 @@ async function loadDetail(studentId) {
     run(db.from("lessons").select("*").eq("student_id", studentId).order("lesson_date", { ascending: false }).limit(300)),
     run(db.from("tests").select("*").eq("student_id", studentId).order("test_date", { ascending: false }).limit(300)),
   ]);
-  state.detail = { lessons, tests };
+  let logs = [];
+  let logsMissing = false;
+  try {
+    logs = await run(db.from("report_logs").select("*").eq("student_id", studentId).order("sent_at", { ascending: false }).limit(50));
+  } catch {
+    logsMissing = true; // schema.sql 업그레이드 전이면 발송 기록 테이블이 없음
+  }
+  state.detail = { lessons, tests, logs, logsMissing };
 }
 
 async function refresh() {
@@ -364,7 +371,7 @@ function renderLessonsTab(s) {
                   <td style="white-space:nowrap">${fmtDate(l.lesson_date)}</td>
                   <td class="att-${esc(l.attendance)}">${esc(l.attendance)}</td>
                   <td>${esc(coverText(l)) || '<span class="muted">-</span>'}${l.topic ? `<div class="muted">${esc(l.topic)}</div>` : ""}</td>
-                  <td>${esc(l.homework || "-")}</td>
+                  <td>${esc(l.homework || "-")}${l.homework_note ? `<div class="muted">${esc(l.homework_note)}</div>` : ""}</td>
                   <td class="memo-cell">${esc(l.memo || "")}${l.next_plan ? `<div class="next-plan">다음: ${esc(l.next_plan)}</div>` : ""}</td></tr>`
               )
               .join("")}</tbody></table></div>
@@ -490,7 +497,8 @@ function buildReport(studentId, start, end) {
   const withNext = [...state.detail.lessons].filter((l) => l.next_plan && l.lesson_date <= end).sort((a, b) => b.lesson_date.localeCompare(a.lesson_date));
   const nextPlan = withNext.length ? withNext[0].next_plan : null;
 
-  return { lessons, attended, att, hw, books, tests, testAvg, prevAvg, nextPlan, hasData: lessons.length + tests.length > 0 };
+  const hwNotes = attended.filter((l) => l.homework_note).map((l) => ({ date: l.lesson_date, note: l.homework_note, status: l.homework }));
+  return { lessons, attended, att, hw, hwNotes, books, tests, testAvg, prevAvg, nextPlan, hasData: lessons.length + tests.length > 0 };
 }
 
 const ACADEMY_NAME = "레이첼잉글리쉬";
@@ -524,6 +532,7 @@ function buildMessage(s, label, start, end, r, comment) {
     }
     const hwParts = ["완료", "일부", "미제출"].filter((k) => r.hw[k]).map((k) => `${k} ${r.hw[k]}회`);
     if (hwParts.length) out.push(`■ 숙제: ${hwParts.join(", ")}`);
+    r.hwNotes.forEach((h) => out.push(`- ${shortDate(h.date)} ${h.note}${h.status ? ` (${h.status})` : ""}`));
     if (r.tests.length) {
       out.push("■ 시험");
       r.tests.forEach((t) => out.push(`- ${shortDate(t.test_date)} ${t.kind}${t.title ? ` ${t.title}` : ""} ${t.score}/${t.max_score}`));
@@ -548,6 +557,15 @@ function renderReportTab(s) {
   const r = buildReport(s.id, range.start, range.end);
   const opts = [["thisWeek", "이번 주"], ["lastWeek", "지난 주"], ["thisMonth", "이번 달"], ["lastMonth", "지난 달"], ["custom", "직접 선택"]];
   const hwTotal = r.hw.완료 + r.hw.일부 + r.hw.미제출;
+  const logs = state.detail.logs || [];
+  const already = logs.find((g) => g.period_start === range.start && g.period_end === range.end);
+  const logBlock = state.detail.logsMissing
+    ? `<p class="muted" style="margin:.6rem 0 0;font-size:.85rem">발송 기록을 쓰려면 Supabase SQL Editor에서 최신 schema.sql을 한 번 더 실행하세요.</p>`
+    : `${already ? `<p class="badge warn" style="margin:.6rem 0 0">이 기간 안내문은 ${fmtDate(already.sent_at.slice(0, 10))}에 발송 기록이 있습니다</p>` : ""}
+       ${logs.length ? `<div class="table-wrap" style="margin-top:.8rem"><table><thead><tr><th>기간</th><th>구분</th><th>발송 기록일</th><th></th></tr></thead><tbody>${logs
+         .slice(0, 10)
+         .map((g) => `<tr><td>${shortDate(g.period_start)} ~ ${shortDate(g.period_end)}</td><td>${esc(g.label || "")}</td><td>${fmtDate(g.sent_at.slice(0, 10))}</td><td><button class="btn small danger" data-logdel="${esc(g.id)}" type="button">삭제</button></td></tr>`)
+         .join("")}</tbody></table></div>` : ""}`;
   $("#tab-body").innerHTML = `
     <div class="card report-controls">
       <label>기간
@@ -574,7 +592,8 @@ function renderReportTab(s) {
       <label>안내문 (직접 고쳐도 됩니다. 기간·한마디를 바꾸면 다시 만들어집니다)
         <textarea id="rp-draft" class="report-draft"></textarea>
       </label>
-      <div class="toolbar"><button class="btn primary" id="rp-copy" type="button">안내문 복사</button><button class="btn" id="rp-print" type="button">인쇄 / PDF 저장</button><span class="muted" id="rp-copied"></span></div>
+      <div class="toolbar"><button class="btn primary" id="rp-copy" type="button">안내문 복사</button><button class="btn" id="rp-print" type="button">인쇄 / PDF 저장</button><button class="btn" id="rp-log" type="button">발송 완료로 기록</button><span class="muted" id="rp-copied"></span></div>
+      ${logBlock}
     </div>
     <div class="print-only" id="rp-print-view"></div>`;
   const draft = $("#rp-draft");
@@ -600,6 +619,31 @@ function renderReportTab(s) {
     draft.value = buildMessage(s, range.label, range.start, range.end, r, rp.comment);
     syncPrint();
   };
+  const logBtn = $("#rp-log");
+  if (logBtn) {
+    logBtn.disabled = !!state.detail.logsMissing;
+    logBtn.onclick = async () => {
+      if (already && !confirm("이 기간은 이미 발송 기록이 있습니다. 또 기록할까요?")) return;
+      try {
+        await run(db.from("report_logs").insert({ student_id: s.id, period_start: range.start, period_end: range.end, label: range.label }));
+        await refresh();
+        toast("발송 기록을 남겼습니다");
+      } catch (err) {
+        fail(err, "발송 기록 실패");
+      }
+    };
+  }
+  $("#tab-body").querySelectorAll("[data-logdel]").forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm("이 발송 기록을 삭제할까요?")) return;
+      try {
+        await run(db.from("report_logs").delete().eq("id", b.dataset.logdel));
+        await refresh();
+      } catch (err) {
+        fail(err);
+      }
+    };
+  });
   $("#rp-copy").onclick = async () => {
     try {
       await navigator.clipboard.writeText(draft.value);
@@ -780,6 +824,7 @@ function lessonForm(s, lesson) {
     { name: "to_unit", label: "종료 단원", type: "number", min: 0, half: true },
     { name: "topic", label: "학습 내용 (예: 현재완료, 본문 읽기)", maxlength: 200 },
     { name: "homework", label: "숙제", type: "select", options: [["", "-"], ["완료", "완료"], ["일부", "일부"], ["미제출", "미제출"]] },
+    { name: "homework_note", label: "숙제 내용 (예: 단어 Day 5 쓰기)", maxlength: 200 },
     { name: "memo", label: "수업 메모", type: "textarea" },
     { name: "next_plan", label: "다음 수업 예정 진도", maxlength: 200 },
   ];
@@ -798,6 +843,8 @@ function lessonForm(s, lesson) {
         if ((data.from_unit || 0) > book.total_units || (data.to_unit || 0) > book.total_units) throw new Error(`이 교재의 전체 단원 수는 ${book.total_units}입니다.`);
       }
       const row = { ...data, textbook_id: data.textbook_id || null, homework: data.homework || null };
+      // 숙제 내용 칸이 비어 있고 기존 기록에도 없으면 컬럼을 보내지 않음(스키마 업그레이드 전에도 저장되도록)
+      if (row.homework_note == null && !(lesson && "homework_note" in lesson)) delete row.homework_note;
       if (lesson) await run(db.from("lessons").update(row).eq("id", lesson.id));
       else await run(db.from("lessons").insert({ ...row, student_id: s.id }));
 

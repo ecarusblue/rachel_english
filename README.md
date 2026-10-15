@@ -6,6 +6,7 @@
 - 전체 현황: 재원생별 교재 진도 바, 최근 수업일, 최근 수업 진도와 다음 예정, 30일 출석, 90일 시험 평균, 기록이 끊긴 학생 표시
 - 학생 상세: 교재 진도(+1/-1/직접 입력), 수업 기록(출결·숙제·메모), 시험·단어 점수와 추이 그래프
 - 수업 진도: 수업마다 교재와 단원 범위(예: Unit 6–7), 학습 내용, 다음 수업 예정 진도를 기록하고, 저장할 때 교재 진도를 종료 단원으로 함께 갱신(결석 제외)
+- 리포트: 기간(주·월·직접) 요약과 학부모 안내문 초안 복사, 인쇄/PDF 저장, 발송 기록 표시
 - 교재 관리, JSON 백업 내려받기, 인쇄(진도표 출력)
 - 선생님 1계정 로그인 + DB 수준 접근 제한(RLS)
 
@@ -20,7 +21,7 @@
    - 공개용 키는 브라우저에 노출돼도 되도록 설계된 키이며, 실제 보호는 RLS가 담당합니다.
    - 키를 코드에 직접 적지 않으므로 저장소가 공개 상태여도 키가 올라가지 않습니다.
 
-**이미 예전 `schema.sql` 을 실행했다면:** 새 `schema.sql` 을 SQL Editor 에서 다시 실행하면 됩니다. 기존 데이터는 그대로 두고 수업 진도 컬럼(`lessons` 테이블)과 `recommendations` 테이블만 추가됩니다.
+**이미 예전 `schema.sql` 을 실행했다면:** 새 `schema.sql` 을 SQL Editor 에서 다시 실행하면 됩니다. 기존 데이터는 그대로 두고 새 컬럼(`lessons` 의 수업 진도·숙제 내용)과 새 테이블(`recommendations`, `report_logs`)만 추가됩니다.
 
 ## 2. 내 컴퓨터에서 먼저 확인
 
@@ -69,7 +70,7 @@ GitHub 저장소를 연결하면 push 할 때마다 자동 배포됩니다.
 | `config.js` | 자리표시자(저장소용). 배포 때는 `build.mjs` 가 `dist/config.js` 를 새로 만듭니다 |
 | `build.mjs` | 환경변수로 `dist/` 생성 (secret 키 차단) |
 | `_headers` | Cloudflare Pages 보안 헤더 |
-| `schema.sql` | DB 테이블 + RLS 정책 (students, textbooks, progress, lessons, tests, recommendations) |
+| `schema.sql` | DB 테이블 + RLS 정책 (students, textbooks, progress, lessons, tests, recommendations, report_logs) |
 
 `recommendations` 테이블은 AI 추천 이력 저장용으로 DB에만 준비되어 있고, 현재 화면(`app.js`)에서는 아직 사용하지 않습니다.
 

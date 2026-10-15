@@ -62,6 +62,7 @@ alter table public.lessons add column if not exists from_unit integer check (fro
 alter table public.lessons add column if not exists to_unit integer check (to_unit >= 0);
 alter table public.lessons add column if not exists topic text;
 alter table public.lessons add column if not exists next_plan text;
+alter table public.lessons add column if not exists homework_note text;   -- 숙제 내용(예: 단어 Day 5 쓰기)
 
 -- 시험 / 단어 점수
 create table if not exists public.tests (
@@ -95,6 +96,19 @@ create table if not exists public.recommendations (
   check (to_unit >= from_unit)
 );
 
+-- 학부모 안내문 발송 기록 (중복·누락 방지용 표시. 실제 발송은 카카오톡/문자로 직접)
+create table if not exists public.report_logs (
+  id            uuid primary key default gen_random_uuid(),
+  owner         uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  student_id    uuid not null references public.students(id) on delete cascade,
+  period_start  date not null,
+  period_end    date not null,
+  label         text,                       -- 주간 / 월간 / 기간
+  sent_at       timestamptz not null default now(),
+  check (period_end >= period_start)
+);
+create index if not exists idx_report_logs_student on public.report_logs(student_id, sent_at desc);
+
 create index if not exists idx_progress_student on public.progress(student_id);
 create index if not exists idx_lessons_student_date on public.lessons(student_id, lesson_date desc);
 create index if not exists idx_lessons_textbook on public.lessons(textbook_id);
@@ -113,11 +127,12 @@ alter table public.progress  enable row level security;
 alter table public.lessons   enable row level security;
 alter table public.tests     enable row level security;
 alter table public.recommendations enable row level security;
+alter table public.report_logs enable row level security;
 
 do $$
 declare t text;
 begin
-  foreach t in array array['students','textbooks','progress','lessons','tests','recommendations'] loop
+  foreach t in array array['students','textbooks','progress','lessons','tests','recommendations','report_logs'] loop
     execute format('drop policy if exists "owner_all" on public.%I', t);
     execute format(
       'create policy "owner_all" on public.%I for all to authenticated
@@ -127,4 +142,4 @@ begin
 end $$;
 
 -- anon 역할의 직접 권한을 제거 (이중 안전장치)
-revoke all on public.students, public.textbooks, public.progress, public.lessons, public.tests, public.recommendations from anon;
+revoke all on public.students, public.textbooks, public.progress, public.lessons, public.tests, public.recommendations, public.report_logs from anon;
