@@ -335,7 +335,6 @@ function renderStudent() {
   const s = state.students.find((x) => x.id === state.studentId);
   if (!s) return renderOverview();
   const main = $("#main");
-  const pendingRecs = (state.detail.recs || []).filter((r) => r.status === "제안").length;
   main.innerHTML = `
     <div class="page-head">
       <h2>${esc(s.name)}</h2>
@@ -347,7 +346,7 @@ function renderStudent() {
     ${s.memo ? `<p class="card muted memo-cell" style="margin:0 0 1rem">${esc(s.memo)}</p>` : ""}
     <div class="tabs" role="tablist">
       ${[["progress", "교재 진도"], ["lessons", "수업 기록"], ["tests", "시험·단어"], ["recs", "수업 추천"]]
-        .map(([k, t]) => `<button class="tab ${state.tab === k ? "active" : ""}" role="tab" data-tab="${k}">${t}${k === "recs" && pendingRecs ? ` <span class="badge warn">${pendingRecs}</span>` : ""}</button>`)
+        .map(([k, t]) => `<button class="tab ${state.tab === k ? "active" : ""}" role="tab" data-tab="${k}">${t}</button>`)
         .join("")}
     </div>
     <div id="tab-body"></div>`;
