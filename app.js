@@ -854,6 +854,10 @@ function monthRange(y, m) {
 function prevMonthStart(y, m) {
   return m === 1 ? `${y - 1}-12-01` : `${y}-${String(m - 1).padStart(2, "0")}-01`;
 }
+function testsFrom(y, m) { // 시험 추이 그래프용: 해당 월 포함 최근 3개월의 첫날
+  const d = new Date(y, m - 3, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
 const levelLabel = (v) => (EVAL_LEVELS.find(([n]) => n === v) || [])[1] || "";
 
 async function loadEvals() {
@@ -869,7 +873,7 @@ async function loadEvals() {
     const from = prevMonthStart(year, month);
     const [lessons, tests] = await Promise.all([
       run(db.from("lessons").select("*").gte("lesson_date", from).lte("lesson_date", range.end).limit(5000)),
-      run(db.from("tests").select("*").gte("test_date", from).lte("test_date", range.end).limit(5000)),
+      run(db.from("tests").select("*").gte("test_date", testsFrom(year, month)).lte("test_date", range.end).limit(5000)),
     ]);
     let rows = [];
     let missing = false;
@@ -1008,6 +1012,32 @@ function evalValues() {
   return vals;
 }
 
+/* 월말평가서용 시험 점수 추이 (최근 3개월, 이번 달에 본 종류만) */
+function evalGraphHtml(s, d) {
+  const start = testsFrom(...d.key.split("-").map(Number));
+  const mine = d.tests.filter((t) => t.student_id === s.id && t.test_date >= start && t.test_date <= d.range.end);
+  const kinds = TEST_KINDS.filter((k) => mine.some((t) => t.kind === k && t.test_date >= d.range.start));
+  if (!kinds.length) return "";
+  const card = (kind, ci) => {
+    const pts = mine.filter((t) => t.kind === kind).sort((a, b) => a.test_date.localeCompare(b.test_date)).slice(-10)
+      .map((t) => ({ v: Math.round(pct(t.score, t.max_score)), cur: t.test_date >= d.range.start, d: parseD(t.test_date) }));
+    const cur = pts.filter((p) => p.cur);
+    const avgCur = Math.round(avg(cur.map((p) => p.v)));
+    const head = `<div class="rg-h"><b>${esc(kind)}</b><span>이번 달 평균 <b>${avgCur}</b>점</span></div>`;
+    if (pts.length < 2) return `<div class="rg-card">${head}<div class="rg-one">${pts[0].v}점 <small>· 1회</small></div></div>`;
+    const W = 300, H = 118, L = 26, R = 10, T = 12, B = 22;
+    const x = (i) => L + 10 + (i * (W - L - R - 20)) / (pts.length - 1);
+    const y = (v) => T + ((100 - Math.max(0, Math.min(100, v))) * (H - T - B)) / 100;
+    const ci0 = pts.findIndex((p) => p.cur);
+    const shade = ci0 >= 0 ? `<rect x="${(x(ci0) - 9).toFixed(1)}" y="${T - 6}" width="${(x(pts.length - 1) - x(ci0) + 18).toFixed(1)}" height="${H - T - B + 6}" rx="3" class="rg-shade"/><text class="rg-cm" x="${((x(ci0) + x(pts.length - 1)) / 2).toFixed(1)}" y="${T - 1}" text-anchor="middle">이번 달</text>` : "";
+    const grid = [0, 50, 100].map((g) => `<line class="rg-ax" x1="${L}" x2="${W - R}" y1="${y(g)}" y2="${y(g)}"/><text class="rg-tk" x="${L - 5}" y="${y(g) + 3}" text-anchor="end">${g}</text>`).join("");
+    const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+    const dots = pts.map((p, i) => `<circle class="rg-dot${p.cur ? " cur" : ""}" cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3.4"/><text class="rg-vl${p.cur ? " cur" : ""}" x="${x(i).toFixed(1)}" y="${(y(p.v) - 7).toFixed(1)}" text-anchor="middle">${p.v}</text><text class="rg-tk" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${p.d.getMonth() + 1}.${p.d.getDate()}</text>`).join("");
+    return `<div class="rg-card k${ci}">${head}<div class="rg-plot"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(kind)} 최근 3개월 점수 추이">${shade}${grid}<path class="rg-ln" d="${line}"/>${dots}</svg></div></div>`;
+  };
+  return `<div class="rg-sec"><h3>시험 점수 추이 <small>최근 3개월 · 100점 환산</small></h3><div class="rg-two">${kinds.map((k) => card(k, TEST_KINDS.indexOf(k))).join("")}</div></div>`;
+}
+
 function evalPrintHtml(s, d, sm, vals) {
   const r = sm.r;
   const [yy, mm] = d.key.split("-").map(Number);
@@ -1032,6 +1062,7 @@ function evalPrintHtml(s, d, sm, vals) {
         <div class="rp-stat"><b>${sm.hwRate == null ? "-" : sm.hwRate + "%"}</b><span>숙제 완료율</span></div>
         <div class="rp-stat"><b>${r.testAvg == null ? "-" : r.testAvg.toFixed(0) + "점"}</b><span>시험 평균</span>${diff == null ? "" : `<em>${diff === 0 ? "전월과 비슷" : `전월 대비 ${diff > 0 ? "+" : ""}${diff}점`}</em>`}</div>
       </div>
+      ${evalGraphHtml(s, d)}
       <div class="rp-two">
         <div><h3>영역별 평가</h3>${rateRows(EVAL_SKILLS, vals.ratings)}</div>
         <div><h3>학습 태도</h3>${rateRows(EVAL_ATTITUDE, vals.attitude)}${books ? `<div class="rp-gap"></div>${books}` : ""}</div>
