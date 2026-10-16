@@ -1783,8 +1783,6 @@ function renderRecsTab(s) {
       <div class="toolbar" style="margin:0">
         <span class="badge ${cls}">${esc(r.status)}</span>
         <strong>${esc(b ? b.title + rangeText(b, r) : r.from_unit + "–" + r.to_unit + "단원")}</strong>
-        ${r.target_date ? `<span class="muted">${fmtDate(r.target_date)} 수업 예정</span>` : ""}
-        ${has ? lessonChip(has) : ""}
         <span class="spacer"></span>
         ${r.status === "제안" ? `${has ? `<button class="btn small" type="button" disabled>기록 있음</button>` : `<button class="btn small primary" data-rec-use="${esc(r.id)}" type="button">수업 기록에 반영</button>`}<button class="btn small danger" data-rec-no="${esc(r.id)}" type="button">거절</button>` : ""}
       </div>
@@ -1792,9 +1790,31 @@ function renderRecsTab(s) {
       <div class="muted" style="font-size:.8rem;margin-top:.3rem">${pr && b ? `현재 진도 ${esc(curLabel(b, pr.current_unit))} · ` : ""}${fmtDate((r.created_at || "").slice(0, 10))} 생성${r.model ? " · " + esc(r.model) : ""}${r.decided_at ? " · " + fmtDate(r.decided_at.slice(0, 10)) + " 처리" : ""}</div>
     </div>`;
   };
+  // 같은 수업일의 추천은 날짜(요일)별 그룹으로 묶어 보여줍니다.
+  const groups = (list, desc) => {
+    const m = new Map();
+    list.forEach((r) => { const k = r.target_date || ""; if (!m.has(k)) m.set(k, []); m.get(k).push(r); });
+    return [...m.entries()].sort((x, y) => (desc ? y[0].localeCompare(x[0]) : x[0].localeCompare(y[0])));
+  };
+  const group = ([date, items], isDone) => {
+    const d = date ? new Date(`${date}T00:00:00`) : null;
+    const wd = d && !Number.isNaN(d.getTime()) ? DAY_NAME[d.getDay()] : "";
+    const has = !isDone && date ? recLessonOn(s.id, { target_date: date }) : null;
+    const open = items.filter((r) => r.status === "제안");
+    return `<section class="rec-grp ${isDone ? "done" : ""}">
+      <div class="rec-gh">
+        <span class="rec-gd" aria-hidden="true">${wd || "·"}</span>
+        <div class="rec-gt"><strong>${date ? `${Number(date.slice(5, 7))}월 ${Number(date.slice(8, 10))}일${wd ? ` (${wd})` : ""}` : "수업일 미정"}</strong><span class="muted">${isDone ? "수업" : "수업 예정"} · 교재 ${items.length}개</span></div>
+        ${has ? lessonChip(has) : ""}
+        <span class="spacer"></span>
+        ${open.length > 1 ? `<button class="btn small primary" type="button" data-rec-use="${esc(open[0].id)}"${has ? " disabled" : ""}>${has ? "기록 있음" : `이날 ${open.length}개 한꺼번에 반영`}</button>` : ""}
+      </div>
+      ${items.map(card).join("")}
+    </section>`;
+  };
   $("#tab-body").innerHTML = `<div class="eval-edit">` + filterHtml(state.recFilter, "rf", "수업 안내 미리보기") + (recs.length
-    ? `${pending.length ? `${pending.map(card).join("")}` : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
-       ${done.length ? `<h3 style="margin-top:1.2rem">지난 추천</h3>${done.map(card).join("")}` : ""}
+    ? `${pending.length ? groups(pending, false).map((g) => group(g, false)).join("") : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
+       ${done.length ? `<h3 style="margin-top:1.2rem">지난 추천</h3>${groups(done, true).map((g) => group(g, true)).join("")}` : ""}
        <p class="muted" style="font-size:.85rem">"수업 기록에 반영"을 누르면 수업 기록 창이 추천 교재·단원으로 채워집니다. 같은 날 추천이 여러 교재면 한 번에 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록됩니다. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`
     : `<div class="card empty">${allForStudent.length ? "이 기간에는 추천이 없습니다. 위에서 기간을 바꿔 보세요." : "아직 추천이 없습니다. Claude 예약 작업이 실행되면 여기에 표시됩니다."}</div>`) + `</div><div class="eval-print" id="plan-print-area"></div>`;
   bindRecFilter(() => renderRecsTab(s));
