@@ -82,6 +82,7 @@ async function run(promise) {
 
 /* ---------- 공용 입력 다이얼로그 ---------- */
 function fieldHtml(f, value) {
+  if (f.type === "slot") return `<div id="${esc(f.name)}"></div>`;
   const v = value ?? f.default ?? "";
   const req = f.required ? "required" : "";
   const label = esc(f.label);
@@ -169,7 +170,8 @@ async function loadCore() {
     run(db.from("students").select("*").order("name")),
     run(db.from("textbooks").select("*").order("title")),
     run(db.from("progress").select("*").limit(5000)),
-    run(db.from("lessons").select("student_id, lesson_date, attendance, textbook_id, from_unit, to_unit, next_plan").gte("lesson_date", daysAgoStr(30)).limit(5000)),
+    run(db.from("lessons").select("student_id, lesson_date, attendance, textbook_id, from_unit, to_unit, next_plan, extra_books").gte("lesson_date", daysAgoStr(30)).limit(5000))
+      .catch(() => run(db.from("lessons").select("student_id, lesson_date, attendance, textbook_id, from_unit, to_unit, next_plan").gte("lesson_date", daysAgoStr(30)).limit(5000))),
     run(db.from("tests").select("student_id, test_date, score, max_score").gte("test_date", daysAgoStr(90)).limit(5000)),
   ]);
   state.students = students;
@@ -358,10 +360,24 @@ function bindUnitCtls(form, names, opts = {}) {
   apply();
 }
 
+/* 한 번의 수업에서 나간 교재들: 첫 교재는 기존 컬럼(textbook_id…), 둘째부터는 extra_books(JSON)에 저장 */
+function lessonBooks(l) {
+  const out = [];
+  if (l && l.textbook_id) out.push({ textbook_id: l.textbook_id, from_unit: l.from_unit, to_unit: l.to_unit, topic: l.topic });
+  if (l && Array.isArray(l.extra_books)) l.extra_books.forEach((e) => { if (e && e.textbook_id) out.push(e); });
+  return out;
+}
 function coverText(l) {
-  if (!l || !l.textbook_id) return "";
-  const book = state.textbooks.find((b) => b.id === l.textbook_id);
-  return book ? book.title + rangeText(book, l) : "";
+  return lessonBooks(l)
+    .map((b) => {
+      const book = state.textbooks.find((x) => x.id === b.textbook_id);
+      return book ? book.title + rangeText(book, b) : "";
+    })
+    .filter(Boolean)
+    .join(" · ");
+}
+function topicText(l) {
+  return [l && l.topic, ...((l && Array.isArray(l.extra_books) ? l.extra_books : []).map((e) => e && e.topic))].filter(Boolean).join(" · ");
 }
 
 /* ---------- 수업 시간표 (전체 현황) ---------- */
@@ -664,7 +680,7 @@ function renderOverview() {
     const lessons = state.recentLessons.filter((l) => l.student_id === s.id);
     const last = lessons.reduce((m, l) => (l.lesson_date > m ? l.lesson_date : m), "");
     const sortedL = [...lessons].sort((a, b) => b.lesson_date.localeCompare(a.lesson_date));
-    const lastCovered = sortedL.find((l) => l.textbook_id);
+    const lastCovered = sortedL.find((l) => lessonBooks(l).length);
     const nextPlan = (sortedL.find((l) => l.next_plan) || {}).next_plan || "";
     const attended = lessons.filter((l) => l.attendance !== "결석").length;
     const tests = state.recentTests.filter((t) => t.student_id === s.id);
@@ -750,12 +766,13 @@ function renderProgressTab(s) {
   const cards = items
     .map(({ p, book }) => {
       const ratio = Math.min(100, Math.round((p.current_unit / book.total_units) * 100));
-      const recent = state.detail.lessons.find((l) => l.textbook_id === book.id);
+      const recent = state.detail.lessons.find((l) => lessonBooks(l).some((b) => b.textbook_id === book.id));
+      const recentEnt = recent ? lessonBooks(recent).find((b) => b.textbook_id === book.id) : null;
       return `<div class="card book-card" data-pid="${esc(p.id)}">
         <h3>${esc(book.title)}</h3>
         <div class="stat"><strong>${bookLeaves(book) ? (p.current_unit > 0 ? esc(unitName(book, p.current_unit)) : "시작 전") : esc(book.unit_label) + " " + p.current_unit} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong><span class="badge ${ratio >= 100 ? "" : "warn"}">${ratio}%</span></div>
         <div class="bar ${ratio >= 100 ? "done" : ""}"><span style="width:${ratio}%"></span></div>
-        ${recent ? `<div style="font-size:.85rem;margin-top:.5rem">최근 수업 <span class="muted">${fmtDate(recent.lesson_date)}</span> ·${esc(rangeText(book, recent) || " 범위 미입력")}</div>` : ""}
+        ${recent ? `<div style="font-size:.85rem;margin-top:.5rem">최근 수업 <span class="muted">${fmtDate(recent.lesson_date)}</span> ·${esc(rangeText(book, recentEnt) || " 범위 미입력")}</div>` : ""}
         <div class="muted" style="font-size:.8rem;margin-top:.4rem">진도 갱신 ${fmtDate((p.updated_at || "").slice(0, 10))}</div>
         <div class="book-actions">
           <button class="btn small" data-act="dec">-1</button>
@@ -787,7 +804,7 @@ function renderLessonsTab(s) {
                 (l) => `<tr class="clickable" data-lid="${esc(l.id)}">
                   <td style="white-space:nowrap">${fmtDate(l.lesson_date)}</td>
                   <td class="att-${esc(l.attendance)}">${esc(l.attendance)}</td>
-                  <td>${esc(coverText(l)) || '<span class="muted">-</span>'}${l.topic ? `<div class="muted">${esc(l.topic)}</div>` : ""}</td>
+                  <td>${esc(coverText(l)) || '<span class="muted">-</span>'}${topicText(l) ? `<div class="muted">${esc(topicText(l))}</div>` : ""}</td>
                   <td>${esc(l.homework || "-")}${l.homework_note ? `<div class="muted">${esc(l.homework_note)}</div>` : ""}</td>
                   <td class="memo-cell">${esc(l.memo || "")}${l.next_plan ? `<div class="next-plan">다음: ${esc(l.next_plan)}</div>` : ""}${l.teacher_comment ? `<div class="lesson-comment"><strong>코멘트</strong>${esc(l.teacher_comment)}</div>` : ""}</td></tr>`
               )
@@ -914,13 +931,14 @@ function buildReport(studentId, start, end, src = state.detail) {
   // 교재별 이번 기간 진도 범위
   const ranges = new Map();
   attended.forEach((l) => {
-    if (!l.textbook_id) return;
-    const r = ranges.get(l.textbook_id) || { from: null, to: null };
-    const f = l.from_unit ?? l.to_unit;
-    const t = l.to_unit ?? l.from_unit;
-    if (f != null) r.from = r.from == null ? f : Math.min(r.from, f);
-    if (t != null) r.to = r.to == null ? t : Math.max(r.to, t);
-    ranges.set(l.textbook_id, r);
+    lessonBooks(l).forEach((lb) => {
+      const r = ranges.get(lb.textbook_id) || { from: null, to: null };
+      const f = lb.from_unit ?? lb.to_unit;
+      const t = lb.to_unit ?? lb.from_unit;
+      if (f != null) r.from = r.from == null ? f : Math.min(r.from, f);
+      if (t != null) r.to = r.to == null ? t : Math.max(r.to, t);
+      ranges.set(lb.textbook_id, r);
+    });
   });
   const books = [...ranges.entries()]
     .map(([id, r]) => {
@@ -965,7 +983,7 @@ function buildMessage(s, label, start, end, r, comment) {
       out.push("■ 학습 내용");
       r.attended.forEach((l) => {
         const cover = coverText(l);
-        const parts = [cover, l.topic].filter(Boolean).join(" · ");
+        const parts = [cover, topicText(l)].filter(Boolean).join(" · ");
         out.push(`- ${shortDate(l.lesson_date)} ${parts || "수업 진행"}${l.memo ? ` (${l.memo.replace(/\s+/g, " ")})` : ""}`);
       });
     }
@@ -2150,38 +2168,38 @@ async function recDateHasLesson(s, rec) {
 function lessonForm(s, lesson, rec = null) {
   const assigned = bookProgressFor(s.id).map((x) => x.book);
   const rest = state.textbooks.filter((b) => !assigned.some((a) => a.id === b.id));
-  const bookOptions = [["", "(교재 없음)"], ...assigned.map((b) => [b.id, b.title]), ...rest.map((b) => [b.id, `${b.title} (미배정)`])];
+  const bookOf = (id) => state.textbooks.find((b) => b.id === id);
+  const progOf = (id) => state.progress.find((x) => x.student_id === s.id && x.textbook_id === id);
+  const autoFrom = (id) => {
+    const bk = bookOf(id), pr = progOf(id);
+    return bk && pr && pr.current_unit < bk.total_units ? pr.current_unit + 1 : null;
+  };
 
+  // 교재 블록 작업본: 첫 블록은 lessons 의 기존 컬럼, 둘째부터는 extra_books 에 저장됩니다.
+  let blocks;
   let values = lesson;
-  if (!lesson) {
+  if (lesson) {
+    blocks = lessonBooks(lesson).map((b) => ({ textbook_id: b.textbook_id, from_unit: b.from_unit ?? null, to_unit: b.to_unit ?? null, topic: b.topic || "" }));
+    if (!blocks.length) blocks = [{ textbook_id: "", from_unit: null, to_unit: null, topic: lesson.topic || "" }];
+  } else {
     values = { lesson_date: todayStr(), attendance: "출석" };
     const lastBookId = (state.detail.lessons.find((l) => l.textbook_id) || {}).textbook_id || (assigned[0] && assigned[0].id);
-    const book = state.textbooks.find((b) => b.id === lastBookId);
-    if (book) {
-      values.textbook_id = book.id;
-      const pr = state.progress.find((x) => x.student_id === s.id && x.textbook_id === book.id);
-      if (pr && pr.current_unit < book.total_units) values.from_unit = pr.current_unit + 1;
-    }
-  }
-
-  if (!lesson && rec) {
-    values = { ...values, textbook_id: rec.textbook_id || values.textbook_id, from_unit: rec.from_unit, to_unit: rec.to_unit, lesson_date: rec.target_date || values.lesson_date };
+    blocks = [{ textbook_id: lastBookId && bookOf(lastBookId) ? lastBookId : "", from_unit: lastBookId ? autoFrom(lastBookId) : null, to_unit: null, topic: "" }];
+    if (rec) blocks[0] = { textbook_id: rec.textbook_id || blocks[0].textbook_id, from_unit: rec.from_unit ?? null, to_unit: rec.to_unit ?? null, topic: "" };
+    values = { ...values, lesson_date: (rec && rec.target_date) || values.lesson_date };
   }
 
   const fields = [
     { name: "lesson_date", label: "날짜", type: "date", required: true, half: true },
     { name: "attendance", label: "출결", type: "select", options: ["출석", "지각", "결석", "보강"].map((x) => [x, x]), half: true },
-    { name: "textbook_id", label: "수업 교재", type: "select", options: bookOptions },
-    { name: "from_unit", label: "시작 단원", type: "number", min: 0, half: true },
-    { name: "to_unit", label: "종료 단원", type: "number", min: 0, half: true },
-    { name: "topic", label: "학습 내용 (예: 현재완료, 본문 읽기)", maxlength: 200 },
+    { name: "ls-books", type: "slot" },
     { name: "homework", label: "숙제", type: "select", options: [["", "-"], ["완료", "완료"], ["일부", "일부"], ["미제출", "미제출"]] },
     { name: "homework_note", label: "숙제 내용 (예: 단어 Day 5 쓰기)", maxlength: 200 },
     { name: "memo", label: "수업 메모", type: "textarea" },
     { name: "teacher_comment", label: "선생님 코멘트 (길게 적을 수 있어요, 최대 5,000자)", type: "textarea", rows: 9, maxlength: 5000 },
     { name: "next_plan", label: "다음 수업 예정 진도", maxlength: 200 },
   ];
-  if (!lesson) fields.push({ name: "sync_progress", label: "저장할 때 교재 진도도 종료 단원으로 갱신 (결석은 제외)", type: "checkbox", default: true });
+  if (!lesson) fields.push({ name: "sync_progress", label: "저장할 때 각 교재의 진도도 종료 단원으로 갱신 (결석은 제외)", type: "checkbox", default: true });
 
   openForm({
     title: lesson ? "수업 기록 수정" : "수업 기록",
@@ -2190,36 +2208,59 @@ function lessonForm(s, lesson, rec = null) {
     values,
     onSubmit: async (d) => {
       const { sync_progress, ...data } = d;
-      const book = state.textbooks.find((b) => b.id === data.textbook_id);
-      if (!book && (data.from_unit != null || data.to_unit != null)) throw new Error("단원 범위를 입력하려면 교재를 선택하세요.");
-      if (book) {
-        if (data.from_unit != null && data.to_unit != null && data.from_unit > data.to_unit) throw new Error("시작 단원이 종료 단원보다 클 수 없습니다.");
-        if ((data.from_unit || 0) > book.total_units || (data.to_unit || 0) > book.total_units) throw new Error(`이 교재의 전체 단원 수는 ${book.total_units}입니다.`);
-      }
-      const row = { ...data, textbook_id: data.textbook_id || null, homework: data.homework || null };
+      const used = new Set();
+      const withBook = [];
+      let topicOnly = null;
+      blocks.forEach((b, i) => {
+        const hasText = b.topic && b.topic.trim();
+        if (!b.textbook_id) {
+          if (b.from_unit != null || b.to_unit != null) throw new Error(`교재 ${i + 1}: 단원 범위를 입력하려면 교재를 선택하세요.`);
+          if (hasText) { if (i > 0) throw new Error(`교재 ${i + 1}: 교재를 선택하세요.`); topicOnly = b; }
+          return;
+        }
+        const book = bookOf(b.textbook_id);
+        if (!book) throw new Error(`교재 ${i + 1}: 교재를 찾을 수 없습니다.`);
+        if (used.has(b.textbook_id)) throw new Error(`${book.title} 교재가 두 번 들어 있습니다. 한 블록으로 합쳐 주세요.`);
+        used.add(b.textbook_id);
+        if (b.from_unit != null && b.to_unit != null && b.from_unit > b.to_unit) throw new Error(`${book.title}: 시작 단원이 종료 단원보다 클 수 없습니다.`);
+        if ((b.from_unit || 0) > book.total_units || (b.to_unit || 0) > book.total_units) throw new Error(`${book.title}: 전체 단원 수는 ${book.total_units}입니다.`);
+        withBook.push({ textbook_id: b.textbook_id, from_unit: b.from_unit ?? null, to_unit: b.to_unit ?? null, topic: hasText ? b.topic.trim().slice(0, 200) : null });
+      });
+      const primary = withBook[0] || (topicOnly ? { textbook_id: null, from_unit: null, to_unit: null, topic: topicOnly.topic.trim().slice(0, 200) } : { textbook_id: null, from_unit: null, to_unit: null, topic: null });
+      const extras = withBook.slice(1);
+      const row = { ...data, textbook_id: primary.textbook_id, from_unit: primary.from_unit, to_unit: primary.to_unit, topic: primary.topic, homework: data.homework || null };
+      if (extras.length || (lesson && "extra_books" in lesson)) row.extra_books = extras;
       // 숙제 내용 칸이 비어 있고 기존 기록에도 없으면 컬럼을 보내지 않음(스키마 업그레이드 전에도 저장되도록)
       if (row.homework_note == null && !(lesson && "homework_note" in lesson)) delete row.homework_note;
       if (row.teacher_comment == null && !(lesson && "teacher_comment" in lesson)) delete row.teacher_comment;
       let newId = null;
-      if (lesson) await run(db.from("lessons").update(row).eq("id", lesson.id));
-      else {
-        const ins = await run(db.from("lessons").insert({ ...row, student_id: s.id }).select("id").single());
-        newId = ins && ins.id;
+      try {
+        if (lesson) await run(db.from("lessons").update(row).eq("id", lesson.id));
+        else {
+          const ins = await run(db.from("lessons").insert({ ...row, student_id: s.id }).select("id").single());
+          newId = ins && ins.id;
+        }
+      } catch (e) {
+        if (/extra_books/i.test((e && e.message) || "")) throw new Error("교재를 여러 개 저장하려면 최신 schema.sql 을 Supabase 에서 먼저 실행하세요.");
+        throw e;
       }
       if (rec && newId) {
-        const same = data.textbook_id === rec.textbook_id && data.from_unit === rec.from_unit && data.to_unit === rec.to_unit;
+        const same = primary.textbook_id === rec.textbook_id && primary.from_unit === rec.from_unit && primary.to_unit === rec.to_unit;
         await run(db.from("recommendations").update({ status: same ? "채택" : "수정", applied_lesson_id: newId, decided_at: new Date().toISOString() }).eq("id", rec.id));
       }
 
       let synced = false;
-      if (!lesson && sync_progress && book && data.to_unit != null && data.attendance !== "결석") {
-        const pr = state.progress.find((x) => x.student_id === s.id && x.textbook_id === book.id);
-        if (!pr) {
-          await run(db.from("progress").insert({ student_id: s.id, textbook_id: book.id, current_unit: data.to_unit }));
-          synced = true;
-        } else if (data.to_unit > pr.current_unit) {
-          await run(db.from("progress").update({ current_unit: data.to_unit, updated_at: new Date().toISOString() }).eq("id", pr.id));
-          synced = true;
+      if (!lesson && sync_progress && data.attendance !== "결석") {
+        for (const b of withBook) {
+          if (b.to_unit == null) continue;
+          const pr = progOf(b.textbook_id);
+          if (!pr) {
+            await run(db.from("progress").insert({ student_id: s.id, textbook_id: b.textbook_id, current_unit: b.to_unit }));
+            synced = true;
+          } else if (b.to_unit > pr.current_unit) {
+            await run(db.from("progress").update({ current_unit: b.to_unit, updated_at: new Date().toISOString() }).eq("id", pr.id));
+            synced = true;
+          }
         }
       }
       await refresh();
@@ -2232,7 +2273,57 @@ function lessonForm(s, lesson, rec = null) {
         }
       : null,
   });
-  bindUnitCtls($("#dlg-form"), ["from_unit", "to_unit"]);
+
+  const host = $("#ls-books");
+  let focusIdx = null;
+  const unitCtl = (b, i, key, label) => {
+    const lv = bookLeaves(bookOf(b.textbook_id));
+    const v = b[key];
+    if (lv) {
+      return `<select data-i="${i}" data-k="${key}" aria-label="${label}"><option value="">-</option>${lv.map((l, n) => `<option value="${n + 1}" ${Number(v) === n + 1 ? "selected" : ""}>${esc(l.label)}</option>`).join("")}</select>`;
+    }
+    return `<input type="number" min="0" inputmode="numeric" data-i="${i}" data-k="${key}" aria-label="${label}" value="${v == null ? "" : esc(v)}">`;
+  };
+  const paint = () => {
+    const usedIds = new Set(blocks.map((b) => b.textbook_id).filter(Boolean));
+    const blockHtml = blocks.map((b, i) => {
+      const opts = [["", i === 0 ? "(교재 없음)" : "(교재 선택)"], ...assigned.map((x) => [x.id, x.title]), ...rest.map((x) => [x.id, `${x.title} (미배정)`])]
+        .filter(([id]) => id === "" || id === b.textbook_id || !usedIds.has(id));
+      const book = bookOf(b.textbook_id);
+      const pr = book ? progOf(book.id) : null;
+      const hint = book ? `<div class="ls-hint">${pr ? `현재 진도 ${esc(curLabel(book, pr.current_unit))}` : "아직 이 교재가 배정되지 않았어요 (저장하면 배정됩니다)"}</div>` : "";
+      return `<div class="ls-block">
+        <div class="ls-head"><span class="tb-n">${i + 1}</span>
+          <select data-i="${i}" data-k="textbook_id" aria-label="교재 ${i + 1}" class="ls-book">${opts.map(([id, t]) => `<option value="${esc(id)}" ${id === (b.textbook_id || "") ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>
+          ${blocks.length > 1 ? `<button type="button" class="tb-x" data-ls="del" data-i="${i}" aria-label="이 교재 빼기">✕</button>` : ""}</div>
+        ${book ? `<div class="ls-units"><label>시작 단원${unitCtl(b, i, "from_unit", "시작 단원")}</label><label>종료 단원${unitCtl(b, i, "to_unit", "종료 단원")}</label></div>${hint}` : ""}
+        <label>학습 내용 (예: 현재완료, 본문 읽기)<input type="text" maxlength="200" data-i="${i}" data-k="topic" value="${esc(b.topic || "")}"></label></div>`;
+    }).join("");
+    const chips = assigned.filter((x) => !usedIds.has(x.id)).map((x) => `<button type="button" class="tb-sub" data-ls="addbook" data-id="${esc(x.id)}">+ ${esc(x.title)}</button>`).join("");
+    host.innerHTML = `<div class="ls-title"><strong>수업 교재 · 진도</strong><span class="muted">교재 ${blocks.filter((b) => b.textbook_id).length}개</span></div>${blockHtml}
+      <div class="ls-add"><span class="muted">교재 추가</span>${chips}<button type="button" class="tb-sub plain" data-ls="addblank">+ 다른 교재 선택…</button></div>`;
+    if (focusIdx != null) { const el = host.querySelector(`select[data-i="${focusIdx}"][data-k="textbook_id"], input[data-i="${focusIdx}"]`); if (el) el.focus(); focusIdx = null; }
+  };
+  host.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-ls]");
+    if (!b) return;
+    if (b.dataset.ls === "del") blocks.splice(Number(b.dataset.i), 1);
+    else if (b.dataset.ls === "addbook") { blocks.push({ textbook_id: b.dataset.id, from_unit: autoFrom(b.dataset.id), to_unit: null, topic: "" }); focusIdx = blocks.length - 1; }
+    else if (b.dataset.ls === "addblank") { blocks.push({ textbook_id: "", from_unit: null, to_unit: null, topic: "" }); focusIdx = blocks.length - 1; }
+    paint();
+  });
+  const onField = (e) => {
+    const el = e.target;
+    if (el.dataset.i == null || !el.dataset.k) return;
+    const b = blocks[Number(el.dataset.i)];
+    const k = el.dataset.k;
+    if (k === "textbook_id") { b.textbook_id = el.value; b.from_unit = el.value ? autoFrom(el.value) : null; b.to_unit = null; paint(); return; }
+    if (k === "topic") b.topic = el.value;
+    else b[k] = el.value === "" ? null : Number(el.value);
+  };
+  host.addEventListener("input", onField);
+  host.addEventListener("change", onField);
+  paint();
 }
 
 function testForm(s, test) {

@@ -79,3 +79,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 ## 교재 구조
 `books[].structure` 가 있으면 `current_unit`, `month_from_unit`, `month_to_unit` 은 항목 트리를 위에서부터 센 누적 번호입니다
 (하위가 없는 항목과 하위 항목이 각각 1칸). 글을 쓸 때는 번호 대신 `structure.items` 에서 찾은 이름(예: "Unit 2 › Part B")을 쓰세요.
+
+## 한 수업에 교재가 여러 개일 때
+`lessons[]` 의 `textbook`·단원 범위는 첫 번째 교재이고, 나머지는 `extra_books` 배열에 있습니다. `month_from_unit`·`month_to_unit`·
+`avg_units_per_lesson` 은 두 가지를 모두 합쳐 계산됩니다. (최신 `schema.sql` 을 다시 실행해야 `extra_books` 컬럼과 `lesson_book_rows` 뷰가 생깁니다.)

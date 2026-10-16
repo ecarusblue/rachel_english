@@ -66,6 +66,21 @@ alter table public.lessons add column if not exists textbook_id uuid references 
 alter table public.lessons add column if not exists from_unit integer check (from_unit >= 0);
 alter table public.lessons add column if not exists to_unit integer check (to_unit >= 0);
 alter table public.lessons add column if not exists topic text;
+-- 한 번의 수업에서 교재를 여러 개 나갔을 때: 첫 교재는 위 컬럼에, 둘째부터는 이 JSON 배열에 저장
+-- 예: [{"textbook_id":"…","from_unit":7,"to_unit":8,"topic":"단어 암기"}]
+alter table public.lessons add column if not exists extra_books jsonb not null default '[]'::jsonb
+  check (jsonb_typeof(extra_books) = 'array');
+
+-- 교재별 수업 한 줄 보기 (첫 교재 + 추가 교재). RLS 는 조회하는 사용자의 권한으로 적용됩니다.
+create or replace view public.lesson_book_rows with (security_invoker = true) as
+  select l.id as lesson_id, l.owner, l.student_id, l.lesson_date, l.attendance, l.created_at,
+         l.textbook_id, l.from_unit, l.to_unit, l.topic
+    from public.lessons l where l.textbook_id is not null
+  union all
+  select l.id, l.owner, l.student_id, l.lesson_date, l.attendance, l.created_at,
+         nullif(e->>'textbook_id', '')::uuid, nullif(e->>'from_unit', '')::integer, nullif(e->>'to_unit', '')::integer, e->>'topic'
+    from public.lessons l cross join lateral jsonb_array_elements(l.extra_books) e
+   where nullif(e->>'textbook_id', '') is not null;
 alter table public.lessons add column if not exists next_plan text;
 alter table public.lessons add column if not exists homework_note text;   -- 숙제 내용(예: 단어 Day 5 쓰기)
 alter table public.lessons add column if not exists teacher_comment text check (char_length(teacher_comment) <= 5000);   -- 선생님 코멘트(긴 글)
@@ -258,7 +273,7 @@ begin
             'remaining_units', greatest(t.total_units - p.current_unit, 0),
             'avg_units_per_lesson', (
               select round(avg(x.n)::numeric, 1) from (
-                select (l.to_unit - l.from_unit + 1) as n from public.lessons l
+                select (l.to_unit - l.from_unit + 1) as n from public.lesson_book_rows l
                  where l.student_id = st.id and l.textbook_id = t.id and l.attendance <> '결석'
                    and l.from_unit is not null and l.to_unit is not null
                  order by l.lesson_date desc, l.created_at desc limit 8) x)
@@ -270,7 +285,7 @@ begin
             select jsonb_build_object('date', l.lesson_date, 'attendance', l.attendance,
                    'homework', l.homework, 'homework_note', l.homework_note,
                    'textbook_id', l.textbook_id, 'from_unit', l.from_unit, 'to_unit', l.to_unit,
-                   'topic', l.topic, 'next_plan', l.next_plan) as r
+                   'topic', l.topic, 'extra_books', l.extra_books, 'next_plan', l.next_plan) as r
               from public.lessons l where l.student_id = st.id
              order by l.lesson_date desc, l.created_at desc limit 10) q), '[]'::jsonb),
         'recent_tests', coalesce((
@@ -502,13 +517,13 @@ begin
             'structure', t.structure,
             'total_units', t.total_units,
             'current_unit', p.current_unit,
-            'month_from_unit', (select min(l.from_unit) from public.lessons l
+            'month_from_unit', (select min(l.from_unit) from public.lesson_book_rows l
                                  where l.student_id = st.id and l.textbook_id = t.id and l.attendance <> '결석'
                                    and l.lesson_date between v_start and v_end),
-            'month_to_unit', (select max(l.to_unit) from public.lessons l
+            'month_to_unit', (select max(l.to_unit) from public.lesson_book_rows l
                                where l.student_id = st.id and l.textbook_id = t.id and l.attendance <> '결석'
                                  and l.lesson_date between v_start and v_end),
-            'month_lessons', (select count(*) from public.lessons l
+            'month_lessons', (select count(*) from public.lesson_book_rows l
                                where l.student_id = st.id and l.textbook_id = t.id and l.attendance <> '결석'
                                  and l.lesson_date between v_start and v_end)
           ) order by t.title)
@@ -521,6 +536,10 @@ begin
                      'homework', l.homework,
                      'homework_note', public._api_mask_names(v_owner, left(l.homework_note, 300)),
                      'topic', public._api_mask_names(v_owner, left(l.topic, 300)),
+                     'extra_books', coalesce((select jsonb_agg(jsonb_build_object(
+                         'textbook_id', e->>'textbook_id', 'from_unit', e->'from_unit', 'to_unit', e->'to_unit',
+                         'topic', public._api_mask_names(v_owner, left(e->>'topic', 300))))
+                       from jsonb_array_elements(l.extra_books) e), '[]'::jsonb),
                      'next_plan', public._api_mask_names(v_owner, left(l.next_plan, 300)),
                      'teacher_comment', public._api_mask_names(v_owner, left(l.teacher_comment, 1500))) as r
               from public.lessons l

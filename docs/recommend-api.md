@@ -86,3 +86,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 **하위가 없는 항목과 하위 항목을 위에서부터 센 누적 번호**가 `current_unit`, `from_unit`, `to_unit` 입니다
 (위 예: Unit 1=1, Unit 2›Part A=2, Unit 2›Part B=3). 추천(`from_unit`/`to_unit`)은 항상 이 누적 번호로 보내고,
 `rationale` 에는 이름("Unit 2 › Part B")으로 풀어 쓰면 읽기 좋습니다.
+
+## 한 수업에 교재가 여러 개일 때
+`recent_lessons[]` 의 `textbook_id`·`from_unit`·`to_unit`·`topic` 은 **첫 번째 교재**이고, 두 번째 이후 교재는 `extra_books`
+(`[{"textbook_id","from_unit","to_unit","topic"}]`, 없으면 `null`)에 들어 있습니다. 교재별 진도를 볼 때는 둘 다 확인하세요.
