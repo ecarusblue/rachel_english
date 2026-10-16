@@ -41,6 +41,8 @@ create table if not exists public.progress (
   updated_at    timestamptz not null default now(),
   unique (student_id, textbook_id)
 );
+-- 교재를 쓰는 수업 요일 (0=일 … 6=토). 빈 배열이면 모든 수업에서 쓰는 교재
+alter table public.progress add column if not exists weekdays smallint[] not null default '{}';
 
 -- 수업 기록: 출결 + 숙제 + 메모
 create table if not exists public.lessons (
@@ -269,6 +271,7 @@ begin
             'unit_label', t.unit_label,
             'structure', t.structure,
             'total_units', t.total_units,
+            'weekdays', p.weekdays,
             'current_unit', p.current_unit,
             'remaining_units', greatest(t.total_units - p.current_unit, 0),
             'avg_units_per_lesson', (
@@ -516,6 +519,7 @@ begin
             'unit_label', t.unit_label,
             'structure', t.structure,
             'total_units', t.total_units,
+            'weekdays', p.weekdays,
             'current_unit', p.current_unit,
             'month_from_unit', (select min(l.from_unit) from public.lesson_book_rows l
                                  where l.student_id = st.id and l.textbook_id = t.id and l.attendance <> '결석'

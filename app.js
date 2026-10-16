@@ -19,6 +19,7 @@ const state = {
   allRecs: [],
   evals: { year: new Date().getFullYear(), month: new Date().getMonth() + 1, studentId: null, data: null, loading: false, failed: false, key: "" },
   studentId: null,
+  progView: "card",      // card | week (교재 진도 탭 보기 방식)
   tab: "progress",       // progress | lessons | tests | report
   report: { range: "thisWeek", start: "", end: "", comment: "" },
   detail: { lessons: [], tests: [], logs: [], logsMissing: false, recs: [] },
@@ -254,6 +255,39 @@ function bookProgressFor(studentId) {
     .map((p) => ({ p, book: state.textbooks.find((b) => b.id === p.textbook_id) }))
     .filter((x) => x.book);
 }
+
+/* 교재별 수업 요일 (progress.weekdays, 0=일 … 6=토; 비어 있으면 모든 수업) */
+const dayList = (p) => (Array.isArray(p && p.weekdays) ? p.weekdays.map(Number).filter((n) => n >= 0 && n <= 6) : []);
+function studentClassDays(studentId) {
+  const set = new Set();
+  state.schedule.slots.forEach((sl) => { if ((sl.student_ids || []).includes(studentId)) set.add(sl.weekday); });
+  return SCH_ORDER.filter((d) => set.has(d));
+}
+const dayChips = (p) => {
+  const ds = dayList(p);
+  return ds.length ? SCH_ORDER.filter((d) => ds.includes(d)).map((d) => `<span class="dchip on">${DAY_NAME[d]}</span>`).join("") : `<span class="dchip">모든 수업</span>`;
+};
+/* 요일 선택 칩 (다이얼로그 안 slot 에 붙임). sel 은 Set<number> */
+function mountDayPicker(hostId, sel, classDays) {
+  const host = $("#" + hostId);
+  const paint = () => {
+    host.innerHTML = `<div class="dp-head"><span class="dp-t">수업 요일</span>
+        <span class="dp-q"><button type="button" class="tb-sub plain" data-dp="class" ${classDays.length ? "" : "disabled"}>수업 요일 모두</button><button type="button" class="tb-sub plain" data-dp="none">선택 해제</button></span></div>
+      <div class="dp-grid">${SCH_ORDER.map((d) => `<button type="button" class="dp-d ${sel.has(d) ? "on" : ""}" data-d="${d}" aria-pressed="${sel.has(d)}">${DAY_NAME[d]}<i class="${classDays.includes(d) ? "dot" : ""}"></i></button>`).join("")}</div>
+      ${classDays.length ? `<div class="dp-leg"><i class="dot"></i>시간표에 있는 수업 요일</div>` : `<div class="dp-leg">이 학생은 시간표에 배정된 수업 요일이 없어요</div>`}
+      <div class="dp-note">${sel.size ? `<b>${SCH_ORDER.filter((d) => sel.has(d)).map((d) => DAY_NAME[d]).join("·")}</b> 수업에 이 교재가 나와요.` : `요일을 고르지 않으면 <b>모든 수업</b>에서 쓰는 교재로 배정돼요.`}</div>`;
+  };
+  host.onclick = (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.d != null) { const d = Number(b.dataset.d); sel.has(d) ? sel.delete(d) : sel.add(d); }
+    else if (b.dataset.dp === "class") classDays.forEach((d) => sel.add(d));
+    else if (b.dataset.dp === "none") sel.clear();
+    paint();
+  };
+  paint();
+}
+const weekdaysErr = (e) => (/weekdays/i.test((e && e.message) || "") ? new Error("요일을 저장하려면 최신 schema.sql 을 Supabase 에서 먼저 실행하세요.") : e);
 
 /* 교재 구조(트리): structure = { items: [{ name, children?: [이름…] }] }
    하위가 없는 1레벨 항목과 2레벨 항목이 "단원"이고, 위에서부터 세어 1~total_units 번호를 붙입니다.
@@ -763,6 +797,27 @@ function renderProgressTab(s) {
   const assignedIds = new Set(items.map((x) => x.book.id));
   const available = state.textbooks.filter((b) => !assignedIds.has(b.id));
   const nextLesson = state.detail.lessons.find((l) => l.next_plan);
+  const classDays = studentClassDays(s.id);
+  const week = state.progView === "week" && items.length > 0;
+  const mini = ({ p, book }) => {
+    const ratio = Math.min(100, Math.round((p.current_unit / book.total_units) * 100));
+    return `<button type="button" class="wk-book" data-act="days" data-pid="${esc(p.id)}" title="누르면 요일을 바꿀 수 있어요"><b>${esc(book.title)}</b><span>${p.current_unit > 0 ? esc(curLabel(book, p.current_unit)) : "시작 전"}</span><div class="bar"><span style="width:${ratio}%"></span></div></button>`;
+  };
+  const dayCols = (() => {
+    const cols = [];
+    SCH_ORDER.forEach((d) => {
+      const books = items.filter((x) => dayList(x.p).includes(d));
+      const on = classDays.includes(d) || books.length > 0;
+      const last = cols[cols.length - 1];
+      if (!on && last && !last.on) { last.days.push(d); return; }
+      cols.push({ days: [d], on, books, cls: classDays.includes(d) });
+    });
+    return cols;
+  })();
+  const anyDay = items.filter((x) => !dayList(x.p).length);
+  const weekHtml = `<div class="wk-scroll"><div class="wk-grid" style="grid-template-columns:repeat(${dayCols.length},minmax(150px,1fr))">${dayCols.map((c) => `<div class="wk-col ${c.on ? "on" : "off"} ${c.cls ? "cls" : ""}"><div class="wk-h">${c.days.map((d) => DAY_NAME[d]).join(" · ")}${c.cls ? `<small>수업일</small>` : ""}</div>${c.on ? c.books.map(mini).join("") || `<div class="wk-none">배정된 교재 없음</div>` : `<div class="wk-none">수업 없음</div>`}</div>`).join("")}</div></div>
+    ${anyDay.length ? `<div class="wk-any"><strong>요일 미지정 · 모든 수업</strong>${anyDay.map(mini).join("")}</div>` : ""}
+    <div class="muted wk-tip">교재를 누르면 요일을 바꿀 수 있어요</div>`;
   const cards = items
     .map(({ p, book }) => {
       const ratio = Math.min(100, Math.round((p.current_unit / book.total_units) * 100));
@@ -770,6 +825,7 @@ function renderProgressTab(s) {
       const recentEnt = recent ? lessonBooks(recent).find((b) => b.textbook_id === book.id) : null;
       return `<div class="card book-card" data-pid="${esc(p.id)}">
         <h3>${esc(book.title)}</h3>
+        <div class="dchips">${dayChips(p)}</div>
         <div class="stat"><strong>${bookLeaves(book) ? (p.current_unit > 0 ? esc(unitName(book, p.current_unit)) : "시작 전") : esc(book.unit_label) + " " + p.current_unit} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong><span class="badge ${ratio >= 100 ? "" : "warn"}">${ratio}%</span></div>
         <div class="bar ${ratio >= 100 ? "done" : ""}"><span style="width:${ratio}%"></span></div>
         ${recent ? `<div style="font-size:.85rem;margin-top:.5rem">최근 수업 <span class="muted">${fmtDate(recent.lesson_date)}</span> ·${esc(rangeText(book, recentEnt) || " 범위 미입력")}</div>` : ""}
@@ -778,6 +834,7 @@ function renderProgressTab(s) {
           <button class="btn small" data-act="dec">-1</button>
           <button class="btn small primary" data-act="inc">+1</button>
           <button class="btn small" data-act="set">직접 입력</button>
+          <button class="btn small" data-act="days">요일 변경</button>
           <button class="btn small danger" data-act="unassign">배정 해제</button>
         </div>
       </div>`;
@@ -786,8 +843,11 @@ function renderProgressTab(s) {
   $("#tab-body").innerHTML = `
     ${nextLesson ? `<div class="card next-card"><strong>다음 수업 예정</strong><div>${esc(nextLesson.next_plan)}</div><span class="muted">${fmtDate(nextLesson.lesson_date)} 수업 기록 기준</span></div>` : ""}
     <div class="toolbar"><button class="btn primary" id="btn-assign" ${available.length ? "" : "disabled"}>+ 교재 배정</button>
-      ${state.textbooks.length ? "" : `<span class="muted">먼저 왼쪽 아래 <strong>교재 관리</strong>에서 교재를 만드세요.</span>`}</div>
-    ${cards ? `<div class="grid">${cards}</div>` : `<div class="card empty">배정된 교재가 없습니다.</div>`}`;
+      ${items.length ? `<span class="seg" role="group" aria-label="보기 방식"><button type="button" data-pv="card" aria-pressed="${!week}">카드</button><button type="button" data-pv="week" aria-pressed="${week}">요일별</button></span>` : ""}
+      ${state.textbooks.length ? "" : `<span class="muted">먼저 왼쪽 아래 <strong>교재 관리</strong>에서 교재를 만드세요.</span>`}
+      <span class="spacer"></span>${classDays.length ? `<span class="muted">시간표 수업 요일: ${classDays.map((d) => DAY_NAME[d]).join(" · ")}</span>` : ""}</div>
+    ${!items.length ? `<div class="card empty">배정된 교재가 없습니다.</div>` : week ? weekHtml : `<div class="grid">${cards}</div>`}`;
+  $("#tab-body").querySelectorAll("[data-pv]").forEach((b) => { b.onclick = () => { state.progView = b.dataset.pv; renderProgressTab(s); }; });
 }
 
 function renderLessonsTab(s) {
@@ -2131,19 +2191,39 @@ async function setProgress(pid, unit) {
 function assignBook(s) {
   const assigned = new Set(bookProgressFor(s.id).map((x) => x.book.id));
   const options = state.textbooks.filter((b) => !assigned.has(b.id)).map((b) => [b.id, `${b.title} (${bookLeaves(b) ? b.total_units + "단원" : b.total_units + " " + b.unit_label})`]);
+  const sel = new Set();
+  const classDays = studentClassDays(s.id);
   openForm({
     title: "교재 배정",
     fields: [
       { name: "textbook_id", label: "교재", type: "select", options, required: true },
       { name: "current_unit", label: "현재 진도 (이미 나간 단원 수)", type: "number", min: 0, default: 0 },
+      { name: "as-days", type: "slot" },
     ],
     onSubmit: async (d) => {
-      await run(db.from("progress").insert({ student_id: s.id, textbook_id: d.textbook_id, current_unit: d.current_unit || 0 }));
+      const row = { student_id: s.id, textbook_id: d.textbook_id, current_unit: d.current_unit || 0 };
+      if (sel.size) row.weekdays = SCH_ORDER.filter((x) => sel.has(x));
+      try { await run(db.from("progress").insert(row)); } catch (e) { throw weekdaysErr(e); }
       await refresh();
       toast("교재를 배정했습니다");
     },
   });
   bindUnitCtls($("#dlg-form"), ["current_unit"], { zero: true });
+  mountDayPicker("as-days", sel, classDays);
+}
+
+function changeDays(s, p, book) {
+  const sel = new Set(dayList(p));
+  openForm({
+    title: `수업 요일 · ${book.title}`,
+    fields: [{ name: "cd-days", type: "slot" }],
+    onSubmit: async () => {
+      try { await run(db.from("progress").update({ weekdays: SCH_ORDER.filter((x) => sel.has(x)) }).eq("id", p.id)); } catch (e) { throw weekdaysErr(e); }
+      await refresh();
+      toast("요일을 저장했습니다");
+    },
+  });
+  mountDayPicker("cd-days", sel, studentClassDays(s.id));
 }
 
 /* 추천 날짜에 이미 있는 수업 기록 찾기 (화면에 불러 둔 기록 기준) */
@@ -2189,6 +2269,10 @@ function lessonForm(s, lesson, rec = null) {
     values = { lesson_date: todayStr(), attendance: "출석" };
     const lastBookId = (state.detail.lessons.find((l) => l.textbook_id && assigned.some((x) => x.id === l.textbook_id)) || {}).textbook_id || (assigned[0] && assigned[0].id);
     blocks = [{ textbook_id: lastBookId && bookOf(lastBookId) ? lastBookId : "", from_unit: lastBookId ? autoFrom(lastBookId) : null, to_unit: null, topic: "" }];
+    const todayWd = new Date(`${values.lesson_date}T00:00:00`).getDay();
+    const dayBooks = bookProgressFor(s.id).filter((x) => dayList(x.p).includes(todayWd));
+    if (dayBooks.length) blocks = dayBooks.map((x) => ({ textbook_id: x.book.id, from_unit: autoFrom(x.book.id), to_unit: null, topic: "" }));
+    if (rec) blocks = [blocks[0]];
     if (rec) blocks[0] = { textbook_id: rec.textbook_id || blocks[0].textbook_id, from_unit: rec.from_unit ?? null, to_unit: rec.to_unit ?? null, topic: "" };
     values = { ...values, lesson_date: (rec && rec.target_date) || values.lesson_date };
   }
@@ -2505,6 +2589,7 @@ function bindEvents() {
       try {
         if (act.dataset.act === "inc") await setProgress(pid, p.current_unit + 1);
         else if (act.dataset.act === "dec") await setProgress(pid, p.current_unit - 1);
+        else if (act.dataset.act === "days") { changeDays(s, p, book); return; }
         else if (act.dataset.act === "set") {
           if (bookLeaves(book)) {
             openForm({

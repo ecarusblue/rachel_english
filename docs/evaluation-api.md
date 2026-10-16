@@ -83,3 +83,6 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 ## 한 수업에 교재가 여러 개일 때
 `lessons[]` 의 `textbook`·단원 범위는 첫 번째 교재이고, 나머지는 `extra_books` 배열에 있습니다. `month_from_unit`·`month_to_unit`·
 `avg_units_per_lesson` 은 두 가지를 모두 합쳐 계산됩니다. (최신 `schema.sql` 을 다시 실행해야 `extra_books` 컬럼과 `lesson_book_rows` 뷰가 생깁니다.)
+
+## 교재별 수업 요일
+`books[].weekdays` 는 교재를 쓰는 수업 요일 배열(0=일 … 6=토)이며 빈 배열이면 모든 수업에서 쓰는 교재입니다.

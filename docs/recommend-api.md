@@ -90,3 +90,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 ## 한 수업에 교재가 여러 개일 때
 `recent_lessons[]` 의 `textbook_id`·`from_unit`·`to_unit`·`topic` 은 **첫 번째 교재**이고, 두 번째 이후 교재는 `extra_books`
 (`[{"textbook_id","from_unit","to_unit","topic"}]`, 없으면 `null`)에 들어 있습니다. 교재별 진도를 볼 때는 둘 다 확인하세요.
+
+## 교재별 수업 요일
+`books[].weekdays` 는 그 교재를 쓰는 수업 요일 배열입니다(0=일 … 6=토, 예: `[1,3]` = 월·수). **빈 배열이면 모든 수업**에서 쓰는 교재입니다.
+추천할 날짜의 요일에 맞는 교재를 우선 고려하세요. (최신 `schema.sql` 을 다시 실행해야 `weekdays` 컬럼이 생깁니다.)
