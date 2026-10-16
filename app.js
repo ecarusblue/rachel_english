@@ -1028,8 +1028,8 @@ function openEvalPreview(html, onPrint, returnTo) {
   ov.className = "ev-ov";
   ov.setAttribute("role", "dialog");
   ov.setAttribute("aria-modal", "true");
-  ov.setAttribute("aria-label", "월말평가서 인쇄 미리보기");
-  ov.innerHTML = `<div class="ev-ov-bar"><strong>인쇄 미리보기</strong><span class="muted" id="ev-ov-note">A4 기준</span><span class="spacer"></span>
+  ov.setAttribute("aria-label", "월말평가서 미리보기");
+  ov.innerHTML = `<div class="ev-ov-bar"><strong>평가서 미리보기</strong><span class="muted" id="ev-ov-note">A4 기준</span><span class="spacer"></span>
       <button class="btn primary" type="button" id="ev-ov-print">인쇄 / PDF 저장</button>
       <button class="btn" type="button" id="ev-ov-close">닫기</button></div>
     <div class="ev-ov-scroll"><div class="ev-sheet" id="ev-sheet">${html}</div></div>`;
@@ -1086,8 +1086,7 @@ function renderEvalDetail(s, d, head, bindHead) {
           <label class="check"><span>상태</span><select name="status">${EVAL_STATUS.map((x) => `<option value="${x}" ${(row ? row.status : "작성중") === x ? "selected" : ""}>${x === "작성중" ? "작성 중" : x}</option>`).join("")}</select></label>
           <span class="spacer"></span>
           <p id="ev-err" class="error" role="alert"></p>
-          <button class="btn" type="button" id="ev-preview">인쇄 미리보기</button>
-          <button class="btn" type="button" id="ev-print">인쇄 / PDF 저장</button>
+          <button class="btn" type="button" id="ev-preview">평가서 미리보기</button>
           <button class="btn primary" type="submit" id="ev-save">저장</button>
         </div>
       </form>
@@ -1099,7 +1098,6 @@ function renderEvalDetail(s, d, head, bindHead) {
     $("#ev-print-area").innerHTML = evalPrintHtml(s, d, sm, evalValues());
     window.print();
   };
-  $("#ev-print").onclick = doPrint;
   $("#ev-preview").onclick = () => openEvalPreview(evalPrintHtml(s, d, sm, evalValues()), doPrint, $("#ev-preview"));
   $("#ev-form").onsubmit = async (e) => {
     e.preventDefault();
