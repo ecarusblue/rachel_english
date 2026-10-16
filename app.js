@@ -472,6 +472,7 @@ function periodRange(kind, customStart, customEnd) {
   const t = parseD(today);
   if (kind === "thisWeek") return { start: monday, end: addDays(monday, 6), label: "주간" };
   if (kind === "lastWeek") return { start: addDays(monday, -7), end: addDays(monday, -1), label: "주간" };
+  if (kind === "nextWeek") return { start: addDays(monday, 7), end: addDays(monday, 13), label: "주간" };
   if (kind === "thisMonth") return { start: toStr(new Date(t.getFullYear(), t.getMonth(), 1)), end: toStr(new Date(t.getFullYear(), t.getMonth() + 1, 0)), label: "월간" };
   if (kind === "lastMonth") return { start: toStr(new Date(t.getFullYear(), t.getMonth() - 1, 1)), end: toStr(new Date(t.getFullYear(), t.getMonth(), 0)), label: "월간" };
   const start = customStart || monday;
@@ -816,7 +817,7 @@ function filterRecs(recs) {
 function recFilterHtml() {
   const f = state.recFilter;
   const rg = recFilterRange();
-  const opts = [["all", "전체 기간"], ["thisWeek", "이번 주"], ["lastWeek", "지난 주"], ["thisMonth", "이번 달"], ["lastMonth", "지난 달"], ["custom", "직접 선택"]];
+  const opts = [["all", "전체 기간"], ["thisWeek", "이번 주"], ["lastWeek", "지난 주"], ["nextWeek", "다음 주"], ["thisMonth", "이번 달"], ["lastMonth", "지난 달"], ["custom", "직접 선택"]];
   return `<div class="card report-controls">
       <label>기간<select id="rf-range">${opts.map(([v, t]) => `<option value="${v}" ${f.range === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
       <label>시작일<input type="date" id="rf-start" value="${esc(rg ? rg.start : "")}" ${f.range === "custom" ? "" : "disabled"}></label>
