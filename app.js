@@ -513,32 +513,17 @@ const SCH_ORIENT_KEY = "rachel_sched_orient";
 function schedOrient() {
   try { return localStorage.getItem(SCH_ORIENT_KEY) === "l" ? "l" : "p"; } catch { return "p"; }
 }
-// 내용이 한 장을 넘으면 본문을 줄여서 A4 한 장에 맞춥니다 (잘리지 않게).
-function fitSchedSheet(sheet, land) {
-  const bd = sheet.querySelector(land ? ".tl-bd" : ".tp-bd");
-  const page = sheet.querySelector(".rp-page");
-  if (!bd || !page) return 1;
-  const pageH = (297 / 25.4) * 96;
-  const over = () => (land ? bd.scrollHeight > bd.clientHeight + 1 : page.offsetHeight > pageH + 1);
-  let s = 1;
-  while (over() && s > 0.45) {
-    s = Math.round((s - 0.04) * 100) / 100;
-    bd.style.zoom = String(s);
-  }
-  return s;
-}
 function openSchedPreview(returnTo, orient = schedOrient()) {
   try { localStorage.setItem(SCH_ORIENT_KEY, orient); } catch { /* 저장 실패는 무시 */ }
-  let sc = 1;
   openEvalPreview(schedulePrintHtml(orient), () => {
     const area = $("#sched-print-area");
-    area.innerHTML = schedulePrintHtml(orient, sc);
+    area.innerHTML = schedulePrintHtml(orient);
     area.classList.toggle("land", orient === "l");
     document.body.classList.add("print-sched");
     try { window.print(); } finally { document.body.classList.remove("print-sched"); area.classList.remove("land"); }
   }, returnTo, "시간표 미리보기", {
     land: orient === "l",
-    onRender: (sheet) => { sc = fitSchedSheet(sheet, orient === "l"); },
+    onRender: orient === "l" ? paginateSchedLand : paginateSchedPortrait,
     orient: { value: orient, options: [["p", "세로"], ["l", "가로"]], onChange: (v) => openSchedPreview(returnTo, v) },
   });
 }
@@ -1867,19 +1852,25 @@ function openEvalPreview(html, onPrint, returnTo, label = "평가서 미리보�
     <div class="ev-ov-scroll"><div class="ev-sheet ${opts.land ? "land" : ""}" id="ev-sheet">${html}</div></div>`;
   document.body.appendChild(ov);
   const sheet = ov.querySelector("#ev-sheet");
+  // 화면 너비에 맞춰 축소 (쪽 나눔은 배율 1에서 계산)
+  const fit = () => {
+    const avail = ov.querySelector(".ev-ov-scroll").clientWidth - 32;
+    const w = ((opts.land ? 297 : 210) / 25.4) * 96;
+    // zoom 대신 transform 으로 줄이면 글자·줄 높이가 달라지지 않아 쪽 나눔이 화면 크기와 무관하게 같습니다
+    const z = Math.min(1, avail / w);
+    const box = ov.querySelector(".ev-ov-scroll").clientWidth;
+    sheet.style.transformOrigin = "top left";
+    sheet.style.transform = z < 1 ? `translateX(${Math.max(0, (box - 32 - w * z) / 2)}px) scale(${z})` : "";
+    sheet.style.margin = z < 1 ? "0" : "";
+    sheet.style.marginBottom = z < 1 ? `${-(1 - z) * sheet.offsetHeight}px` : "";
+  };
   const paged = opts.onRender ? opts.onRender(sheet) : null;
+  fit();
   // A4 한 장(297mm) 기준으로 몇 장이 되는지 계산 (쪽을 나눠 보여 준 화면은 그 쪽 수)
   const pageH = ((opts.land ? 210 : 297) / 25.4) * 96;
   const pages = typeof paged === "number" ? paged : Math.max(1, Math.ceil((sheet.offsetHeight - 2) / pageH));
   const pg = opts.land ? "A4 가로" : "A4";
   ov.querySelector("#ev-ov-note").textContent = pages > 1 ? `${pg} 기준 · 내용이 길어 ${pages}장으로 인쇄됩니다` : `${pg} 한 장`;
-  // 화면 너비에 맞춰 축소
-  const fit = () => {
-    const avail = ov.querySelector(".ev-ov-scroll").clientWidth - 32;
-    const w = ((opts.land ? 297 : 210) / 25.4) * 96;
-    sheet.style.zoom = String(Math.min(1, avail / w));
-  };
-  fit();
   const onResize = () => fit();
   window.addEventListener("resize", onResize);
   const close = () => {
@@ -2072,7 +2063,7 @@ const DOW_FULL = "일요일 월요일 화요일 수요일 목요일 금요일 �
 function paginatePreview(sheet, cfg) {
   const first = sheet.querySelector(cfg.page);
   if (!first) return null;
-  const pageH = (297 / 25.4) * 96;
+  const pageH = ((cfg.h || 297) / 25.4) * 96;
   const foot = first.querySelector(".rp-foot");
   const items = (bd) => [...bd.querySelectorAll(cfg.items)];
   const pagesEls = [first];
@@ -2101,6 +2092,44 @@ function paginatePreview(sheet, cfg) {
   return pagesEls.length;
 }
 const paginatePlanPreview = (sheet) => paginatePreview(sheet, { page: ".pl-page", body: ".pl-bd", items: ":scope > .pl-card, :scope > .pl-memo", cont: "pl-page pl-cont" });
+const paginateSchedPortrait = (sheet) => paginatePreview(sheet, { page: ".rp-page", body: ".tp-bd", items: ":scope > .tp-day", cont: "tp-page tp-cont" });
+// 가로 시간표: 표의 줄(타임)을 쪽 단위로 나누고, 요일 머리줄은 모든 쪽에 다시 붙입니다.
+function paginateSchedLand(sheet) {
+  const first = sheet.querySelector(".rp-page");
+  const table = first && first.querySelector(".tl-table");
+  if (!table) return null;
+  const pageH = (210 / 25.4) * 96;
+  const foot = first.querySelector(".rp-foot");
+  const pagesEls = [first];
+  let page = first;
+  for (let guard = 0; guard < 40; guard++) {
+    const tb = page.querySelector(".tl-table tbody");
+    let next = null;
+    const footEl = page.querySelector(".rp-foot");
+    // 마지막 줄 아래(표 간격 3mm + 여백 2mm)가 푸터 위로 넘치면 한 줄씩 다음 쪽으로 보냅니다
+    const over = () => tb.rows[tb.rows.length - 1].getBoundingClientRect().bottom + (5 / 25.4) * 96 > footEl.getBoundingClientRect().top + 1;
+    while ((page.offsetHeight > pageH + 1 || over()) && tb.rows.length > 1) {
+      if (!next) {
+        next = document.createElement("div");
+        next.className = "rp-page tp-page tp-land tp-cont";
+        const t2 = table.cloneNode(false);
+        t2.appendChild(table.tHead.cloneNode(true));
+        t2.appendChild(document.createElement("tbody"));
+        next.innerHTML = `<div class="tl-bd"></div>`;
+        next.querySelector(".tl-bd").appendChild(t2);
+        if (foot) next.appendChild(foot.cloneNode(true));
+        page.after(next);
+      }
+      next.querySelector("tbody").prepend(tb.rows[tb.rows.length - 1]);
+    }
+    if (!next) break;
+    pagesEls.push(next);
+    page = next;
+  }
+  sheet.classList.add("paged");
+  pagesEls.forEach((p, i) => { const n = document.createElement("div"); n.className = "pl-pn"; n.textContent = `${i + 1} / ${pagesEls.length}쪽`; p.appendChild(n); });
+  return pagesEls.length;
+}
 const paginateEvalPreview = (sheet) => paginatePreview(sheet, { page: ".rp-page", body: ".rp-body", items: ":scope > *", cont: "rp-cont" });
 
 function planPrintHtml(s, recs) {

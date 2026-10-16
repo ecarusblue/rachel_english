@@ -742,3 +742,8 @@ td[class^="att-"] { white-space: nowrap; }
 .ev-sheet.paged .pl-hd + .pl-bd { }
 .ev-sheet.paged .rp-cont { padding-top: 10mm; }
 .ev-sheet.paged .rp-cont .rp-body { padding-top: 4mm; }
+.ev-sheet.land.paged .rp-page { height: 209mm; min-height: 209mm; }
+.ev-sheet.paged .tp-cont .tp-bd { padding-top: 14mm; }
+.ev-sheet.paged .tp-land.tp-cont .tl-bd { padding-top: 10mm; }
+@media print { .tp-day, .tl-table tr { break-inside: avoid; } .tl-table thead { display: table-header-group; } }
+.ev-ov-scroll { overflow-x: hidden; }
