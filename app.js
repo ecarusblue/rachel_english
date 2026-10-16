@@ -1272,9 +1272,7 @@ function bindEvents() {
   $("#btn-add-student").onclick = addStudent;
   $("#btn-textbooks").onclick = manageTextbooks;
   document.querySelectorAll(".js-logout").forEach((b) => {
-    b.onclick = async () => {
-      await db.auth.signOut();
-    };
+    b.onclick = logout;
   });
   $("#btn-password").onclick = changePassword;
 
@@ -1342,15 +1340,90 @@ function changePassword(title = "비밀번호 변경") {
   });
 }
 
+/* ---------- 유휴 자동 로그아웃 ---------- */
+const IDLE_MS = (Number(cfg.IDLE_MINUTES) > 0 ? Number(cfg.IDLE_MINUTES) : 30) * 60 * 1000;
+const WARN_MS = 60 * 1000;
+const ACTIVITY_KEY = "study-room-last-activity";
+let lastActivityMem = Date.now();
+let lastMarked = 0;
+let idleTimer = null;
+let idleLoggedOut = false;
+
+function getLastActivity() {
+  try {
+    const v = Number(localStorage.getItem(ACTIVITY_KEY));
+    if (v > 0) return v;
+  } catch {}
+  return lastActivityMem;
+}
+function markActivity(force = false) {
+  const now = Date.now();
+  if (!force && now - lastMarked < 5000) return; // 너무 자주 쓰지 않도록 5초에 한 번만
+  lastMarked = now;
+  lastActivityMem = now;
+  try {
+    localStorage.setItem(ACTIVITY_KEY, String(now));
+  } catch {}
+}
+async function logout() {
+  try {
+    await db.auth.signOut({ scope: "global" }); // 서버의 갱신 토큰까지 폐기
+  } catch {
+    try {
+      await db.auth.signOut({ scope: "local" });
+    } catch {}
+  }
+}
+function idleCheck() {
+  const elapsed = Date.now() - getLastActivity();
+  const warn = $("#idle-warn");
+  if (elapsed >= IDLE_MS) {
+    stopIdleWatch();
+    idleLoggedOut = true;
+    logout();
+  } else if (elapsed >= IDLE_MS - WARN_MS) {
+    $("#idle-left").textContent = Math.max(1, Math.ceil((IDLE_MS - elapsed) / 1000));
+    warn.hidden = false;
+  } else {
+    warn.hidden = true;
+  }
+}
+function startIdleWatch() {
+  stopIdleWatch();
+  idleLoggedOut = false;
+  idleTimer = setInterval(idleCheck, 5000);
+}
+function stopIdleWatch() {
+  if (idleTimer) clearInterval(idleTimer);
+  idleTimer = null;
+  const warn = $("#idle-warn");
+  if (warn) warn.hidden = true;
+}
+function bindIdleEvents() {
+  ["mousedown", "mousemove", "keydown", "touchstart", "wheel", "scroll"].forEach((ev) =>
+    window.addEventListener(ev, () => markActivity(), { passive: true, capture: true })
+  );
+  $("#idle-stay").onclick = () => {
+    markActivity(true);
+    $("#idle-warn").hidden = true;
+  };
+}
+
 /* ---------- 시작 ---------- */
 function showLogin() {
+  stopIdleWatch();
   $("#app-view").hidden = true;
   $("#login-view").hidden = false;
+  if (idleLoggedOut) {
+    idleLoggedOut = false;
+    $("#login-err").textContent = `${Math.round(IDLE_MS / 60000)}분 동안 사용이 없어 자동 로그아웃되었습니다.`;
+  }
 }
 
 async function showApp() {
   $("#login-view").hidden = true;
   $("#app-view").hidden = false;
+  startIdleWatch();
   try {
     const { data } = await db.auth.getUser();
     $("#user-email").textContent = data?.user?.email || "";
@@ -1365,6 +1438,7 @@ async function showApp() {
 
 async function init() {
   bindEvents();
+  bindIdleEvents();
   if (!configured) {
     showLogin();
     $("#login-err").textContent = "config.js 에 Supabase URL과 키를 먼저 입력하세요.";
@@ -1385,6 +1459,7 @@ async function init() {
     e.preventDefault();
     $("#login-err").textContent = "";
     const f = e.target;
+    markActivity(true); // 방금 로그인했으므로 이전 활동 시각은 무시
     const { error } = await db.auth.signInWithPassword({ email: f.elements.email.value.trim(), password: f.elements.password.value });
     if (error) $("#login-err").textContent = "로그인에 실패했습니다. 이메일과 비밀번호를 확인하세요.";
     else {
@@ -1410,7 +1485,10 @@ async function init() {
 
   let appShown = false;
   db.auth.onAuthStateChange((event, session) => {
-    if (event === "PASSWORD_RECOVERY") setTimeout(() => changePassword("새 비밀번호 설정"), 400);
+    if (event === "PASSWORD_RECOVERY") {
+      markActivity(true);
+      setTimeout(() => changePassword("새 비밀번호 설정"), 400);
+    }
     // 콜백 안에서 바로 supabase 호출을 await 하면 교착될 수 있어 다음 틱으로 넘깁니다.
     setTimeout(() => {
       if (session && !appShown) {

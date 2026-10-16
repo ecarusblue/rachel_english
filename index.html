@@ -76,6 +76,11 @@
     </form>
   </dialog>
 
+  <div id="idle-warn" class="idle-warn" role="alertdialog" aria-live="assertive" hidden>
+    <span><strong id="idle-left"></strong>초 후 사용이 없어 자동 로그아웃됩니다.</span>
+    <button class="btn small primary" type="button" id="idle-stay">계속 사용</button>
+  </div>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
