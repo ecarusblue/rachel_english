@@ -1911,23 +1911,36 @@ function manageTextbooks() {
 }
 
 function editTextbook(book) {
-  const tree = !!bookLeaves(book);
+  const wasTree = !!bookLeaves(book);
+  // 항목 편집용 작업본 (표시 중인 입력값과 항상 같게 유지)
+  let rows = wasTree ? book.structure.items.map((it) => ({ name: it.name, children: (it.children || []).map((c) => String(c)) })) : [{ name: "Unit 1", children: [] }];
+  let textMode = false;
+  let bulk = null; // { top: -1(맨 아래) | 항목 번호, prefix, count }
+  let focusKey = null;
+
   openForm({
     title: book ? "교재 수정" : "교재 추가",
     wide: true,
     fields: [
       { name: "title", label: "교재명", required: true, maxlength: 100 },
-      { name: "mode", label: "구조", type: "select", options: [["flat", "한 줄 번호 (Unit 1, 2, 3 …)"], ["tree", "항목 + 하위 항목 (이름을 직접 입력, 하위는 선택)"]] },
+      { name: "mode", label: "구조", type: "select", options: [["flat", "flat"], ["tree", "tree"]] },
       { name: "total_units", label: "전체 단원 수", type: "number", min: 1, max: 500, half: true },
       { name: "unit_label", label: "단위 이름 (Unit, Lesson 등)", half: true, maxlength: 20 },
-      { name: "outline", label: "항목 목록 (한 줄에 하나, 앞에 공백을 넣으면 위 항목의 하위)", type: "textarea", rows: 10, maxlength: 12000 },
+      { name: "outline", label: "텍스트로 편집 (한 줄에 항목 하나, 앞에 공백을 넣으면 위 항목의 하위)", type: "textarea", rows: 10, maxlength: 12000 },
     ],
-    values: book ? { ...book, mode: tree ? "tree" : "flat", outline: tree ? outlineText(book.structure) : "" } : { total_units: 20, unit_label: "Unit", mode: "flat", outline: "Unit 1\nUnit 2\n  Part A\n  Part B\nUnit 3" },
+    values: book ? { ...book, mode: wasTree ? "tree" : "flat", outline: "" } : { total_units: 20, unit_label: "Unit", mode: "flat", outline: "" },
     onSubmit: async (d) => {
       const out = { title: d.title };
       if (d.mode === "tree") {
-        const { structure, leaves } = parseOutline(d.outline);
-        out.structure = structure;
+        if (textMode) rows = parseOutline(form.elements.outline.value).structure.items.map((it) => ({ name: it.name, children: it.children || [] }));
+        const items = rows
+          .map((r) => ({ name: r.name.trim().slice(0, 60), children: r.children.map((c) => c.trim().slice(0, 60)).filter(Boolean) }))
+          .filter((r) => r.name)
+          .map((r) => (r.children.length ? { name: r.name, children: r.children } : { name: r.name }));
+        if (!items.length) throw new Error("항목을 한 개 이상 입력하세요.");
+        const leaves = items.reduce((n, it) => n + (it.children ? it.children.length : 1), 0);
+        if (leaves > 500) throw new Error(`단원이 너무 많습니다 (${leaves}개, 최대 500개).`);
+        out.structure = { items };
         out.total_units = leaves;
         out.unit_label = (d.unit_label || "Unit").slice(0, 20);
       } else {
@@ -1955,17 +1968,130 @@ function editTextbook(book) {
         }
       : null,
   });
+
   const form = $("#dlg-form");
   const modeEl = form.elements.mode;
-  const toggle = () => {
-    const t = modeEl.value === "tree";
-    ["total_units"].forEach((n) => { form.elements[n].closest("label").hidden = t; });
-    form.elements.outline.closest("label").hidden = !t;
-    form.elements.unit_label.closest("label").hidden = t;
+  modeEl.closest("label").hidden = true;
+  const outlineLabel = form.elements.outline.closest("label");
+  const host = document.createElement("div");
+  host.id = "tb-host";
+  $("#dlg-body").appendChild(host);
+
+  const leafCount = () => rows.reduce((n, r) => n + (r.children.length ? r.children.length : 1), 0);
+  const esc2 = (v) => esc(v);
+  const paint = () => {
+    const tree = modeEl.value === "tree";
+    form.elements.total_units.closest("label").hidden = tree;
+    form.elements.unit_label.closest("label").hidden = tree;
+    outlineLabel.hidden = !(tree && textMode);
+    const segHtml = `<div class="tb-seg" role="group" aria-label="구조">
+      <button type="button" class="tb-seg-b ${tree ? "" : "on"}" data-tb-mode="flat" aria-pressed="${!tree}">한 줄 번호 <span class="muted">(Unit 1, 2, 3…)</span></button>
+      <button type="button" class="tb-seg-b ${tree ? "on" : ""}" data-tb-mode="tree" aria-pressed="${tree}">항목 + 하위 항목</button></div>`;
+    if (!tree) { host.innerHTML = segHtml; return; }
+    if (textMode) {
+      host.innerHTML = segHtml + `<div class="tb-foot"><button type="button" class="btn small" data-tb="visual">← 목록 입력으로</button></div>`;
+      return;
+    }
+    let n = 0;
+    const num = (leaf) => (leaf ? `<span class="tb-n">${++n}</span>` : `<span class="tb-n grp">묶음</span>`);
+    const rowsHtml = rows.map((r, i) => {
+      const hasKids = r.children.length > 0;
+      const top = `<div class="tb-row">${num(!hasKids)}<input type="text" data-t="${i}" aria-label="항목 이름" maxlength="60" value="${esc2(r.name)}">
+        ${hasKids ? "" : `<button type="button" class="tb-sub" data-tb="addkid" data-t="${i}">+ 하위</button>`}
+        <button type="button" class="tb-x" data-tb="del" data-t="${i}" aria-label="삭제">✕</button></div>`;
+      const kids = r.children.map((c, j) => `<div class="tb-row tb-kid">${num(true)}<input type="text" data-t="${i}" data-c="${j}" aria-label="하위 항목 이름" maxlength="60" value="${esc2(c)}">
+        <button type="button" class="tb-x" data-tb="delkid" data-t="${i}" data-c="${j}" aria-label="삭제">✕</button></div>`).join("");
+      const more = hasKids ? `<div class="tb-kid tb-more"><button type="button" class="tb-link" data-tb="addkid" data-t="${i}">+ ${esc2(r.name || "항목")}에 하위 추가</button><button type="button" class="tb-link" data-tb="bulkkid" data-t="${i}">여러 개…</button></div>` : "";
+      const bulkPanel = bulk && bulk.top === i ? bulkHtml() : "";
+      return top + kids + more + bulkPanel;
+    }).join("");
+    host.innerHTML = segHtml + `<div class="tb-box">
+      <div class="tb-head"><span class="muted">단원 총 ${leafCount()}개</span></div>
+      ${rowsHtml}
+      <div class="tb-foot"><button type="button" class="btn primary small" data-tb="add">+ 항목 추가</button>
+        <button type="button" class="btn small" data-tb="bulk">여러 개 한 번에…</button><span class="spacer"></span>
+        <button type="button" class="tb-link" data-tb="text">텍스트로 편집</button></div>
+      ${bulk && bulk.top === -1 ? bulkHtml() : ""}</div>
+      <p class="tb-note">하위 항목이 있는 줄(묶음)에는 번호가 붙지 않고, 하위 항목이 각각 한 단원이 됩니다. 진도는 “Unit 2 › Part B (3/4)”처럼 표시돼요.</p>`;
+    if (focusKey) {
+      const q = focusKey.c != null ? `input[data-t="${focusKey.t}"][data-c="${focusKey.c}"]` : `input[data-t="${focusKey.t}"]:not([data-c])`;
+      const el = host.querySelector(q);
+      if (el) { el.focus(); el.select(); }
+      focusKey = null;
+    }
   };
-  modeEl.addEventListener("change", toggle);
-  toggle();
-  if (book && tree) $("#dlg-err").textContent = "이미 진도가 있는 교재는 목록 중간에 항목을 끼워 넣으면 번호가 밀립니다. 새 항목은 뒤쪽에 추가하세요.";
+  const bulkHtml = () => {
+    const pre = bulk.prefix, cnt = bulk.count;
+    const sample = cnt >= 1 ? `${pre} 1, ${pre} 2${cnt > 2 ? ` … ${pre} ${cnt}` : ""}` : "";
+    return `<div class="tb-bulk"><strong>여러 개 한 번에 추가</strong>
+      <div class="tb-bulk-f"><label>이름 앞부분<input type="text" data-bk="prefix" maxlength="40" value="${esc2(pre)}"></label>
+      <label class="tb-cnt">개수<input type="number" data-bk="count" min="1" max="500" value="${cnt}"></label></div>
+      <div class="tb-prev">미리보기: <b>${esc2(sample)}</b></div>
+      <div class="tb-foot"><span class="spacer"></span><button type="button" class="btn small" data-tb="bulkcancel">취소</button>
+      <button type="button" class="btn primary small" data-tb="bulkok">${cnt || 0}개 추가</button></div></div>`;
+  };
+
+  host.addEventListener("click", (e) => {
+    const modeBtn = e.target.closest("[data-tb-mode]");
+    if (modeBtn) { modeEl.value = modeBtn.dataset.tbMode; $("#dlg-err").textContent = ""; paint(); return; }
+    const b = e.target.closest("[data-tb]");
+    if (!b) return;
+    const t = b.dataset.t != null ? Number(b.dataset.t) : null;
+    const c = b.dataset.c != null ? Number(b.dataset.c) : null;
+    switch (b.dataset.tb) {
+      case "add": rows.push({ name: "", children: [] }); focusKey = { t: rows.length - 1 }; break;
+      case "addkid": rows[t].children.push(""); focusKey = { t, c: rows[t].children.length - 1 }; break;
+      case "del": rows.splice(t, 1); if (!rows.length) rows.push({ name: "", children: [] }); break;
+      case "delkid": rows[t].children.splice(c, 1); break;
+      case "bulk": bulk = { top: -1, prefix: "Unit", count: 10 }; break;
+      case "bulkkid": bulk = { top: t, prefix: "Part", count: 4 }; break;
+      case "bulkcancel": bulk = null; break;
+      case "bulkok": {
+        if (!(bulk.count >= 1)) return;
+        const names = Array.from({ length: Math.min(500, bulk.count) }, (_, i) => `${bulk.prefix.trim()} ${i + 1}`.trim());
+        if (bulk.top === -1) {
+          if (rows.length === 1 && !rows[0].name.trim() && !rows[0].children.length) rows = [];
+          names.forEach((nm) => rows.push({ name: nm, children: [] }));
+          focusKey = { t: rows.length - 1 };
+        } else rows[bulk.top].children.push(...names);
+        bulk = null;
+        break;
+      }
+      case "text": form.elements.outline.value = outlineText({ items: rows.map((r) => ({ name: r.name, children: r.children })) }); textMode = true; break;
+      case "visual":
+        try { rows = parseOutline(form.elements.outline.value).structure.items.map((it) => ({ name: it.name, children: it.children || [] })); textMode = false; $("#dlg-err").textContent = ""; }
+        catch (err) { $("#dlg-err").textContent = err.message; return; }
+        break;
+      default: return;
+    }
+    paint();
+  });
+  host.addEventListener("input", (e) => {
+    const el = e.target;
+    if (el.dataset.t != null && el.tagName === "INPUT") {
+      const t = Number(el.dataset.t);
+      if (el.dataset.c != null) rows[t].children[Number(el.dataset.c)] = el.value;
+      else rows[t].name = el.value;
+    } else if (el.dataset.bk && bulk) {
+      bulk[el.dataset.bk] = el.dataset.bk === "count" ? Math.max(0, Math.min(500, Math.round(Number(el.value) || 0))) : el.value;
+      const prev = el.closest(".tb-bulk");
+      const pre = bulk.prefix, cnt = bulk.count;
+      prev.querySelector(".tb-prev b").textContent = cnt >= 1 ? `${pre} 1, ${pre} 2${cnt > 2 ? ` … ${pre} ${cnt}` : ""}` : "";
+      prev.querySelector('[data-tb="bulkok"]').textContent = `${cnt || 0}개 추가`;
+    }
+  });
+  host.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.target.tagName !== "INPUT") return;
+    e.preventDefault(); // Enter 로 대화상자가 저장되지 않게
+    const el = e.target;
+    if (el.dataset.bk) return;
+    const t = Number(el.dataset.t);
+    if (el.dataset.c != null) { const c = Number(el.dataset.c); rows[t].children.splice(c + 1, 0, ""); focusKey = { t, c: c + 1 }; }
+    else { rows.splice(t + 1, 0, { name: "", children: [] }); focusKey = { t: t + 1 }; }
+    paint();
+  });
+  paint();
+  if (book && wasTree) $("#dlg-err").textContent = "이미 진도가 있는 교재는 항목을 중간에 끼워 넣거나 지우면 번호가 밀립니다. 새 항목은 뒤쪽에 추가하세요.";
 }
 
 /* ---------- 학생 상세 동작 ---------- */
