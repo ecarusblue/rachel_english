@@ -747,3 +747,20 @@ td[class^="att-"] { white-space: nowrap; }
 .ev-sheet.paged .tp-land.tp-cont .tl-bd { padding-top: 10mm; }
 @media print { .tp-day, .tl-table tr { break-inside: avoid; } .tl-table thead { display: table-header-group; } }
 .ev-ov-scroll { overflow-x: hidden; }
+
+/* 시험 종류 관리 */
+.sidebar .wide-btn { flex: 1 1 100%; }
+.sidebar .wide-btn.active { border-color: var(--side-text); font-weight: 700; }
+.kd-list { display: flex; flex-direction: column; gap: .6rem; margin-bottom: 1rem; }
+.kd-row { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; padding: .7rem 1rem; }
+.kd-row.mine { border-color: var(--accent); }
+.kd-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); flex: none; }
+.kd-dot.k1 { background: var(--progress); } .kd-dot.k2 { background: #2f8f86; } .kd-dot.k3 { background: #8a6d3b; }
+.kd-name { min-width: 6rem; }
+.kd-tag { font-size: .8rem; }
+.kd-colors { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.kd-sw { position: relative; display: inline-flex; cursor: pointer; }
+.kd-sw input { position: absolute; opacity: 0; inset: 0; }
+.kd-sw span { width: 30px; height: 30px; border-radius: 50%; display: block; }
+.kd-sw input:checked + span { outline: 3px solid var(--text); outline-offset: 2px; }
+.kd-sw input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }

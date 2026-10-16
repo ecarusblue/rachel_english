@@ -134,12 +134,38 @@ create table if not exists public.tests (
   owner       uuid not null default auth.uid() references auth.users(id) on delete cascade,
   student_id  uuid not null references public.students(id) on delete cascade,
   test_date   date not null default current_date,
-  kind        text not null default '단어시험' check (kind in ('단어시험','단원평가','모의고사','기타')),
+  kind        text not null default '단어시험',
   title       text,
   score       numeric not null check (score >= 0),
   max_score   numeric not null default 100 check (max_score > 0),
   created_at  timestamptz not null default now()
 );
+
+-- 시험 종류 (기본 4종은 앱에 내장, 여기에는 선생님이 만든 종류만 저장)
+create table if not exists public.test_kinds (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  name        text not null check (char_length(name) between 1 and 30),
+  default_max numeric not null default 100 check (default_max > 0),
+  color       text,
+  memo        text,
+  created_at  timestamptz not null default now(),
+  unique (owner, name)
+);
+alter table public.test_kinds enable row level security;
+drop policy if exists "owner_all" on public.test_kinds;
+create policy "owner_all" on public.test_kinds for all to authenticated
+  using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
+revoke all on public.test_kinds from anon;
+-- 예전 DB: tests.kind 의 고정 목록 제약 제거
+do $$
+declare c text;
+begin
+  for c in select conname from pg_constraint
+           where conrelid = 'public.tests'::regclass and contype = 'c' and pg_get_constraintdef(oid) like '%kind%' loop
+    execute format('alter table public.tests drop constraint %I', c);
+  end loop;
+end $$;
 
 -- AI 추천 이력: 다음 수업 진도 추천과 그 결과(채택 여부)를 기록
 create table if not exists public.recommendations (
