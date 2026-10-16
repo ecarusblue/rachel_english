@@ -1474,16 +1474,48 @@ function filterHtml(f, p, withPrint) {
   const opts = [["all", "전체 기간"], ["thisWeek", "이번 주"], ["lastWeek", "지난 주"], ["nextWeek", "다음 주"], ["thisMonth", "이번 달"], ["lastMonth", "지난 달"], ["custom", "직접 선택"]];
   return `<div class="card report-controls">
       <label>기간<select id="${p}-range">${opts.map(([v, t]) => `<option value="${v}" ${f.range === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
-      <label>시작일<input type="date" id="${p}-start" value="${esc(rg ? rg.start : "")}" ${f.range === "custom" ? "" : "disabled"}></label>
-      <label>종료일<input type="date" id="${p}-end" value="${esc(rg ? rg.end : "")}" ${f.range === "custom" ? "" : "disabled"}></label>
+      <label>시작일<input type="date" id="${p}-start" value="${esc(rg ? rg.start : "")}" aria-label="시작일 직접 입력"></label>
+      <label>종료일<input type="date" id="${p}-end" value="${esc(rg ? rg.end : "")}" aria-label="종료일 직접 입력"></label>
       ${withPrint ? `<div style="align-self:end"><button class="btn" id="${p}-print" type="button">${typeof withPrint === "string" ? esc(withPrint) : "인쇄 / PDF 저장"}</button></div>` : ""}
     </div>`;
 }
 function bindFilter(f, p, rerender) {
-  $("#" + p + "-range").onchange = (e) => { f.range = e.target.value; rerender(); };
-  const onDate = () => { f.start = $("#" + p + "-start").value; f.end = $("#" + p + "-end").value; rerender(); };
-  $("#" + p + "-start").onchange = onDate;
-  $("#" + p + "-end").onchange = onDate;
+  // 직접 선택으로 바꿀 때는 지금 보던 기간을 시작·종료일 초기값으로 유지
+  $("#" + p + "-range").onchange = (e) => {
+    if (e.target.value === "custom") {
+      const cur = filterRange(f) || { start: todayStr(), end: todayStr() };
+      f.start = cur.start; f.end = cur.end;
+    }
+    f.range = e.target.value;
+    rerender();
+  };
+  // 날짜를 직접 입력하면 자동으로 "직접 선택"이 된다. 연도를 타이핑하는 동안은 기다렸다가 적용.
+  let timer = null;
+  const apply = (nextId) => {
+    clearTimeout(timer);
+    timer = null;
+    const cur = filterRange(f) || { start: todayStr(), end: todayStr() };
+    const s = $("#" + p + "-start"), e = $("#" + p + "-end");
+    if (!s || !e) return;
+    const ae = document.activeElement;
+    const keep = typeof nextId === "string" ? nextId : (ae === s || ae === e ? ae.id : "");
+    f.start = s.value || cur.start;
+    f.end = e.value || cur.end;
+    f.range = "custom";
+    rerender();
+    if (keep) { const el = $("#" + keep); if (el) el.focus(); }
+  };
+  const later = () => { clearTimeout(timer); timer = setTimeout(() => apply(), 700); };
+  ["start", "end"].forEach((k) => {
+    const el = $("#" + p + "-" + k);
+    el.onchange = later;
+    el.onblur = (ev) => {
+      if (!timer) return;
+      const rt = ev.relatedTarget;
+      apply(rt && (rt.id === p + "-start" || rt.id === p + "-end") ? rt.id : "");
+    };
+    el.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); apply(el.id); } };
+  });
   const pr = $("#" + p + "-print");
   if (pr) pr.onclick = () => window.print();
 }
