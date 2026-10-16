@@ -38,6 +38,7 @@ rmSync("dist", { recursive: true, force: true });
 mkdirSync("dist");
 for (const f of ["index.html", "app.js", "style.css", "_headers"]) copyFileSync(f, `dist/${f}`);
 cpSync("fonts", "dist/fonts", { recursive: true });
+cpSync("vendor", "dist/vendor", { recursive: true });
 writeFileSync(
   "dist/config.js",
   `window.APP_CONFIG = ${JSON.stringify({ SUPABASE_URL: url, SUPABASE_KEY: key }, null, 2)};\n`

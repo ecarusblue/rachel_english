@@ -568,3 +568,8 @@ td.name-cell, td:first-child { white-space: nowrap; }
   .sch-wide { display: none; }
   .sch-narrow { display: block; }
 }
+
+/* PDF 만들 때 화면 밖에서 A4 크기로 그리는 임시 영역 */
+.pdf-host { position: fixed; left: -10000px; top: 0; width: 210mm; background: #fff; z-index: -1; pointer-events: none; }
+.pdf-host .rp-page { min-height: 296mm; }
+@media print { .pdf-host { display: none !important; } }

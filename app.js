@@ -1356,6 +1356,96 @@ function evalPrintHtml(s, d, sm, vals) {
   </div>`;
 }
 
+/* PDF 만들기·공유 (폰의 공유 창으로 보내기). 라이브러리는 처음 쓸 때만 불러옵니다. */
+let pdfLibsPromise = null;
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error("PDF 라이브러리를 불러오지 못했습니다"));
+    document.head.appendChild(s);
+  });
+}
+function loadPdfLibs() {
+  if (!pdfLibsPromise) {
+    pdfLibsPromise = Promise.all([loadScriptOnce("vendor/html2canvas.min.js"), loadScriptOnce("vendor/jspdf.umd.min.js")]).catch((e) => { pdfLibsPromise = null; throw e; });
+  }
+  return pdfLibsPromise;
+}
+// 평가서(.rp-page)를 A4 세로 PDF Blob 으로 만든다. 여러 장이면 블록 경계(.rp-body 의 자식 위)에서 나눈다.
+async function buildPdfBlob(html) {
+  await loadPdfLibs();
+  const host = document.createElement("div");
+  host.className = "pdf-host";
+  host.innerHTML = html;
+  document.body.appendChild(host);
+  try {
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    await new Promise((r) => setTimeout(r, 200));
+    const page = host.querySelector(".rp-page");
+    const W = page.offsetWidth, H = page.offsetHeight;
+    const scale = Math.min(2, 3000 / W);
+    const canvas = await window.html2canvas(page, { scale, backgroundColor: "#ffffff", logging: false, windowWidth: W });
+    const mm = W / 210;               // 화면 px per mm
+    const pageH = 297 * mm, mt = 10 * mm, mb = 8 * mm;
+    const body = page.querySelector(".rp-body");
+    const baseTop = page.getBoundingClientRect().top;
+    const tops = body ? [...body.children].map((el) => el.getBoundingClientRect().top - baseTop) : [];
+    const foot = page.querySelector(".rp-foot");
+    if (foot) tops.push(foot.getBoundingClientRect().top - baseTop);
+    const slices = [];
+    let pos = 0;
+    while (pos < H - 1) {
+      const avail = (slices.length ? pageH - mt : pageH) - mb;
+      if (H - pos <= avail + mb) { slices.push([pos, H]); break; }
+      const limit = pos + avail;
+      const cands = tops.filter((t) => t > pos + 20 * mm && t <= limit);
+      const cut = cands.length ? Math.max(...cands) : limit;
+      slices.push([pos, cut]);
+      pos = cut;
+    }
+    const pdf = new window.jspdf.jsPDF({ unit: "mm", format: "a4", orientation: "portrait", compress: true });
+    slices.forEach(([y0, y1], i) => {
+      if (i) pdf.addPage();
+      const sc = canvas.width / W;
+      const sub = document.createElement("canvas");
+      sub.width = canvas.width;
+      sub.height = Math.max(1, Math.round((y1 - y0) * sc));
+      const ctx = sub.getContext("2d");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, sub.width, sub.height);
+      ctx.drawImage(canvas, 0, Math.round(y0 * sc), canvas.width, sub.height, 0, 0, canvas.width, sub.height);
+      pdf.addImage(sub.toDataURL("image/jpeg", 0.92), "JPEG", 0, i ? 10 : 0, 210, (y1 - y0) / mm);
+    });
+    return pdf.output("blob");
+  } finally {
+    host.remove();
+  }
+}
+function canSharePdf() {
+  return typeof navigator !== "undefined" && typeof navigator.share === "function" && typeof navigator.canShare === "function"
+    && (window.matchMedia("(pointer: coarse)").matches || window.innerWidth <= 800);
+}
+async function sharePdfBlob(blob, filename, title) {
+  const file = new File([blob], filename, { type: "application/pdf" });
+  if (navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title });
+    } catch (e) {
+      if (e && e.name === "AbortError") return "cancel";   // 사용자가 공유 창을 닫음
+      throw e;
+    }
+    return "shared";
+  }
+  const url = URL.createObjectURL(blob);   // 파일 공유를 못 하는 브라우저: 내려받기
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  return "downloaded";
+}
+
 /* 월말평가서 인쇄 미리보기 (화면에서 A4 모양 확인) */
 function openEvalPreview(html, onPrint, returnTo, label = "평가서 미리보기", opts = {}) {
   const old = document.getElementById("ev-preview-overlay");
@@ -1368,6 +1458,7 @@ function openEvalPreview(html, onPrint, returnTo, label = "평가서 미리보�
   ov.setAttribute("aria-label", label);
   ov.innerHTML = `<div class="ev-ov-bar"><strong>${esc(label)}</strong><span class="muted" id="ev-ov-note">A4 기준</span><span class="spacer"></span>
       ${opts.orient ? `<div class="seg" role="group" aria-label="용지 방향">${opts.orient.options.map(([v, t]) => `<button type="button" class="seg-b ${v === opts.orient.value ? "on" : ""}" data-orient="${v}" aria-pressed="${v === opts.orient.value}">${t}</button>`).join("")}</div>` : ""}
+      ${opts.share && canSharePdf() ? `<button class="btn" type="button" id="ev-ov-share" disabled>공유 준비 중…</button>` : ""}
       <button class="btn primary" type="button" id="ev-ov-print">인쇄 / PDF 저장</button>
       <button class="btn" type="button" id="ev-ov-close">닫기</button></div>
     <div class="ev-ov-scroll"><div class="ev-sheet ${opts.land ? "land" : ""}" id="ev-sheet">${html}</div></div>`;
@@ -1402,6 +1493,34 @@ function openEvalPreview(html, onPrint, returnTo, label = "평가서 미리보�
   });
   ov.querySelector("#ev-ov-close").onclick = close;
   ov.querySelector("#ev-ov-print").onclick = onPrint;
+  const shBtn = ov.querySelector("#ev-ov-share");
+  if (shBtn) {
+    // 공유 창은 버튼을 누른 직후에만 열 수 있어서(특히 Safari), PDF를 미리 만들어 두고 준비가 끝나면 버튼을 켠다.
+    let blob = null, closed = false;
+    const origClose = ov.querySelector("#ev-ov-close");
+    origClose.addEventListener("click", () => { closed = true; });
+    setTimeout(() => {
+      buildPdfBlob(html).then((b) => {
+        if (closed) return;
+        blob = b; shBtn.disabled = false; shBtn.textContent = "공유";
+      }).catch((e) => {
+        if (closed) return;
+        shBtn.textContent = "공유 불가"; shBtn.title = String((e && e.message) || e);
+      });
+    }, 300);
+    shBtn.onclick = async () => {
+      if (!blob) return;
+      shBtn.disabled = true;
+      try {
+        const r = await sharePdfBlob(blob, opts.share.filename, opts.share.title || label);
+        if (r === "downloaded") toast("PDF를 내려받았습니다");
+      } catch (e) {
+        toast("공유하지 못했습니다: " + ((e && e.message) || e));
+      } finally {
+        shBtn.disabled = false;
+      }
+    };
+  }
   ov.querySelector("#ev-ov-close").focus();
 }
 
@@ -1441,7 +1560,9 @@ function renderEvalDetail(s, d, head, bindHead) {
     $("#ev-print-area").innerHTML = evalPrintHtml(s, d, sm, evalValues());
     window.print();
   };
-  $("#ev-preview").onclick = () => openEvalPreview(evalPrintHtml(s, d, sm, evalValues()), doPrint, $("#ev-preview"));
+  $("#ev-preview").onclick = () => openEvalPreview(evalPrintHtml(s, d, sm, evalValues()), doPrint, $("#ev-preview"), "평가서 미리보기", {
+    share: { filename: `월말평가서_${s.name}_${ev.year}-${String(ev.month).padStart(2, "0")}.pdf`, title: `${s.name} ${ev.month}월 월말평가서` },
+  });
   $("#ev-form").onsubmit = async (e) => {
     e.preventDefault();
     const btn = $("#ev-save");
