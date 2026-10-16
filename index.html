@@ -11,20 +11,25 @@
 
   <!-- 로그인 화면 -->
   <section id="login-view" class="login" hidden>
-    <form id="login-form" class="card login-card" autocomplete="on">
-      <h1>Rachel English</h1>
-      <p class="muted">공부방 진도표 · 선생님 계정으로 로그인하세요.</p>
-      <label>이메일
-        <input type="email" name="email" autocomplete="username" required>
-      </label>
-      <label>비밀번호
-        <input type="password" name="password" autocomplete="current-password" required>
-      </label>
-      <label class="check"><input type="checkbox" name="remember" id="remember-email"> 이메일 저장하기</label>
-      <p id="login-err" class="error" role="alert"></p>
-      <button class="btn primary" type="submit">로그인</button>
-      <button class="btn ghost" type="button" id="btn-forgot">비밀번호를 잊으셨나요?</button>
-    </form>
+    <div class="login-wrap">
+      <div class="login-brand">
+        <h1>Rachel English</h1>
+        <p>공부방 진도표</p>
+      </div>
+      <form id="login-form" class="card login-card" autocomplete="on">
+        <h2>선생님 로그인</h2>
+        <label>이메일
+          <input type="email" name="email" autocomplete="username" required>
+        </label>
+        <label>비밀번호
+          <input type="password" name="password" autocomplete="current-password" required>
+        </label>
+        <label class="check"><input type="checkbox" name="remember" id="remember-email"> 이메일 저장하기</label>
+        <p id="login-err" class="error" role="alert"></p>
+        <button class="btn primary" type="submit">로그인</button>
+        <button class="btn ghost" type="button" id="btn-forgot">비밀번호를 잊으셨나요?</button>
+      </form>
+    </div>
   </section>
 
   <!-- 메인 앱 -->

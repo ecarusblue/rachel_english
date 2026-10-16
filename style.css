@@ -41,6 +41,11 @@
   }
 }
 
+@media (prefers-color-scheme: dark) {
+  .btn.primary, .pill input:checked + span, .pill.none input:checked + span { color: #0b1220; }
+  .pill.none input:checked + span { color: var(--muted); }
+}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body {
@@ -100,9 +105,15 @@ label input, label select, label textarea { margin-top: .25em; color: var(--text
 }
 
 /* 로그인 */
-.login { min-height: 100%; display: grid; place-items: center; padding: 1rem; }
-.login-card { width: min(380px, 100%); }
+.login { min-height: 100%; display: grid; place-items: center; padding: 1.5rem 1rem; background: var(--side-bg); }
+.login-wrap { width: min(400px, 100%); }
+.login-brand { text-align: center; margin-bottom: 1.4rem; color: var(--side-text); }
+.login-brand h1 { margin: 0; font-size: 2rem; letter-spacing: -.01em; }
+.login-brand p { margin: .25rem 0 0; color: var(--side-muted); font-size: .95rem; }
+.login-card { padding: 1.4rem 1.5rem 1.5rem; box-shadow: 0 10px 40px rgba(0, 0, 0, .28); border-color: transparent; }
+.login-card h2 { margin: 0 0 1rem; font-size: 1.1rem; }
 .login-card .btn { width: 100%; margin-top: .4em; }
+.login-card .error { min-height: 0; margin: .3em 0 .2em; }
 .login-msg { color: var(--good); min-height: 1.2em; margin: .4em 0; font-size: .9rem; }
 
 /* 레이아웃 */
