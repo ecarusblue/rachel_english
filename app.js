@@ -1027,7 +1027,7 @@ function evalPrintHtml(s, d, sm, vals) {
 }
 
 /* 월말평가서 인쇄 미리보기 (화면에서 A4 모양 확인) */
-function openEvalPreview(html, onPrint, returnTo) {
+function openEvalPreview(html, onPrint, returnTo, label = "평가서 미리보기") {
   const old = document.getElementById("ev-preview-overlay");
   if (old) old.remove();
   const ov = document.createElement("div");
@@ -1035,8 +1035,8 @@ function openEvalPreview(html, onPrint, returnTo) {
   ov.className = "ev-ov";
   ov.setAttribute("role", "dialog");
   ov.setAttribute("aria-modal", "true");
-  ov.setAttribute("aria-label", "월말평가서 미리보기");
-  ov.innerHTML = `<div class="ev-ov-bar"><strong>평가서 미리보기</strong><span class="muted" id="ev-ov-note">A4 기준</span><span class="spacer"></span>
+  ov.setAttribute("aria-label", label);
+  ov.innerHTML = `<div class="ev-ov-bar"><strong>${esc(label)}</strong><span class="muted" id="ev-ov-note">A4 기준</span><span class="spacer"></span>
       <button class="btn primary" type="button" id="ev-ov-print">인쇄 / PDF 저장</button>
       <button class="btn" type="button" id="ev-ov-close">닫기</button></div>
     <div class="ev-ov-scroll"><div class="ev-sheet" id="ev-sheet">${html}</div></div>`;
@@ -1142,7 +1142,7 @@ function filterHtml(f, p, withPrint) {
       <label>기간<select id="${p}-range">${opts.map(([v, t]) => `<option value="${v}" ${f.range === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
       <label>시작일<input type="date" id="${p}-start" value="${esc(rg ? rg.start : "")}" ${f.range === "custom" ? "" : "disabled"}></label>
       <label>종료일<input type="date" id="${p}-end" value="${esc(rg ? rg.end : "")}" ${f.range === "custom" ? "" : "disabled"}></label>
-      ${withPrint ? `<div style="align-self:end"><button class="btn" id="${p}-print" type="button">인쇄 / PDF 저장</button></div>` : ""}
+      ${withPrint ? `<div style="align-self:end"><button class="btn" id="${p}-print" type="button">${typeof withPrint === "string" ? esc(withPrint) : "인쇄 / PDF 저장"}</button></div>` : ""}
     </div>`;
 }
 function bindFilter(f, p, rerender) {
@@ -1167,6 +1167,44 @@ function recPrintHead(title) {
 }
 function bindRecFilter(rerender) { bindFilter(state.recFilter, "rf", rerender); }
 
+
+/* 학생용 수업 안내서 (A4) */
+function planTitle(f) {
+  const t = { thisWeek: "이번 주", lastWeek: "지난 주", nextWeek: "다음 주", thisMonth: "이번 달", lastMonth: "지난 달" }[f.range];
+  return t ? `${t} 수업 안내` : "수업 안내";
+}
+const DOW_FULL = "일요일 월요일 화요일 수요일 목요일 금요일 토요일".split(" ");
+function planPrintHtml(s, recs) {
+  const rg = filterRange(state.recFilter);
+  const title = planTitle(state.recFilter);
+  const list = recs.filter((r) => r.status !== "거절").sort((a, b) => recDate(a).localeCompare(recDate(b)));
+  const card = (r) => {
+    const b = state.textbooks.find((x) => x.id === r.textbook_id);
+    const pr = b ? state.progress.find((x) => x.student_id === s.id && x.textbook_id === b.id) : null;
+    const d = r.target_date ? parseD(r.target_date) : null;
+    const pct = pr && b && b.total_units ? Math.max(0, Math.min(100, Math.round((pr.current_unit / b.total_units) * 100))) : null;
+    const range = b ? rangeText(b, r).trim() : `${r.from_unit}–${r.to_unit}단원`;
+    return `<div class="pl-card">
+      <div class="pl-date">${d ? `<div class="pl-d">${d.getDate()}</div><div class="pl-w">${DOW_FULL[d.getDay()]}</div>` : `<div class="pl-d pl-tbd">예정</div><div class="pl-w">날짜 미정</div>`}</div>
+      <div class="pl-main">
+        <div class="pl-bk">${esc(b ? b.title : "")}</div>
+        <div class="pl-rg">${esc(range)}</div>
+        ${pct !== null ? `<div class="rp-bar pl-bar"><span style="width:${pct}%"></span></div><div class="pl-pg">지금까지 ${esc(b.unit_label)} ${pr.current_unit} / ${b.total_units} · ${pct}%</div>` : ""}
+        ${r.rationale ? `<div class="pl-pt">${esc(r.rationale)}</div>` : ""}
+      </div></div>`;
+  };
+  return `<div class="rp-page pl-page">
+    <div class="pl-hd"><div class="pl-br">${esc(ACADEMY_NAME).toUpperCase()}</div><h1>${esc(title)}</h1>
+      <div class="pl-who"><span><b>${esc(s.name)}</b>${s.grade ? ` (${esc(s.grade)})` : ""}</span>${rg ? `<span>${shortDate(rg.start)} – ${shortDate(rg.end)}</span>` : ""}</div></div>
+    <div class="pl-bd">
+      <p class="pl-hello">${esc(title)}입니다. 수업 전에 한 번 훑어보고 오면 더 쉬워져요!</p>
+      <h2 class="pl-h2">${esc(title.replace(/ 안내$/, ""))}</h2>
+      ${list.length ? list.map(card).join("") : `<p class="pl-empty">이 기간에 예정된 수업이 없습니다.</p>`}
+    </div>
+    <div class="rp-foot"><span>${esc(ACADEMY_NAME)}</span><span>궁금한 점은 선생님께 언제든 물어보세요</span></div>
+  </div>`;
+}
+
 /* ---------- 수업 추천 (Claude 예약 작업이 저장한 제안을 확인) ---------- */
 function renderRecsTab(s) {
   const allForStudent = state.detail.recs || [];
@@ -1189,12 +1227,18 @@ function renderRecsTab(s) {
       <div class="muted" style="font-size:.8rem;margin-top:.3rem">${pr && b ? `현재 진도 ${esc(b.unit_label)} ${pr.current_unit}/${b.total_units} · ` : ""}${fmtDate((r.created_at || "").slice(0, 10))} 생성${r.model ? " · " + esc(r.model) : ""}${r.decided_at ? " · " + fmtDate(r.decided_at.slice(0, 10)) + " 처리" : ""}</div>
     </div>`;
   };
-  $("#tab-body").innerHTML = recFilterHtml() + recPrintHead(`${s.name} 수업 추천`) + (recs.length
+  $("#tab-body").innerHTML = `<div class="eval-edit">` + filterHtml(state.recFilter, "rf", "수업 안내 미리보기") + (recs.length
     ? `${pending.length ? `<h3>확인할 추천 (${pending.length})</h3>${pending.map(card).join("")}` : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
        ${done.length ? `<h3 style="margin-top:1.2rem">지난 추천</h3>${done.map(card).join("")}` : ""}
        <p class="muted" style="font-size:.85rem">"수업 기록에 반영"을 누르면 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록됩니다. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`
-    : `<div class="card empty">${allForStudent.length ? "이 기간에는 추천이 없습니다. 위에서 기간을 바꿔 보세요." : "아직 추천이 없습니다. Claude 예약 작업이 실행되면 여기에 표시됩니다."}</div>`);
+    : `<div class="card empty">${allForStudent.length ? "이 기간에는 추천이 없습니다. 위에서 기간을 바꿔 보세요." : "아직 추천이 없습니다. Claude 예약 작업이 실행되면 여기에 표시됩니다."}</div>`) + `</div><div class="eval-print" id="plan-print-area"></div>`;
   bindRecFilter(() => renderRecsTab(s));
+  const doPrint = () => {
+    $("#plan-print-area").innerHTML = planPrintHtml(s, recs);
+    document.body.classList.add("print-plan"); // 학생 머리글·메모는 인쇄에서 제외
+    try { window.print(); } finally { document.body.classList.remove("print-plan"); }
+  };
+  $("#rf-print").onclick = () => openEvalPreview(planPrintHtml(s, recs), doPrint, $("#rf-print"), "수업 안내 미리보기");
 
   $("#tab-body").querySelectorAll("[data-rec-use]").forEach((b) => {
     b.onclick = () => lessonForm(s, null, recs.find((r) => r.id === b.dataset.recUse));

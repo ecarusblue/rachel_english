@@ -283,6 +283,25 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .eval-text { display: block; }
 .eval-text h3 { color: var(--text); margin-bottom: .4rem; }
 .eval-text textarea { margin-top: 0; min-height: 7rem; }
+.pl-hd { background: #1f2c47; color: #fff; padding: 14mm 16mm 11mm; }
+.pl-br { font-size: 10pt; letter-spacing: .08em; opacity: .8; font-weight: 600; }
+.pl-hd h1 { margin: 3mm 0 0; font-size: 24pt; font-weight: 800; letter-spacing: -.02em; }
+.pl-who { margin-top: 5mm; display: flex; gap: 6mm; font-size: 11pt; }
+.pl-who b { font-weight: 700; }
+.pl-bd { padding: 10mm 16mm; flex: 1; }
+.pl-hello { font-size: 11.5pt; line-height: 1.65; color: #55657a; margin: 0 0 8mm; }
+.pl-h2 { font-size: 12pt; margin: 0 0 3.5mm; display: flex; align-items: center; gap: 2.5mm; }
+.pl-h2::before { content: ""; width: 3mm; height: 3mm; border-radius: 1mm; background: #2c5fd1; }
+.pl-card { border: 1px solid #d3dbe7; border-radius: 3mm; padding: 5mm 6mm; margin-bottom: 4.5mm; display: grid; grid-template-columns: 23mm 1fr; gap: 5mm; break-inside: avoid; }
+.pl-date { background: #dfe8fb; border-radius: 2.5mm; text-align: center; padding: 3mm 0; color: #2c5fd1; align-self: stretch; }
+.pl-d { font-size: 20pt; font-weight: 800; line-height: 1.1; } .pl-tbd { font-size: 14pt; padding: 1mm 0; }
+.pl-w { font-size: 9.5pt; font-weight: 600; margin-top: 1.5mm; }
+.pl-bk { font-size: 10pt; color: #55657a; font-weight: 600; }
+.pl-rg { font-size: 16pt; font-weight: 800; margin: 1mm 0 3mm; letter-spacing: -.01em; }
+.pl-bar { width: 70%; margin: 0; }
+.pl-pg { font-size: 9pt; color: #55657a; margin-top: 1.5mm; }
+.pl-pt { font-size: 10.5pt; line-height: 1.6; margin-top: 3.5mm; padding: 2.5mm 3.5mm; border-left: 1mm solid #2c5fd1; background: #f5f8fd; border-radius: 0 2mm 2mm 0; white-space: pre-wrap; }
+.pl-empty { color: #55657a; font-size: 11pt; }
 .eval-actions { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
 .eval-actions .check { margin: 0; gap: .6rem; }
 .eval-actions select { width: auto; margin: 0; }
@@ -355,6 +374,7 @@ td.name-cell, td:first-child { white-space: nowrap; }
   .report-controls, .draft-card { display: none !important; }
   .ev-ov { display: none !important; }
   .eval-edit { display: none !important; }
+  .print-plan #main > :not(#tab-body) { display: none !important; }
   .eval-print { display: block; page: evalreport; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .print-head { display: block; margin-bottom: 1rem; }
   .print-head h2 { margin: 0 0 .2rem; }
