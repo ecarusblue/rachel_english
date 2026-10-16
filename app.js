@@ -1241,7 +1241,11 @@ function renderRecsTab(s) {
   $("#rf-print").onclick = () => openEvalPreview(planPrintHtml(s, recs), doPrint, $("#rf-print"), "수업 안내 미리보기");
 
   $("#tab-body").querySelectorAll("[data-rec-use]").forEach((b) => {
-    b.onclick = () => lessonForm(s, null, recs.find((r) => r.id === b.dataset.recUse));
+    b.onclick = async () => {
+      const rec = recs.find((r) => r.id === b.dataset.recUse);
+      if (await recDateHasLesson(s, rec)) return;
+      lessonForm(s, null, rec);
+    };
   });
   $("#tab-body").querySelectorAll("[data-rec-no]").forEach((b) => {
     b.onclick = async () => {
@@ -1296,6 +1300,7 @@ function renderAllRecs() {
       await selectStudent(s.id);
       state.tab = "recs";
       render();
+      if (await recDateHasLesson(s, rec)) return;
       lessonForm(s, null, state.detail.recs.find((r) => r.id === rec.id) || rec);
     };
   });
@@ -1455,6 +1460,20 @@ function assignBook(s) {
       toast("교재를 배정했습니다");
     },
   });
+}
+
+/* 추천 → 수업 기록 반영: 같은 날짜에 이미 수업 기록이 있으면 막음 */
+async function recDateHasLesson(s, rec) {
+  const date = rec.target_date || todayStr();
+  let exists = (state.detail.lessons || []).some((l) => l.student_id === s.id && l.lesson_date === date);
+  if (!exists) {
+    try {
+      const rows = await run(db.from("lessons").select("id").eq("student_id", s.id).eq("lesson_date", date).limit(1));
+      exists = !!(rows && rows.length);
+    } catch { /* 조회 실패 시 화면의 목록만으로 판단 */ }
+  }
+  if (exists) alert("등록된 수업기록 내용이 있습니다.");
+  return exists;
 }
 
 function lessonForm(s, lesson, rec = null) {
