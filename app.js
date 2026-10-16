@@ -2367,13 +2367,22 @@ function lessonForm(s, lesson, rec = null) {
   const assignedIds = new Set(assigned.map((x) => x.id));
   const extraOpts = [...keepIds].filter((id) => !assignedIds.has(id) && bookOf(id)).map((id) => bookOf(id));
   let focusIdx = null;
-  const unitCtl = (b, i, key, label) => {
-    const lv = bookLeaves(bookOf(b.textbook_id));
+  const leafNo = (book, top, child) => bookLeaves(book).findIndex((l) => l.top === top && l.child === child) + 1;
+  const topRange = (book, top) => { const lv = bookLeaves(book); const ix = lv.map((l, n) => (l.top === top ? n + 1 : 0)).filter(Boolean); return [ix[0], ix[ix.length - 1]]; };
+  const unitField = (b, i, key, label) => {
+    const book = bookOf(b.textbook_id);
+    const lv = bookLeaves(book);
     const v = b[key];
-    if (lv) {
-      return `<select data-i="${i}" data-k="${key}" aria-label="${label}"><option value="">-</option>${lv.map((l, n) => `<option value="${n + 1}" ${Number(v) === n + 1 ? "selected" : ""}>${esc(l.label)}</option>`).join("")}</select>`;
-    }
-    return `<input type="number" min="0" inputmode="numeric" data-i="${i}" data-k="${key}" aria-label="${label}" value="${v == null ? "" : esc(v)}">`;
+    if (!lv) return `<label>${label}<input type="number" min="0" inputmode="numeric" data-i="${i}" data-k="${key}" aria-label="${label}" value="${v == null ? "" : esc(v)}"></label>`;
+    const items = book.structure.items;
+    const leaf = v ? lv[v - 1] : null;
+    const top = leaf ? leaf.top : null;
+    const kids = top != null ? items[top].children || [] : [];
+    const l1 = `<select data-i="${i}" data-k="${key}" data-lv="1" aria-label="${label} 1레벨"><option value="">-</option>${items.map((it, n) => `<option value="${n}" ${top === n ? "selected" : ""}>${esc(it.name)}</option>`).join("")}</select>`;
+    const l2 = kids.length
+      ? `<select data-i="${i}" data-k="${key}" data-lv="2" aria-label="${label} 2레벨"><option value="all" ${b[key + "All"] ? "selected" : ""}>${esc(items[top].name)} 전체</option>${kids.map((k, n) => `<option value="${n}" ${!b[key + "All"] && leaf && leaf.child === n ? "selected" : ""}>${esc(k)}</option>`).join("")}</select>`
+      : `<select disabled aria-label="${label} 2레벨"><option>${top == null ? "-" : "하위 없음"}</option></select>`;
+    return `<div class="ls-lv"><span>${label}</span><div class="ls-lv2">${l1}${l2}</div></div>`;
   };
   const paint = () => {
     const usedIds = new Set(blocks.map((b) => b.textbook_id).filter(Boolean));
@@ -2382,12 +2391,13 @@ function lessonForm(s, lesson, rec = null) {
         .filter(([id]) => id === "" || id === b.textbook_id || !usedIds.has(id));
       const book = bookOf(b.textbook_id);
       const pr = book ? progOf(book.id) : null;
-      const hint = book ? `<div class="ls-hint">${pr ? `현재 진도 ${esc(curLabel(book, pr.current_unit))}` : "배정이 해제된 교재예요"}</div>` : "";
+      const hint = book ? `<div class="ls-hint">${pr ? `현재 진도 ${esc(curLabel(book, pr.current_unit))}` : "배정이 해제된 교재예요"}${b.from_unit != null && b.to_unit != null && b.from_unit <= b.to_unit && b.from_unit >= 1 ? ` · 기록 <b>${esc(unitName(book, b.from_unit))} – ${esc(unitName(book, b.to_unit))} (${b.to_unit - b.from_unit + 1}${bookLeaves(book) ? "단원" : ""})</b>` : ""}</div>` : "";
       return `<div class="ls-block">
         <div class="ls-head"><span class="tb-n">${i + 1}</span>
           <select data-i="${i}" data-k="textbook_id" aria-label="교재 ${i + 1}" class="ls-book">${opts.map(([id, t]) => `<option value="${esc(id)}" ${id === (b.textbook_id || "") ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>
+          ${book ? `<span class="ls-kind">${bookLeaves(book) && bookLeaves(book).some((l) => l.child >= 0) ? "1레벨 → 2레벨" : "1레벨만"}</span>` : ""}
           ${blocks.length > 1 ? `<button type="button" class="tb-x" data-ls="del" data-i="${i}" aria-label="이 교재 빼기">✕</button>` : ""}</div>
-        ${book ? `<div class="ls-units"><label>시작 단원${unitCtl(b, i, "from_unit", "시작 단원")}</label><label>종료 단원${unitCtl(b, i, "to_unit", "종료 단원")}</label></div>${hint}` : ""}
+        ${book ? `<div class="ls-units ${bookLeaves(book) ? "tree" : ""}">${unitField(b, i, "from_unit", "시작 단원")}${unitField(b, i, "to_unit", "종료 단원")}</div>${hint}` : ""}
         <label>학습 내용 (예: 현재완료, 본문 읽기)<input type="text" maxlength="200" data-i="${i}" data-k="topic" value="${esc(b.topic || "")}"></label></div>`;
     }).join("");
     const chips = assigned.filter((x) => !usedIds.has(x.id)).map((x) => `<button type="button" class="tb-sub" data-ls="addbook" data-id="${esc(x.id)}">+ ${esc(x.title)}</button>`).join("");
@@ -2408,6 +2418,25 @@ function lessonForm(s, lesson, rec = null) {
     if (el.dataset.i == null || !el.dataset.k) return;
     const b = blocks[Number(el.dataset.i)];
     const k = el.dataset.k;
+    if (el.dataset.lv) {
+      const book = bookOf(b.textbook_id);
+      const items = book.structure.items;
+      const first = k === "from_unit";
+      if (el.dataset.lv === "1") {
+        if (el.value === "") { b[k] = null; b[k + "All"] = false; }
+        else {
+          const top = Number(el.value);
+          if ((items[top].children || []).length) { b[k + "All"] = true; b[k] = topRange(book, top)[first ? 0 : 1]; }
+          else { b[k + "All"] = false; b[k] = leafNo(book, top, -1); }
+        }
+      } else {
+        const top = bookLeaves(book)[b[k] - 1].top;
+        if (el.value === "all") { b[k + "All"] = true; b[k] = topRange(book, top)[first ? 0 : 1]; }
+        else { b[k + "All"] = false; b[k] = leafNo(book, top, Number(el.value)); }
+      }
+      paint();
+      return;
+    }
     if (k === "textbook_id") { b.textbook_id = el.value; b.from_unit = el.value ? autoFrom(el.value) : null; b.to_unit = null; paint(); return; }
     if (k === "topic") b.topic = el.value;
     else b[k] = el.value === "" ? null : Number(el.value);
