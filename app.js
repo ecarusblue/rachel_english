@@ -1215,13 +1215,15 @@ function renderRecsTab(s) {
     const b = state.textbooks.find((x) => x.id === r.textbook_id);
     const pr = b ? state.progress.find((x) => x.student_id === s.id && x.textbook_id === b.id) : null;
     const cls = r.status === "거절" ? "bad" : r.status === "제안" ? "warn" : "";
-    return `<div class="card" style="margin-bottom:.7rem">
+    const has = r.status === "거절" ? null : recLessonOn(s.id, r);
+    return `<div class="card ${has ? "rec-has" : ""}" style="margin-bottom:.7rem">
       <div class="toolbar" style="margin:0">
         <span class="badge ${cls}">${esc(r.status)}</span>
         <strong>${esc(b ? b.title + rangeText(b, r) : r.from_unit + "–" + r.to_unit + "단원")}</strong>
         ${r.target_date ? `<span class="muted">${fmtDate(r.target_date)} 수업 예정</span>` : ""}
+        ${has ? lessonChip(has) : ""}
         <span class="spacer"></span>
-        ${r.status === "제안" ? `<button class="btn small primary" data-rec-use="${esc(r.id)}" type="button">수업 기록에 반영</button><button class="btn small danger" data-rec-no="${esc(r.id)}" type="button">거절</button>` : ""}
+        ${r.status === "제안" ? `${has ? `<button class="btn small" type="button" disabled>기록 있음</button>` : `<button class="btn small primary" data-rec-use="${esc(r.id)}" type="button">수업 기록에 반영</button>`}<button class="btn small danger" data-rec-no="${esc(r.id)}" type="button">거절</button>` : ""}
       </div>
       ${r.rationale ? `<div class="memo-cell" style="margin-top:.4rem">${esc(r.rationale)}</div>` : ""}
       <div class="muted" style="font-size:.8rem;margin-top:.3rem">${pr && b ? `현재 진도 ${esc(b.unit_label)} ${pr.current_unit}/${b.total_units} · ` : ""}${fmtDate((r.created_at || "").slice(0, 10))} 생성${r.model ? " · " + esc(r.model) : ""}${r.decided_at ? " · " + fmtDate(r.decided_at.slice(0, 10)) + " 처리" : ""}</div>
@@ -1245,6 +1247,12 @@ function renderRecsTab(s) {
       const rec = recs.find((r) => r.id === b.dataset.recUse);
       if (await recDateHasLesson(s, rec)) return;
       lessonForm(s, null, rec);
+    };
+  });
+  $("#tab-body").querySelectorAll("[data-lesson-chip]").forEach((b) => {
+    b.onclick = () => {
+      const l = state.detail.lessons.find((x) => x.lesson_date === b.dataset.lessonChip);
+      if (l) lessonForm(s, l);
     };
   });
   $("#tab-body").querySelectorAll("[data-rec-no]").forEach((b) => {
@@ -1275,13 +1283,14 @@ function renderAllRecs() {
     const b = state.textbooks.find((x) => x.id === r.textbook_id);
     const pr = b ? state.progress.find((x) => x.student_id === r.student_id && x.textbook_id === b.id) : null;
     const cls = r.status === "거절" ? "bad" : r.status === "제안" ? "warn" : "";
-    return `<tr data-rid="${esc(r.id)}">
+    const has = r.status === "거절" ? null : recLessonOn(r.student_id, r);
+    return `<tr data-rid="${esc(r.id)}" class="${has ? "rec-has-row" : ""}">
       <td><strong>${esc(name(r.student_id))}</strong></td>
       <td>${esc(b ? b.title + rangeText(b, r) : r.from_unit + "–" + r.to_unit + "단원")}${pr && b ? `<div class="muted" style="font-size:.8rem">현재 ${esc(b.unit_label)} ${pr.current_unit}/${b.total_units}</div>` : ""}</td>
-      <td style="white-space:nowrap">${r.target_date ? fmtDate(r.target_date) : "-"}</td>
+      <td style="white-space:nowrap">${r.target_date ? fmtDate(r.target_date) : "-"}${has ? `<div style="margin-top:.3rem">${lessonChip(has)}</div>` : ""}</td>
       <td class="memo-cell">${esc(r.rationale || "")}</td>
       <td style="white-space:nowrap"><span class="badge ${cls}">${esc(r.status)}</span>
-        ${r.status === "제안" ? `<div class="book-actions" style="margin-top:.4rem"><button class="btn small primary" data-rec-use="${esc(r.id)}" type="button">반영</button><button class="btn small danger" data-rec-no="${esc(r.id)}" type="button">거절</button></div>` : ""}</td></tr>`;
+        ${r.status === "제안" ? `<div class="book-actions" style="margin-top:.4rem">${has ? `<button class="btn small" type="button" disabled>기록 있음</button>` : `<button class="btn small primary" data-rec-use="${esc(r.id)}" type="button">반영</button>`}<button class="btn small danger" data-rec-no="${esc(r.id)}" type="button">거절</button></div>` : ""}</td></tr>`;
   };
   const table = (rows) => `<div class="card table-wrap"><table>
     <thead><tr><th>학생</th><th>추천 교재 · 범위</th><th>수업 예정일</th><th>근거</th><th>상태</th></tr></thead>
@@ -1302,6 +1311,18 @@ function renderAllRecs() {
       render();
       if (await recDateHasLesson(s, rec)) return;
       lessonForm(s, null, state.detail.recs.find((r) => r.id === rec.id) || rec);
+    };
+  });
+  $("#main").querySelectorAll("[data-lesson-chip]").forEach((b) => {
+    b.onclick = async () => {
+      const rec = recs.find((r) => r.id === b.closest("tr").dataset.rid);
+      const st = rec && state.students.find((x) => x.id === rec.student_id);
+      if (!st) return;
+      await selectStudent(st.id);
+      state.tab = "recs";
+      render();
+      const l = state.detail.lessons.find((x) => x.lesson_date === b.dataset.lessonChip);
+      if (l) lessonForm(st, l);
     };
   });
   $("#main").querySelectorAll("[data-rec-no]").forEach((b) => {
@@ -1460,6 +1481,16 @@ function assignBook(s) {
       toast("교재를 배정했습니다");
     },
   });
+}
+
+/* 추천 날짜에 이미 있는 수업 기록 찾기 (화면에 불러 둔 기록 기준) */
+function recLessonOn(studentId, rec) {
+  const date = rec.target_date || todayStr();
+  const pool = [...(state.detail && state.detail.lessons ? state.detail.lessons : []), ...state.recentLessons];
+  return pool.find((l) => l.student_id === studentId && l.lesson_date === date) || null;
+}
+function lessonChip(l) {
+  return `<button type="button" class="chip-has" data-lesson-chip="${esc(l.lesson_date)}" title="그날 수업 기록 열기"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>수업 기록 있음 · ${esc(l.attendance || "")}</button>`;
 }
 
 /* 추천 → 수업 기록 반영: 같은 날짜에 이미 수업 기록이 있으면 막음 */

@@ -384,3 +384,13 @@ td.name-cell, td:first-child { white-space: nowrap; }
   .bar { border: 1px solid #999; background: #fff; }
   .bar > span { background: #555 !important; }
 }
+
+/* 추천 날짜에 수업 기록이 있을 때 */
+.rec-has { border-left: 4px solid var(--good); }
+.rec-has-row td:first-child { box-shadow: inset 4px 0 0 var(--good); }
+.chip-has { display: inline-flex; align-items: center; gap: .3em; font: inherit; font-size: .78rem; font-weight: 600; padding: .15em .65em; border-radius: 999px; background: #dff3e8; color: #17724a; border: 1px solid #b6e1c9; cursor: pointer; }
+.chip-has svg { width: .95em; height: .95em; }
+.chip-has:hover { background: #cdeedb; }
+@media (prefers-color-scheme: dark) { .chip-has { background: #1d3b2d; color: #8fe0b4; border-color: #2f6a4a; } .chip-has:hover { background: #24493a; } }
+@media print { .chip-has { display: none; } }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
