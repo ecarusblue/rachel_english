@@ -1689,6 +1689,10 @@ function planPrintHtml(s, recs) {
         <div class="pl-rg">${esc(range)}</div>
         ${pct !== null ? `<div class="rp-bar pl-bar"><span style="width:${pct}%"></span></div><div class="pl-pg">지금까지 ${bookLeaves(b) ? esc(curNum(b, pr.current_unit)) : esc(b.unit_label) + " " + pr.current_unit + " / " + b.total_units} · ${pct}%</div>` : ""}
         ${r.rationale ? `<div class="pl-pt">${esc(r.rationale)}</div>` : ""}
+        <div class="pl-wr"><div class="pl-wr-t">수업 후 기록</div>
+          <div class="pl-ln"><span>실제 진도</span><i class="w1"></i><span>~</span><i class="w2"></i></div>
+          <div class="pl-ln"><span>학습 내용</span><i></i></div>
+          <div class="pl-ln"><i></i></div></div>
       </div></div>`;
   };
   return `<div class="rp-page pl-page">
@@ -1698,6 +1702,7 @@ function planPrintHtml(s, recs) {
       <p class="pl-hello">${esc(title)}입니다. 수업 전에 한 번 훑어보고 오면 더 쉬워져요!</p>
       <h2 class="pl-h2">${esc(title.replace(/ 안내$/, ""))}</h2>
       ${list.length ? list.map(card).join("") : `<p class="pl-empty">이 기간에 예정된 수업이 없습니다.</p>`}
+      ${list.length ? `<div class="pl-ln pl-memo"><span>메모</span><i></i></div>` : ""}
     </div>
     <div class="rp-foot"><span>${esc(ACADEMY_NAME)}</span><span>궁금한 점은 선생님께 언제든 물어보세요</span></div>
   </div>`;
