@@ -430,7 +430,7 @@ td.name-cell, td:first-child { white-space: nowrap; }
 .gchg { font-size: .8rem; font-weight: 700; margin-left: .3rem; color: var(--muted); }
 .gchg.up { color: var(--good); } .gchg.dn { color: var(--bad); }
 .gm { font-size: .75rem; color: var(--muted); background: var(--bg); border-radius: 999px; padding: .1em .7em; }
-.gsvg { width: 100%; height: auto; display: block; }
+.gsvg { width: 100%; height: auto; display: block; overflow: visible; }
 .gaxis { stroke: var(--border); }
 .gtick { fill: var(--muted); font-size: 9px; }
 .gval { fill: var(--text); font-size: 9.5px; } .gval.last { font-weight: 700; }

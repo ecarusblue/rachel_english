@@ -1204,7 +1204,7 @@ function kindCard(kind, list, ci) {
   if (pts.length < 2) {
     return `<div class="card gc gone k${ci}"><div class="gk">${esc(kind)}</div><div class="gbig">${last}점 <small>· 1회</small></div><div class="muted">다음 시험부터 추이가 표시돼요</div></div>`;
   }
-  const W = 300, H = 130, L = 30, R = 12, T = 14, B = 24;
+  const W = 300, H = 136, L = 30, R = 12, T = 22, B = 24;
   const x = (i) => L + 14 + (i * (W - L - R - 24)) / (pts.length - 1);
   const y = (v) => T + ((100 - Math.max(0, Math.min(100, v))) * (H - T - B)) / 100;
   const line = vals.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
