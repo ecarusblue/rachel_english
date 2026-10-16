@@ -264,6 +264,9 @@ begin
           select round(count(*)::numeric / 4.0, 1) from public.lessons l
            where l.student_id = st.id and l.attendance <> '결석'
              and l.lesson_date >= (now() at time zone 'Asia/Seoul')::date - 28),
+        'class_weekdays', coalesce((
+          select jsonb_agg(distinct sl.weekday order by sl.weekday) from public.schedule_slots sl
+           where sl.owner = v_owner and st.id = any(sl.student_ids)), '[]'::jsonb),
         'books', coalesce((
           select jsonb_agg(jsonb_build_object(
             'textbook_id', t.id,
@@ -362,6 +365,13 @@ begin
         raise exception 'invalid unit range (1..%)', v_book.total_units;
       end if;
       v_target := coalesce((v_item->>'target_date')::date, (now() at time zone 'Asia/Seoul')::date);
+      -- 교재에 수업 요일이 지정돼 있으면 그 요일의 수업일에만 추천할 수 있음 (비어 있으면 모든 수업)
+      if exists (select 1 from public.progress p
+                  where p.student_id = v_student and p.textbook_id = v_book.id
+                    and cardinality(p.weekdays) > 0
+                    and not (extract(dow from v_target)::smallint = any(p.weekdays))) then
+        raise exception 'target_date weekday is not one of the textbook weekdays';
+      end if;
 
       -- 같은 학생·교재·수업일: 이미 처리된(채택/수정/거절) 기록이 있으면 건너뜀, '제안'이면 최신 내용으로 갱신, 없으면 추가
       if exists (select 1 from public.recommendations r

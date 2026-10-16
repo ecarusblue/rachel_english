@@ -1795,7 +1795,7 @@ function renderRecsTab(s) {
   $("#tab-body").innerHTML = `<div class="eval-edit">` + filterHtml(state.recFilter, "rf", "수업 안내 미리보기") + (recs.length
     ? `${pending.length ? `${pending.map(card).join("")}` : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
        ${done.length ? `<h3 style="margin-top:1.2rem">지난 추천</h3>${done.map(card).join("")}` : ""}
-       <p class="muted" style="font-size:.85rem">"수업 기록에 반영"을 누르면 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록됩니다. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`
+       <p class="muted" style="font-size:.85rem">"수업 기록에 반영"을 누르면 수업 기록 창이 추천 교재·단원으로 채워집니다. 같은 날 추천이 여러 교재면 한 번에 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록됩니다. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`
     : `<div class="card empty">${allForStudent.length ? "이 기간에는 추천이 없습니다. 위에서 기간을 바꿔 보세요." : "아직 추천이 없습니다. Claude 예약 작업이 실행되면 여기에 표시됩니다."}</div>`) + `</div><div class="eval-print" id="plan-print-area"></div>`;
   bindRecFilter(() => renderRecsTab(s));
   const doPrint = () => {
@@ -2275,13 +2275,15 @@ function lessonForm(s, lesson, rec = null) {
   // 교재 블록 작업본: 첫 블록은 lessons 의 기존 컬럼, 둘째부터는 extra_books 에 저장됩니다.
   let blocks;
   let values = lesson;
+  // 같은 학생·같은 수업일의 '제안' 추천은 한 번에 블록으로 채웁니다 (눌린 추천이 맨 앞).
+  const recGroup = rec ? [rec, ...((state.detail && state.detail.recs) || []).filter((r) => r.id !== rec.id && r.status === "제안" && r.student_id === s.id && (r.target_date || "") === (rec.target_date || "") && r.textbook_id && progOf(r.textbook_id))] : [];
   if (lesson) {
     blocks = lessonBooks(lesson).map((b) => ({ textbook_id: b.textbook_id, from_unit: b.from_unit ?? null, to_unit: b.to_unit ?? null, topic: b.topic || "" }));
     if (!blocks.length) blocks = lesson.topic ? [{ textbook_id: "", from_unit: null, to_unit: null, topic: lesson.topic }] : [];
   } else {
     values = { lesson_date: (rec && rec.target_date) || todayStr(), attendance: "출석" };
     blocks = defaultBlocks(wdOf(values.lesson_date));
-    if (rec && rec.textbook_id) blocks = [{ textbook_id: rec.textbook_id, from_unit: rec.from_unit ?? null, to_unit: rec.to_unit ?? null, topic: "" }];
+    if (rec && rec.textbook_id) blocks = recGroup.map((r) => ({ textbook_id: r.textbook_id, from_unit: r.from_unit ?? null, to_unit: r.to_unit ?? null, topic: "" }));
   }
   let curWd = wdOf(values.lesson_date);
 
@@ -2341,8 +2343,12 @@ function lessonForm(s, lesson, rec = null) {
         throw e;
       }
       if (rec && newId) {
-        const same = primary.textbook_id === rec.textbook_id && primary.from_unit === rec.from_unit && primary.to_unit === rec.to_unit;
-        await run(db.from("recommendations").update({ status: same ? "채택" : "수정", applied_lesson_id: newId, decided_at: new Date().toISOString() }).eq("id", rec.id));
+        for (const r of recGroup) {
+          const b = withBook.find((x) => x.textbook_id === r.textbook_id);
+          if (!b) continue; // 빼 둔 교재의 추천은 '제안' 그대로 둡니다
+          const same = b.from_unit === r.from_unit && b.to_unit === r.to_unit;
+          await run(db.from("recommendations").update({ status: same ? "채택" : "수정", applied_lesson_id: newId, decided_at: new Date().toISOString() }).eq("id", r.id));
+        }
       }
 
       let synced = false;

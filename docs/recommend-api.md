@@ -40,10 +40,11 @@ curl -H "Authorization: Bearer $TOKEN" https://.../api/progress
   "today": "2026-10-15",
   "students": [{
     "alias": "S01", "grade": "초5", "lessons_per_week": 1.5,
-    "books": [{"textbook_id": "…", "title": "Grammar Zone 1", "unit_label": "Unit",
-               "total_units": 20, "current_unit": 7, "remaining_units": 13, "avg_units_per_lesson": 2.0}],
+    "class_weekdays": [1, 3],
+    "books": [{"textbook_id": "…", "title": "Grammar Zone 1", "unit_label": "Unit", "structure": null,
+               "weekdays": [1], "total_units": 20, "current_unit": 7, "remaining_units": 13, "avg_units_per_lesson": 2.0}],
     "recent_lessons": [{"date": "…", "attendance": "출석", "homework": "완료", "homework_note": "…",
-                        "textbook_id": "…", "from_unit": 6, "to_unit": 7, "topic": "…", "next_plan": "…"}],
+                        "textbook_id": "…", "from_unit": 6, "to_unit": 7, "topic": "…", "extra_books": null, "next_plan": "…"}],
     "recent_tests": [{"date": "…", "kind": "단어시험", "percent": 90}]
   }]}}
 ```
@@ -62,6 +63,8 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   - '제안' 상태가 있고 내용이 다름 → 최신 내용으로 수정 (`updated`)
   - '제안' 상태가 있고 내용이 같음 → 그대로 둠 (`unchanged`)
   - 이미 채택·수정·거절로 처리된 기록이 있음 → 덮어쓰지 않고 건너뜀 (`skipped`)
+- 교재에 수업 요일(`weekdays`)이 지정돼 있는데 `target_date` 의 요일이 거기에 없으면 그 항목은 `errors` 에 담깁니다(비어 있으면 모든 요일 가능).
+- 같은 학생이 같은 날 교재 2개 이상을 추천받아도 됩니다(교재마다 항목 하나). 앱에서는 한 번에 수업 기록으로 채워집니다.
 - 단원 범위가 1~전체 단원을 벗어나거나 배정되지 않은 교재면 그 항목만 `errors` 에 담기고 나머지는 저장됩니다.
 - 한 번에 최대 100개, 본문 100KB 까지입니다.
 
@@ -70,14 +73,17 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 ## 4. 예약 작업 프롬프트 예시
 ```
 아래 순서로 영어 공부방 학생별 다음 수업 진도를 추천하세요.
-1. GET https://rachel-english.ecarusblue.workers.dev/api/progress 를 Authorization: Bearer <토큰> 헤더로 호출합니다.
-2. students 의 각 교재(books)마다 다음 수업의 단원 범위를 정합니다.
-   - 기준: avg_units_per_lesson(없으면 2)을 반올림한 개수만큼 current_unit+1 부터.
-   - 최근 시험 percent 가 70 미만이거나 숙제가 '일부'/'미제출'이 반복되면 범위를 줄이고 복습을 권합니다.
-   - 안정적이면 기준을 유지하고, 매우 좋으면 1단원 늘릴 수 있습니다.
-   - from_unit 은 1 이상, to_unit 은 from_unit 이상이며 total_units 를 넘기지 않습니다.
-3. 결과를 POST /api/recommendations 로 보냅니다. items 의 각 항목은 alias, textbook_id, from_unit, to_unit, target_date(다음 수업 예정일을 알면), rationale(한국어 1~3문장).
-4. 응답의 inserted / updated / unchanged / skipped / errors 를 요약해서 보고합니다. 학생 실명은 알 수 없으며 추측하지 않습니다.
+1. GET https://rachel-english.ecarusblue.workers.dev/api/progress 를 Authorization: Bearer <토큰> 헤더로 호출합니다. today 를 기준일로 쓰고 요일은 date 명령으로 계산합니다.
+2. 학생별 수업일: class_weekdays(0=일…6=토)에 든 요일이 그 학생의 수업일입니다. 비어 있으면 월~목으로 봅니다. 기준일 이후 이번 주 남은 수업일을 대상으로 하고, 없으면 다음 주 수업일입니다.
+   recent_lessons 에 같은 날짜 기록이 있는 날은 그 학생에게 추천하지 않습니다.
+3. 수업일마다 그날 요일에 맞는 교재만 고릅니다: books[].weekdays 가 비어 있거나 그 요일을 포함하는 교재.
+4. 교재별로, 그 교재가 나가는 수업일끼리만 이어서 단원 범위를 정합니다.
+   - 한 수업 분량 n = avg_units_per_lesson(없으면 2)을 반올림. 첫 날은 current_unit+1 부터 n개, 다음 날은 직전 to_unit+1 부터.
+   - 최근 시험 percent 가 70 미만이거나 숙제가 '일부'/'미제출'이 반복되면 분량을 줄이고(최소 1) 첫 날 복습을 권합니다. 매우 좋으면 1단원 늘릴 수 있습니다.
+   - from_unit 은 1 이상, to_unit 은 from_unit 이상이며 total_units 를 넘기지 않습니다. total_units 를 채우면 그 뒤 날짜는 추천하지 않습니다.
+   - 번호는 누적 번호로 계산하고, rationale 에는 structure 가 있으면 이름("Unit 2 › Part B")으로 풀어 씁니다.
+5. POST /api/recommendations 로 한 번에 보냅니다(최대 100개). 항목은 (학생, 교재, 수업일)마다 하나: alias, textbook_id, from_unit, to_unit, target_date, rationale(한국어 1~3문장, 요일 포함).
+6. 응답의 inserted / updated / unchanged / skipped / errors 를 요약해서 보고합니다. 학생 실명은 알 수 없으며 추측하지 않습니다.
 ```
 
 ## 교재 구조(`structure`)
@@ -93,4 +99,4 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 
 ## 교재별 수업 요일
 `books[].weekdays` 는 그 교재를 쓰는 수업 요일 배열입니다(0=일 … 6=토, 예: `[1,3]` = 월·수). **빈 배열이면 모든 수업**에서 쓰는 교재입니다.
-추천할 날짜의 요일에 맞는 교재를 우선 고려하세요. (최신 `schema.sql` 을 다시 실행해야 `weekdays` 컬럼이 생깁니다.)
+추천할 날짜의 요일에 맞는 교재만 추천하세요(서버도 요일이 맞지 않는 항목은 거절합니다). 학생의 수업 요일은 `class_weekdays`(시간표)입니다. (최신 `schema.sql` 을 다시 실행해야 `weekdays` 컬럼이 생깁니다.)
