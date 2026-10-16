@@ -715,10 +715,14 @@ function kindCard(kind, list, ci) {
     <svg class="gsvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(kind)} 점수 추이(100점 만점 환산)">${grid}<path class="garea" d="${area}"/><path class="gline" d="${line}"/>${dots}${labels}</svg>
     <div class="gf"><span>평균 <b>${avg(vals).toFixed(0)}</b></span><span>최고 <b>${Math.max(...vals).toFixed(0)}</b></span><span>최저 <b>${Math.min(...vals).toFixed(0)}</b></span></div></div>`;
 }
-function trendCards(rows, scoped) {
+// 그래프는 기간 필터와 무관하게 최근 4주(오늘 포함 28일) 기준
+function trendCards(all) {
+  const from = addDays(todayStr(), -27);
+  const rows = all.filter((t) => t.test_date >= from && t.test_date <= todayStr());
   const kinds = TEST_KINDS.filter((k) => rows.some((t) => t.kind === k));
+  if (!kinds.length) return `<h3 class="gtitle">종류별 점수 추이 <small class="muted">· 최근 4주 · 100점 환산</small></h3><div class="card empty">최근 4주 안에 시험 기록이 없습니다.</div>`;
   const cards = kinds.map((k) => kindCard(k, rows.filter((t) => t.kind === k), TEST_KINDS.indexOf(k)));
-  return `<h3 class="gtitle">종류별 점수 추이 <small class="muted">· ${scoped ? "선택한 기간" : "전체 기간"} · 100점 환산</small></h3><div class="gg ${kinds.length === 1 ? "one" : ""}">${cards.join("")}</div>`;
+  return `<h3 class="gtitle">종류별 점수 추이 <small class="muted">· 최근 4주 · 100점 환산</small></h3><div class="gg ${kinds.length === 1 ? "one" : ""}">${cards.join("")}</div>`;
 }
 
 function renderTestsTab(s) {
@@ -727,8 +731,10 @@ function renderTestsTab(s) {
   const pcts = rows.map((t) => pct(t.score, t.max_score));
   const recent = pcts.slice(0, 5);
   const scoped = state.testFilter.range !== "all";
-  $("#tab-body").innerHTML = filterHtml(state.testFilter, "tf", false) + `
+  $("#tab-body").innerHTML = `
     <div class="toolbar"><button class="btn primary" id="btn-add-test">+ 시험 점수</button></div>
+    ${all.length ? trendCards(all) : ""}
+    ${filterHtml(state.testFilter, "tf", false)}
     ${
       rows.length
         ? `<div class="summary">
@@ -737,7 +743,6 @@ function renderTestsTab(s) {
             <div class="card"><strong>${Math.max(...pcts).toFixed(0)}점</strong><span>최고점</span></div>
             <div class="card"><strong>${rows.length}회</strong><span>${scoped ? "기간 내 시험" : "누적 시험"}</span></div>
           </div>
-          ${trendCards(rows, scoped)}
           <div class="card table-wrap"><table>
             <thead><tr><th>날짜</th><th>종류</th><th>이름</th><th class="num">점수</th><th class="num">환산</th></tr></thead>
             <tbody>${rows
