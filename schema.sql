@@ -84,6 +84,20 @@ create table if not exists public.monthly_evaluations (
   unique (student_id, year, month)
 );
 
+-- 수업 시간표 (요일·타임·시간과 배정 학생을 매주 반복으로 저장)
+create table if not exists public.schedule_slots (
+  id           uuid primary key default gen_random_uuid(),
+  owner        uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  weekday      smallint not null check (weekday between 0 and 6),   -- 0=일 … 6=토
+  slot_order   smallint not null default 0,
+  label        text not null default '' check (char_length(label) <= 30),
+  start_time   time,
+  end_time     time,
+  student_ids  uuid[] not null default '{}',
+  created_at   timestamptz not null default now()
+);
+create index if not exists schedule_slots_weekday_idx on public.schedule_slots (weekday, slot_order);
+
 -- 시험 / 단어 점수
 create table if not exists public.tests (
   id          uuid primary key default gen_random_uuid(),
@@ -149,11 +163,12 @@ alter table public.tests     enable row level security;
 alter table public.recommendations enable row level security;
 alter table public.report_logs enable row level security;
 alter table public.monthly_evaluations enable row level security;
+alter table public.schedule_slots enable row level security;
 
 do $$
 declare t text;
 begin
-  foreach t in array array['students','textbooks','progress','lessons','tests','recommendations','report_logs','monthly_evaluations'] loop
+  foreach t in array array['students','textbooks','progress','lessons','tests','recommendations','report_logs','monthly_evaluations','schedule_slots'] loop
     execute format('drop policy if exists "owner_all" on public.%I', t);
     execute format(
       'create policy "owner_all" on public.%I for all to authenticated
@@ -163,7 +178,7 @@ begin
 end $$;
 
 -- anon 역할의 직접 권한을 제거 (이중 안전장치)
-revoke all on public.students, public.textbooks, public.progress, public.lessons, public.tests, public.recommendations, public.report_logs, public.monthly_evaluations from anon;
+revoke all on public.students, public.textbooks, public.progress, public.lessons, public.tests, public.recommendations, public.report_logs, public.monthly_evaluations, public.schedule_slots from anon;
 
 -- ============================================================
 -- 3. 추천용 API (Claude 예약 작업 전용)
