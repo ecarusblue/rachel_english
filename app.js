@@ -1965,6 +1965,7 @@ function renderEvalDetail(s, d, head, bindHead) {
     window.print();
   };
   $("#ev-preview").onclick = () => openEvalPreview(evalPrintHtml(s, d, sm, evalValues()), doPrint, $("#ev-preview"), "평가서 미리보기", {
+    onRender: paginateEvalPreview,
     share: { filename: `월말평가서_${s.name}_${ev.year}-${String(ev.month).padStart(2, "0")}.pdf`, title: `${s.name} ${ev.month}월 월말평가서` },
   });
   $("#ev-form").onsubmit = async (e) => {
@@ -2067,29 +2068,29 @@ function planTitle(f) {
   return t ? `${t} 수업 안내` : "수업 안내";
 }
 const DOW_FULL = "일요일 월요일 화요일 수요일 목요일 금요일 토요일".split(" ");
-/* 수업 안내 미리보기: 긴 내용을 A4 쪽 단위로 나눠 보여 줍니다 (카드는 쪽 사이에서 잘리지 않음) */
-function paginatePlanPreview(sheet) {
-  const first = sheet.querySelector(".pl-page");
+/* 미리보기: 긴 내용을 A4 쪽 단위로 나눠 보여 줍니다 (블록은 쪽 사이에서 잘리지 않음, 머리글은 첫 쪽에만, 푸터는 모든 쪽에) */
+function paginatePreview(sheet, cfg) {
+  const first = sheet.querySelector(cfg.page);
   if (!first) return null;
   const pageH = (297 / 25.4) * 96;
   const foot = first.querySelector(".rp-foot");
-  const items = (bd) => [...bd.querySelectorAll(":scope > .pl-card, :scope > .pl-memo")];
+  const items = (bd) => [...bd.querySelectorAll(cfg.items)];
   const pagesEls = [first];
   let page = first;
-  for (let guard = 0; guard < 60; guard++) {
-    const bd = page.querySelector(".pl-bd");
+  for (let guard = 0; guard < 80; guard++) {
+    const bd = page.querySelector(cfg.body);
     let next = null;
     while (page.offsetHeight > pageH + 1) {
       const kids = items(bd);
       if (kids.length <= 1) break;
       if (!next) {
         next = document.createElement("div");
-        next.className = "rp-page pl-page pl-cont";
-        next.innerHTML = `<div class="pl-bd"></div>`;
-        next.appendChild(foot.cloneNode(true));
+        next.className = `rp-page ${cfg.cont}`;
+        next.innerHTML = `<div class="${cfg.body.slice(1)}"></div>`;
+        if (foot) next.appendChild(foot.cloneNode(true));
         page.after(next);
       }
-      next.querySelector(".pl-bd").prepend(kids[kids.length - 1]);
+      next.querySelector(cfg.body).prepend(kids[kids.length - 1]);
     }
     if (!next) break;
     pagesEls.push(next);
@@ -2099,6 +2100,8 @@ function paginatePlanPreview(sheet) {
   pagesEls.forEach((p, i) => { const n = document.createElement("div"); n.className = "pl-pn"; n.textContent = `${i + 1} / ${pagesEls.length}쪽`; p.appendChild(n); });
   return pagesEls.length;
 }
+const paginatePlanPreview = (sheet) => paginatePreview(sheet, { page: ".pl-page", body: ".pl-bd", items: ":scope > .pl-card, :scope > .pl-memo", cont: "pl-page pl-cont" });
+const paginateEvalPreview = (sheet) => paginatePreview(sheet, { page: ".rp-page", body: ".rp-body", items: ":scope > *", cont: "rp-cont" });
 
 function planPrintHtml(s, recs) {
   const rg = filterRange(state.recFilter);

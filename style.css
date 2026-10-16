@@ -740,3 +740,5 @@ td[class^="att-"] { white-space: nowrap; }
 .ev-sheet.paged .pl-cont .pl-bd { padding-top: 14mm; }
 .pl-pn { position: absolute; top: 4mm; right: 6mm; font-size: 8.5pt; color: #8b95a5; }
 .ev-sheet.paged .pl-hd + .pl-bd { }
+.ev-sheet.paged .rp-cont { padding-top: 10mm; }
+.ev-sheet.paged .rp-cont .rp-body { padding-top: 4mm; }
