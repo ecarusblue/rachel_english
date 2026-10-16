@@ -13,7 +13,7 @@ const state = {
   recentTests: [],       // 최근 90일 (전체 현황용)
   view: "overview",      // overview | summary | recs | student
   pendingRecs: 0,
-  recFilter: { range: "all", start: "", end: "" },
+  recFilter: { range: "thisWeek", start: "", end: "" },
   allRecs: [],
   summary: { range: "thisWeek", start: "", end: "", data: null, loading: false, failed: false },
   studentId: null,
