@@ -307,6 +307,12 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .ev-ov-scroll { flex: 1; overflow: auto; padding: 1.2rem 1rem 2rem; }
 .ev-sheet { width: 210mm; margin: 0 auto; background: #fff; box-shadow: 0 8px 36px rgba(0, 0, 0, .45); }
 .ev-sheet .rp-page { min-height: 297mm; }
+.ev-sheet.land { width: 297mm; }
+.ev-sheet.land .rp-page { min-height: 209mm; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg-b { border: 0; background: var(--surface); color: var(--text); padding: .4rem .9rem; font: inherit; cursor: pointer; }
+.seg-b + .seg-b { border-left: 1px solid var(--border); }
+.seg-b.on { background: var(--accent); color: #fff; font-weight: 700; }
 @media (max-width: 800px) { .rate-row { grid-template-columns: 1fr; } .eval-controls { grid-template-columns: 1fr 1fr; } }
 
 @media print { .idle-warn { display: none !important; } }
@@ -360,6 +366,7 @@ td.name-cell, td:first-child { white-space: nowrap; }
 
 @page { margin: 14mm; }
 @page evalreport { size: A4; margin: 0; }
+@page evalland { size: A4 landscape; margin: 0; }
 @media print {
   body { background: #fff; color: #000; }
   .sidebar, .topbar, .toolbar, .tabs, .book-actions, .btn, .toast { display: none !important; }
@@ -371,6 +378,7 @@ td.name-cell, td:first-child { white-space: nowrap; }
   .eval-edit { display: none !important; }
   .print-plan #main > :not(#tab-body) { display: none !important; }
   .print-sched #main > :not(#sched-print-area) { display: none !important; }
+  .eval-print.land { page: evalland; }
   .eval-print { display: block; page: evalreport; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .print-head { display: block; margin-bottom: 1rem; }
   .print-head h2 { margin: 0 0 .2rem; }
@@ -505,3 +513,24 @@ html:not([data-theme="light"]) .sch-day em { color: #0b1220; }
 .tp-n { display: flex; flex-wrap: wrap; gap: 2mm; }
 .tp-name { font-size: 13.5pt; font-weight: 700; color: #1b2536; padding: 1.2mm 4mm; border: 1.2px solid #9fb0cc; border-radius: 99px; background: #f5f8fd; }
 .tp-empty { color: #55657a; }
+
+/* 시간표 가로(A4 landscape) */
+.tp-land { width: 297mm; height: 209mm; min-height: 0; overflow: hidden; }
+.tl-hd { background: #1f2c47; color: #fff; padding: 9mm 14mm 7mm; display: flex; justify-content: space-between; align-items: flex-end; }
+.tl-hd h1 { margin: 2mm 0 0; font-size: 24pt; font-weight: 800; letter-spacing: -.02em; }
+.tl-hd > span { font-size: 11pt; opacity: .85; }
+.tl-bd { flex: 1; padding: 6mm 14mm 2mm; display: flex; min-height: 0; }
+.tl-table { width: 100%; border-collapse: separate; border-spacing: 3mm; table-layout: fixed; }
+.tl-table th { border: 0; background: none; padding: 0; text-align: center; }
+.tl-table th:first-child { width: 34mm; }
+.tl-table th.tl-d { background: #1f2c47; color: #fff; font-size: 22pt; font-weight: 800; border-radius: 3mm; height: 15mm; }
+.tl-table th.tl-t { text-align: left; vertical-align: middle; padding-left: 2mm; }
+.tl-t b { display: block; font-size: 13pt; color: #1b2536; }
+.tl-t span { font-size: 10pt; color: #55657a; font-weight: 400; }
+.tl-table td { border: 1px solid #b9c6dc; border-radius: 3mm; vertical-align: top; padding: 3.5mm; }
+.tl-table td.tl-off { background: #f3f5f9; border-style: dashed; }
+.tl-tm { font-size: 9.5pt; color: #55657a; margin-bottom: 2mm; }
+.tl-n { display: flex; flex-direction: column; gap: 2mm; }
+.tl-n .tp-name { font-size: 13pt; text-align: center; }
+.tl-n .tp-empty { text-align: center; }
+.tp-land .rp-foot { margin: 0 14mm 7mm; }

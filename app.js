@@ -310,31 +310,64 @@ function scheduleHtml() {
   }).join("")).join("");
   return `<section class="sch">${head}<div class="card sch-card"><table class="sch-table"><tbody>${rows}</tbody></table></div></section>`;
 }
-function schedulePrintHtml() {
+function schedulePrintHtml(orient = "p") {
   const days = groupDays(state.schedule.slots);
   const active = state.students.filter((s) => s.active);
+  const namesOf = (sl) => active.filter((s) => (sl.student_ids || []).includes(s.id));
+  const chips = (names) => names.length ? names.map((s) => `<span class="tp-name">${esc(s.name)}</span>`).join("") : `<span class="tp-empty">-</span>`;
+  const foot = `<div class="rp-foot"><span>${esc(ACADEMY_NAME)}</span><span>${shortDate(todayStr())} 출력</span></div>`;
+  if (orient === "l") {
+    const rowsN = Math.max(...days.map((d) => d.slots.length));
+    const rowHead = Array.from({ length: rowsN }, (_, i) => {
+      const sl = (days.find((d) => d.slots[i]) || { slots: [] }).slots[i];
+      const same = days.every((d) => !d.slots[i] || timeText(d.slots[i].start_time, d.slots[i].end_time) === timeText(sl.start_time, sl.end_time));
+      return { label: (sl && sl.label) || "타임 " + (i + 1), time: same && sl ? timeText(sl.start_time, sl.end_time) : "" };
+    });
+    const body = rowHead.map((rh, i) => `<tr><th class="tl-t"><b>${esc(rh.label)}</b>${rh.time ? `<span>${rh.time}</span>` : ""}</th>${days.map((d) => {
+      const sl = d.slots[i];
+      if (!sl) return `<td class="tl-off"></td>`;
+      const tm = rh.time ? "" : timeText(sl.start_time, sl.end_time);
+      return `<td>${tm ? `<div class="tl-tm">${tm}</div>` : ""}<div class="tl-n">${chips(namesOf(sl))}</div></td>`;
+    }).join("")}</tr>`).join("");
+    return `<div class="rp-page tp-page tp-land">
+      <div class="tl-hd"><div><div class="pl-br">${esc(ACADEMY_NAME).toUpperCase()}</div><h1>수업 시간표</h1></div><span>매주 반복</span></div>
+      <div class="tl-bd"><table class="tl-table"><thead><tr><th></th>${days.map((d) => `<th class="tl-d">${DAY_NAME[d.wd]}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>
+      ${foot}</div>`;
+  }
   const block = (d) => `<div class="tp-day"><div class="tp-d">${DAY_NAME[d.wd]}</div><div class="tp-slots">${d.slots.map((sl, i) => {
-    const names = active.filter((s) => (sl.student_ids || []).includes(s.id));
     const tm = timeText(sl.start_time, sl.end_time);
     return `<div class="tp-slot"><div class="tp-t"><b>${esc(sl.label || "타임 " + (i + 1))}</b>${tm ? `<span>${tm}</span>` : ""}</div>
-      <div class="tp-n">${names.length ? names.map((s) => `<span class="tp-name">${esc(s.name)}</span>`).join("") : `<span class="tp-empty">-</span>`}</div></div>`;
+      <div class="tp-n">${chips(namesOf(sl))}</div></div>`;
   }).join("")}</div></div>`;
   return `<div class="rp-page tp-page">
     <div class="pl-hd"><div class="pl-br">${esc(ACADEMY_NAME).toUpperCase()}</div><h1>수업 시간표</h1><div class="pl-who"><span>매주 반복</span></div></div>
     <div class="tp-bd">${days.map(block).join("")}</div>
-    <div class="rp-foot"><span>${esc(ACADEMY_NAME)}</span><span>${shortDate(todayStr())} 출력</span></div>
+    ${foot}
   </div>`;
+}
+const SCH_ORIENT_KEY = "rachel_sched_orient";
+function schedOrient() {
+  try { return localStorage.getItem(SCH_ORIENT_KEY) === "l" ? "l" : "p"; } catch { return "p"; }
+}
+function openSchedPreview(returnTo, orient = schedOrient()) {
+  try { localStorage.setItem(SCH_ORIENT_KEY, orient); } catch { /* 저장 실패는 무시 */ }
+  openEvalPreview(schedulePrintHtml(orient), () => {
+    const area = $("#sched-print-area");
+    area.innerHTML = schedulePrintHtml(orient);
+    area.classList.toggle("land", orient === "l");
+    document.body.classList.add("print-sched");
+    try { window.print(); } finally { document.body.classList.remove("print-sched"); area.classList.remove("land"); }
+  }, returnTo, "시간표 미리보기", {
+    land: orient === "l",
+    orient: { value: orient, options: [["p", "세로"], ["l", "가로"]], onChange: (v) => openSchedPreview(returnTo, v) },
+  });
 }
 function bindSchedule() {
   const eb = $("#sch-edit");
   if (eb) eb.onclick = startScheduleEdit;
   const pb = $("#sch-print");
   if (pb) {
-    pb.onclick = () => openEvalPreview(schedulePrintHtml(), () => {
-      $("#sched-print-area").innerHTML = schedulePrintHtml();
-      document.body.classList.add("print-sched");
-      try { window.print(); } finally { document.body.classList.remove("print-sched"); }
-    }, pb, "시간표 미리보기");
+    pb.onclick = () => openSchedPreview(pb);
   }
   $("#main").querySelectorAll("[data-sch-sid]").forEach((b) => {
     b.onclick = (e) => { e.stopPropagation(); selectStudent(b.dataset.schSid); };
@@ -1301,7 +1334,7 @@ function evalPrintHtml(s, d, sm, vals) {
 }
 
 /* 월말평가서 인쇄 미리보기 (화면에서 A4 모양 확인) */
-function openEvalPreview(html, onPrint, returnTo, label = "평가서 미리보기") {
+function openEvalPreview(html, onPrint, returnTo, label = "평가서 미리보기", opts = {}) {
   const old = document.getElementById("ev-preview-overlay");
   if (old) old.remove();
   const ov = document.createElement("div");
@@ -1311,19 +1344,21 @@ function openEvalPreview(html, onPrint, returnTo, label = "평가서 미리보�
   ov.setAttribute("aria-modal", "true");
   ov.setAttribute("aria-label", label);
   ov.innerHTML = `<div class="ev-ov-bar"><strong>${esc(label)}</strong><span class="muted" id="ev-ov-note">A4 기준</span><span class="spacer"></span>
+      ${opts.orient ? `<div class="seg" role="group" aria-label="용지 방향">${opts.orient.options.map(([v, t]) => `<button type="button" class="seg-b ${v === opts.orient.value ? "on" : ""}" data-orient="${v}" aria-pressed="${v === opts.orient.value}">${t}</button>`).join("")}</div>` : ""}
       <button class="btn primary" type="button" id="ev-ov-print">인쇄 / PDF 저장</button>
       <button class="btn" type="button" id="ev-ov-close">닫기</button></div>
-    <div class="ev-ov-scroll"><div class="ev-sheet" id="ev-sheet">${html}</div></div>`;
+    <div class="ev-ov-scroll"><div class="ev-sheet ${opts.land ? "land" : ""}" id="ev-sheet">${html}</div></div>`;
   document.body.appendChild(ov);
   const sheet = ov.querySelector("#ev-sheet");
   // A4 한 장(297mm) 기준으로 몇 장이 되는지 계산
-  const pageH = (297 / 25.4) * 96;
+  const pageH = ((opts.land ? 210 : 297) / 25.4) * 96;
   const pages = Math.max(1, Math.ceil((sheet.offsetHeight - 2) / pageH));
-  ov.querySelector("#ev-ov-note").textContent = pages > 1 ? `A4 기준 · 내용이 길어 ${pages}장으로 인쇄됩니다` : "A4 한 장";
+  const pg = opts.land ? "A4 가로" : "A4";
+  ov.querySelector("#ev-ov-note").textContent = pages > 1 ? `${pg} 기준 · 내용이 길어 ${pages}장으로 인쇄됩니다` : `${pg} 한 장`;
   // 화면 너비에 맞춰 축소
   const fit = () => {
     const avail = ov.querySelector(".ev-ov-scroll").clientWidth - 32;
-    const w = (210 / 25.4) * 96;
+    const w = ((opts.land ? 297 : 210) / 25.4) * 96;
     sheet.style.zoom = String(Math.min(1, avail / w));
   };
   fit();
@@ -1339,6 +1374,9 @@ function openEvalPreview(html, onPrint, returnTo, label = "평가서 미리보�
     if (e.key === "Escape") { e.stopPropagation(); close(); }
   };
   document.addEventListener("keydown", onKey, true);
+  ov.querySelectorAll("[data-orient]").forEach((b) => {
+    b.onclick = () => { if (b.dataset.orient !== opts.orient.value) { window.removeEventListener("resize", onResize); document.removeEventListener("keydown", onKey, true); opts.orient.onChange(b.dataset.orient); } };
+  });
   ov.querySelector("#ev-ov-close").onclick = close;
   ov.querySelector("#ev-ov-print").onclick = onPrint;
   ov.querySelector("#ev-ov-close").focus();
