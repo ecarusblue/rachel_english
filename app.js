@@ -987,22 +987,36 @@ function evalValues() {
 
 function evalPrintHtml(s, d, sm, vals) {
   const r = sm.r;
-  const dots = (v) => (v ? `<span class="dots">${"●".repeat(v)}${"○".repeat(5 - v)}</span> ${esc(levelLabel(v))}` : "-");
-  const rateTable = (title, defs, obj) => `<table class="eval-table"><thead><tr><th colspan="2">${title}</th></tr></thead><tbody>${defs.map(([k, t]) => `<tr><th>${t}</th><td>${dots(obj[k])}</td></tr>`).join("")}</tbody></table>`;
+  const [yy, mm] = d.key.split("-").map(Number);
+  const segs = (v) => Array.from({ length: 5 }, (_, k) => `<i class="${k < (v || 0) ? "on" : ""}"></i>`).join("");
+  const rateRows = (defs, obj) => defs.map(([k, t]) => `<div class="rp-rr"><span class="rp-rn">${t}</span><span class="rp-seg">${segs(obj[k])}</span><span class="rp-rl">${obj[k] ? esc(levelLabel(obj[k])) : "-"}</span></div>`).join("");
   const attParts = ["출석", "지각", "결석", "보강"].filter((k) => r.att[k]).map((k) => `${k} ${r.att[k]}`);
   const diff = r.testAvg != null && r.prevAvg != null ? Math.round(r.testAvg - r.prevAvg) : null;
-  const books = r.books.map(({ book, from, to, current }) => `${esc(book.title)}${esc(rangeText(book, { from_unit: from, to_unit: to }))}${current != null ? ` (현재 ${current}/${book.total_units})` : ""}`);
-  const text = (k, t) => (vals[k] ? `<section><h3>${t}</h3><p>${esc(vals[k])}</p></section>` : "");
-  return `<div class="eval-head"><h2>[${esc(ACADEMY_NAME)}] 월말평가서</h2><p>${esc(s.name)} 학생${s.grade ? ` (${esc(s.grade)})` : ""} · ${d.key.split("-")[0]}년 ${Number(d.key.split("-")[1])}월 · 출력일 ${shortDate(todayStr())}</p></div>
-    <table class="eval-table"><tbody>
-      <tr><th>수업</th><td>${r.lessons.length}회${attParts.length ? ` (${attParts.join(", ")})` : ""} · 출석률 ${sm.attRate == null ? "-" : sm.attRate + "%"}</td></tr>
-      <tr><th>숙제</th><td>완료율 ${sm.hwRate == null ? "-" : sm.hwRate + "%"}</td></tr>
-      <tr><th>시험</th><td>${r.testAvg == null ? "-" : "평균 " + r.testAvg.toFixed(0) + "점" + (diff == null ? "" : diff === 0 ? " (전월과 비슷)" : ` (전월 대비 ${diff > 0 ? "+" : ""}${diff}점)`)}</td></tr>
-      <tr><th>진도</th><td>${books.length ? books.join("<br>") : "-"}</td></tr>
-    </tbody></table>
-    <div class="eval-two">${rateTable("영역별 평가", EVAL_SKILLS, vals.ratings)}${rateTable("학습 태도", EVAL_ATTITUDE, vals.attitude)}</div>
-    ${EVAL_TEXTS.map(([k, t]) => text(k, t)).join("")}
-    <p class="eval-sign">${esc(ACADEMY_NAME)}</p>`;
+  const books = r.books.length
+    ? `<h3>이번 달 진도</h3>${r.books.map(({ book, from, to, current }) => {
+        const ratio = current != null && book.total_units ? Math.min(100, Math.round((current / book.total_units) * 100)) : 0;
+        return `<div class="rp-bk"><div><b>${esc(book.title)}</b> <span class="rp-mut">${esc(rangeText(book, { from_unit: from, to_unit: to }).trim())}</span></div>${current != null ? `<div class="rp-bar"><span style="width:${ratio}%"></span></div><div class="rp-mut rp-sm">현재 ${current}/${book.total_units}</div>` : ""}</div>`;
+      }).join("")}`
+    : "";
+  const texts = EVAL_TEXTS.filter(([k]) => vals[k]).map(([k, t]) => `<div class="rp-tx"><h4>${t}</h4><p>${esc(vals[k])}</p></div>`).join("");
+  return `<div class="rp-page">
+    <div class="rp-top"><div class="rp-brand">${esc(ACADEMY_NAME)}<small>월말평가서</small></div><div class="rp-when">${yy}년<b>${mm}월</b></div></div>
+    <div class="rp-body">
+      <div class="rp-who"><b>${esc(s.name)}</b><span>${s.grade ? esc(s.grade) + " 학생" : "학생"}</span></div>
+      <div class="rp-stats">
+        <div class="rp-stat"><b>${r.lessons.length}회</b><span>수업</span>${attParts.length ? `<em>${attParts.join(" · ")}</em>` : ""}</div>
+        <div class="rp-stat"><b>${sm.attRate == null ? "-" : sm.attRate + "%"}</b><span>출석률</span></div>
+        <div class="rp-stat"><b>${sm.hwRate == null ? "-" : sm.hwRate + "%"}</b><span>숙제 완료율</span></div>
+        <div class="rp-stat"><b>${r.testAvg == null ? "-" : r.testAvg.toFixed(0) + "점"}</b><span>시험 평균</span>${diff == null ? "" : `<em>${diff === 0 ? "전월과 비슷" : `전월 대비 ${diff > 0 ? "+" : ""}${diff}점`}</em>`}</div>
+      </div>
+      <div class="rp-two">
+        <div><h3>영역별 평가</h3>${rateRows(EVAL_SKILLS, vals.ratings)}</div>
+        <div><h3>학습 태도</h3>${rateRows(EVAL_ATTITUDE, vals.attitude)}${books ? `<div class="rp-gap"></div>${books}` : ""}</div>
+      </div>
+      ${texts}
+    </div>
+    <div class="rp-foot"><span>${esc(ACADEMY_NAME)} 공부방</span><span>${shortDate(todayStr())} 출력</span></div>
+  </div>`;
 }
 
 function renderEvalDetail(s, d, head, bindHead) {
