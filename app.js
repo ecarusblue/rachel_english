@@ -14,6 +14,8 @@ const state = {
   view: "overview",      // overview | summary | evals | recs | student
   pendingRecs: 0,
   recFilter: { range: "thisWeek", start: "", end: "" },
+  lessonFilter: { range: "thisWeek", start: "", end: "" },
+  testFilter: { range: "thisWeek", start: "", end: "" },
   allRecs: [],
   summary: { range: "thisWeek", start: "", end: "", data: null, loading: false, failed: false },
   evals: { year: new Date().getFullYear(), month: new Date().getMonth() + 1, studentId: null, data: null, loading: false, failed: false, key: "" },
@@ -388,8 +390,9 @@ function renderProgressTab(s) {
 }
 
 function renderLessonsTab(s) {
-  const rows = state.detail.lessons;
-  $("#tab-body").innerHTML = `
+  const all = state.detail.lessons;
+  const rows = all.filter((l) => inRange(state.lessonFilter, l.lesson_date));
+  $("#tab-body").innerHTML = filterHtml(state.lessonFilter, "lf", false) + `
     <div class="toolbar"><button class="btn primary" id="btn-add-lesson">+ 수업 기록</button></div>
     ${
       rows.length
@@ -406,8 +409,9 @@ function renderLessonsTab(s) {
               )
               .join("")}</tbody></table></div>
           <p class="muted" style="font-size:.85rem;margin-top:.6rem">행을 누르면 수정·삭제할 수 있습니다. 최근 300건까지 표시됩니다.</p>`
-        : `<div class="card empty">수업 기록이 없습니다.</div>`
+        : `<div class="card empty">${all.length ? "이 기간에는 수업 기록이 없습니다. 위에서 기간을 바꿔 보세요." : "수업 기록이 없습니다."}</div>`
     }`;
+  bindFilter(state.lessonFilter, "lf", () => renderLessonsTab(s));
 }
 
 function trendSvg(tests) {
@@ -425,18 +429,20 @@ function trendSvg(tests) {
 }
 
 function renderTestsTab(s) {
-  const rows = state.detail.tests;
+  const all = state.detail.tests;
+  const rows = all.filter((t) => inRange(state.testFilter, t.test_date));
   const pcts = rows.map((t) => pct(t.score, t.max_score));
   const recent = pcts.slice(0, 5);
-  $("#tab-body").innerHTML = `
+  const scoped = state.testFilter.range !== "all";
+  $("#tab-body").innerHTML = filterHtml(state.testFilter, "tf", false) + `
     <div class="toolbar"><button class="btn primary" id="btn-add-test">+ 시험 점수</button></div>
     ${
       rows.length
         ? `<div class="summary">
-            <div class="card"><strong>${avg(pcts).toFixed(0)}점</strong><span>전체 평균</span></div>
+            <div class="card"><strong>${avg(pcts).toFixed(0)}점</strong><span>${scoped ? "기간 평균" : "전체 평균"}</span></div>
             <div class="card"><strong>${avg(recent).toFixed(0)}점</strong><span>최근 ${recent.length}회 평균</span></div>
             <div class="card"><strong>${Math.max(...pcts).toFixed(0)}점</strong><span>최고점</span></div>
-            <div class="card"><strong>${rows.length}회</strong><span>누적 시험</span></div>
+            <div class="card"><strong>${rows.length}회</strong><span>${scoped ? "기간 내 시험" : "누적 시험"}</span></div>
           </div>
           <div class="card" style="margin-bottom:1rem">${trendSvg(rows)}</div>
           <div class="card table-wrap"><table>
@@ -448,8 +454,9 @@ function renderTestsTab(s) {
                   <td class="num">${t.score}/${t.max_score}</td><td class="num">${pct(t.score, t.max_score).toFixed(0)}점</td></tr>`
               )
               .join("")}</tbody></table></div>`
-        : `<div class="card empty">시험 기록이 없습니다.</div>`
+        : `<div class="card empty">${all.length ? "이 기간에는 시험 기록이 없습니다. 위에서 기간을 바꿔 보세요." : "시험 기록이 없습니다."}</div>`
     }`;
+  bindFilter(state.testFilter, "tf", () => renderTestsTab(s));
 }
 
 /* ---------- 리포트 (기간 요약 + 학부모 안내문 초안) ---------- */
@@ -1121,40 +1128,44 @@ function renderEvalDetail(s, d, head, bindHead) {
 }
 
 /* ---------- 수업 추천 공통: 기간 필터 + 인쇄 ---------- */
-function recFilterRange() {
-  const f = state.recFilter;
+function filterRange(f) {
   return f.range === "all" ? null : periodRange(f.range, f.start, f.end);
 }
+function inRange(f, dateStr) {
+  const rg = filterRange(f);
+  return !rg || (dateStr >= rg.start && dateStr <= rg.end);
+}
+function filterHtml(f, p, withPrint) {
+  const rg = filterRange(f);
+  const opts = [["all", "전체 기간"], ["thisWeek", "이번 주"], ["lastWeek", "지난 주"], ["nextWeek", "다음 주"], ["thisMonth", "이번 달"], ["lastMonth", "지난 달"], ["custom", "직접 선택"]];
+  return `<div class="card report-controls">
+      <label>기간<select id="${p}-range">${opts.map(([v, t]) => `<option value="${v}" ${f.range === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+      <label>시작일<input type="date" id="${p}-start" value="${esc(rg ? rg.start : "")}" ${f.range === "custom" ? "" : "disabled"}></label>
+      <label>종료일<input type="date" id="${p}-end" value="${esc(rg ? rg.end : "")}" ${f.range === "custom" ? "" : "disabled"}></label>
+      ${withPrint ? `<div style="align-self:end"><button class="btn" id="${p}-print" type="button">인쇄 / PDF 저장</button></div>` : ""}
+    </div>`;
+}
+function bindFilter(f, p, rerender) {
+  $("#" + p + "-range").onchange = (e) => { f.range = e.target.value; rerender(); };
+  const onDate = () => { f.start = $("#" + p + "-start").value; f.end = $("#" + p + "-end").value; rerender(); };
+  $("#" + p + "-start").onchange = onDate;
+  $("#" + p + "-end").onchange = onDate;
+  const pr = $("#" + p + "-print");
+  if (pr) pr.onclick = () => window.print();
+}
+function recFilterRange() { return filterRange(state.recFilter); }
 function recDate(r) {
   return r.target_date || (r.created_at || "").slice(0, 10);
 }
 function filterRecs(recs) {
-  const rg = recFilterRange();
-  return rg ? recs.filter((r) => recDate(r) >= rg.start && recDate(r) <= rg.end) : recs;
+  return recs.filter((r) => inRange(state.recFilter, recDate(r)));
 }
-function recFilterHtml() {
-  const f = state.recFilter;
-  const rg = recFilterRange();
-  const opts = [["all", "전체 기간"], ["thisWeek", "이번 주"], ["lastWeek", "지난 주"], ["nextWeek", "다음 주"], ["thisMonth", "이번 달"], ["lastMonth", "지난 달"], ["custom", "직접 선택"]];
-  return `<div class="card report-controls">
-      <label>기간<select id="rf-range">${opts.map(([v, t]) => `<option value="${v}" ${f.range === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
-      <label>시작일<input type="date" id="rf-start" value="${esc(rg ? rg.start : "")}" ${f.range === "custom" ? "" : "disabled"}></label>
-      <label>종료일<input type="date" id="rf-end" value="${esc(rg ? rg.end : "")}" ${f.range === "custom" ? "" : "disabled"}></label>
-      <div style="align-self:end"><button class="btn" id="rf-print" type="button">인쇄 / PDF 저장</button></div>
-    </div>`;
-}
+function recFilterHtml() { return filterHtml(state.recFilter, "rf", true); }
 function recPrintHead(title) {
   const rg = recFilterRange();
   return `<div class="print-head"><h2>[${esc(ACADEMY_NAME)}] ${esc(title)}</h2><p>${rg ? `기간: ${shortDate(rg.start)} ~ ${shortDate(rg.end)}` : "기간: 전체"} · 출력일 ${shortDate(todayStr())}</p></div>`;
 }
-function bindRecFilter(rerender) {
-  const f = state.recFilter;
-  $("#rf-range").onchange = (e) => { f.range = e.target.value; rerender(); };
-  const onDate = () => { f.start = $("#rf-start").value; f.end = $("#rf-end").value; rerender(); };
-  $("#rf-start").onchange = onDate;
-  $("#rf-end").onchange = onDate;
-  $("#rf-print").onclick = () => window.print();
-}
+function bindRecFilter(rerender) { bindFilter(state.recFilter, "rf", rerender); }
 
 /* ---------- 수업 추천 (Claude 예약 작업이 저장한 제안을 확인) ---------- */
 function renderRecsTab(s) {
