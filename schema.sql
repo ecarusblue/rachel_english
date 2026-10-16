@@ -65,6 +65,25 @@ alter table public.lessons add column if not exists next_plan text;
 alter table public.lessons add column if not exists homework_note text;   -- 숙제 내용(예: 단어 Day 5 쓰기)
 alter table public.lessons add column if not exists teacher_comment text check (char_length(teacher_comment) <= 5000);   -- 선생님 코멘트(긴 글)
 
+-- 월말평가서 (학생·연·월별 1건)
+create table if not exists public.monthly_evaluations (
+  id           uuid primary key default gen_random_uuid(),
+  owner        uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  student_id   uuid not null references public.students(id) on delete cascade,
+  year         integer not null check (year between 2000 and 2100),
+  month        integer not null check (month between 1 and 12),
+  ratings      jsonb not null default '{}'::jsonb,   -- 영역별 평가 {listening:5,...} (1~5)
+  attitude     jsonb not null default '{}'::jsonb,   -- 학습 태도 {participation:4,...} (1~5)
+  achievement  text check (char_length(achievement) <= 3000),
+  improvement  text check (char_length(improvement) <= 3000),
+  next_plan    text check (char_length(next_plan) <= 3000),
+  parent_note  text check (char_length(parent_note) <= 3000),
+  status       text not null default '작성중' check (status in ('작성중','완료')),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  unique (student_id, year, month)
+);
+
 -- 시험 / 단어 점수
 create table if not exists public.tests (
   id          uuid primary key default gen_random_uuid(),
@@ -129,11 +148,12 @@ alter table public.lessons   enable row level security;
 alter table public.tests     enable row level security;
 alter table public.recommendations enable row level security;
 alter table public.report_logs enable row level security;
+alter table public.monthly_evaluations enable row level security;
 
 do $$
 declare t text;
 begin
-  foreach t in array array['students','textbooks','progress','lessons','tests','recommendations','report_logs'] loop
+  foreach t in array array['students','textbooks','progress','lessons','tests','recommendations','report_logs','monthly_evaluations'] loop
     execute format('drop policy if exists "owner_all" on public.%I', t);
     execute format(
       'create policy "owner_all" on public.%I for all to authenticated
@@ -143,7 +163,7 @@ begin
 end $$;
 
 -- anon 역할의 직접 권한을 제거 (이중 안전장치)
-revoke all on public.students, public.textbooks, public.progress, public.lessons, public.tests, public.recommendations, public.report_logs from anon;
+revoke all on public.students, public.textbooks, public.progress, public.lessons, public.tests, public.recommendations, public.report_logs, public.monthly_evaluations from anon;
 
 -- ============================================================
 -- 3. 추천용 API (Claude 예약 작업 전용)

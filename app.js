@@ -11,11 +11,12 @@ const state = {
   progress: [],          // 전체 학생의 교재 진도
   recentLessons: [],     // 최근 30일 (전체 현황용)
   recentTests: [],       // 최근 90일 (전체 현황용)
-  view: "overview",      // overview | summary | recs | student
+  view: "overview",      // overview | summary | evals | recs | student
   pendingRecs: 0,
   recFilter: { range: "thisWeek", start: "", end: "" },
   allRecs: [],
   summary: { range: "thisWeek", start: "", end: "", data: null, loading: false, failed: false },
+  evals: { year: new Date().getFullYear(), month: new Date().getMonth() + 1, studentId: null, data: null, loading: false, failed: false, key: "" },
   studentId: null,
   tab: "progress",       // progress | lessons | tests | report
   report: { range: "thisWeek", start: "", end: "", comment: "" },
@@ -222,6 +223,7 @@ function render() {
   renderSidebar();
   if (state.view === "student") renderStudent();
   else if (state.view === "summary") renderSummary();
+  else if (state.view === "evals") renderEvals();
   else if (state.view === "recs") renderAllRecs();
   else renderOverview();
 }
@@ -229,6 +231,7 @@ function render() {
 function renderSidebar() {
   $("#nav-overview").classList.toggle("active", state.view === "overview");
   $("#nav-summary").classList.toggle("active", state.view === "summary");
+  $("#nav-evals").classList.toggle("active", state.view === "evals");
   $("#nav-recs").classList.toggle("active", state.view === "recs");
   const rb = $("#recs-badge");
   rb.hidden = !state.pendingRecs;
@@ -809,6 +812,255 @@ function renderSummary() {
   };
 }
 
+/* ---------- 월말평가서 ---------- */
+const EVAL_LEVELS = [[5, "매우 우수"], [4, "우수"], [3, "보통"], [2, "노력 필요"], [1, "많이 노력 필요"]];
+const EVAL_SKILLS = [["listening", "듣기"], ["speaking", "말하기"], ["reading", "읽기"], ["writing", "쓰기"], ["vocab", "어휘"], ["grammar", "문법"]];
+const EVAL_ATTITUDE = [["participation", "참여도"], ["focus", "집중도"], ["homework", "숙제 성실도"]];
+const EVAL_TEXTS = [
+  ["achievement", "이달의 성취", "예: 현재완료를 정확히 쓰기 시작했고, 단어 시험 점수가 꾸준히 올랐습니다."],
+  ["improvement", "보완할 점", "예: 본문을 소리 내어 읽을 때 끊어 읽기를 더 연습하면 좋겠습니다."],
+  ["next_plan", "다음 달 학습 계획", "예: Grammar Zone 1 Unit 9~12 진행, 주 1회 쓰기 활동 추가"],
+  ["parent_note", "학부모께 드리는 말씀", "가정에서 도와주실 부분이나 전달 사항을 적어 주세요."],
+];
+const EVAL_STATUS = ["작성중", "완료"];
+
+function monthRange(y, m) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return { start: `${y}-${pad(m)}-01`, end: toStr(new Date(y, m, 0)) };
+}
+function prevMonthStart(y, m) {
+  return m === 1 ? `${y - 1}-12-01` : `${y}-${String(m - 1).padStart(2, "0")}-01`;
+}
+const levelLabel = (v) => (EVAL_LEVELS.find(([n]) => n === v) || [])[1] || "";
+
+async function loadEvals() {
+  const ev = state.evals;
+  const { year, month } = ev;
+  const key = `${year}-${month}`;
+  ev.key = key;
+  ev.loading = true;
+  ev.failed = false;
+  renderEvals();
+  const range = monthRange(year, month);
+  try {
+    const from = prevMonthStart(year, month);
+    const [lessons, tests] = await Promise.all([
+      run(db.from("lessons").select("*").gte("lesson_date", from).lte("lesson_date", range.end).limit(5000)),
+      run(db.from("tests").select("*").gte("test_date", from).lte("test_date", range.end).limit(5000)),
+    ]);
+    let rows = [];
+    let missing = false;
+    try {
+      rows = await run(db.from("monthly_evaluations").select("*").eq("year", year).eq("month", month).limit(1000));
+    } catch {
+      missing = true; // 테이블이 아직 없음
+    }
+    if (ev.key !== key) return; // 그 사이 다른 달을 골랐으면 버림
+    ev.data = { key, range, lessons, tests, rows, missing };
+  } catch (e) {
+    if (ev.key !== key) return;
+    ev.data = null;
+    ev.failed = true;
+    fail(e, "월말평가서를 불러오지 못했습니다");
+  }
+  ev.loading = false;
+  if (state.view === "evals") renderEvals();
+}
+
+function evalSummary(s, d) {
+  const src = { lessons: d.lessons.filter((l) => l.student_id === s.id), tests: d.tests.filter((t) => t.student_id === s.id) };
+  const r = buildReport(s.id, d.range.start, d.range.end, src);
+  const hwTotal = r.hw.완료 + r.hw.일부 + r.hw.미제출;
+  return {
+    r,
+    attRate: r.lessons.length ? Math.round((r.attended.length / r.lessons.length) * 100) : null,
+    hwRate: hwTotal ? Math.round((r.hw.완료 / hwTotal) * 100) : null,
+    comments: r.lessons.filter((l) => l.teacher_comment && l.teacher_comment.trim()),
+  };
+}
+
+function evalStatusBadge(row) {
+  if (!row) return `<span class="badge warn">미작성</span>`;
+  return row.status === "완료" ? `<span class="badge done">완료</span>` : `<span class="badge">작성 중</span>`;
+}
+
+function renderEvals() {
+  const ev = state.evals;
+  const yNow = new Date().getFullYear();
+  const years = [];
+  for (let y = yNow - 3; y <= yNow + 1; y++) years.push(y);
+  if (!years.includes(ev.year)) years.push(ev.year);
+  years.sort();
+  const head = `<div class="page-head"><h2>월말평가서</h2><span class="muted">${ev.year}년 ${ev.month}월</span></div>
+    <div class="card report-controls eval-controls">
+      <label>연도<select id="ev-year">${years.map((y) => `<option value="${y}" ${y === ev.year ? "selected" : ""}>${y}년</option>`).join("")}</select></label>
+      <label>월<select id="ev-month">${Array.from({ length: 12 }, (_, i) => i + 1).map((m) => `<option value="${m}" ${m === ev.month ? "selected" : ""}>${m}월</option>`).join("")}</select></label>
+    </div>`;
+  const bind = () => {
+    $("#ev-year").onchange = (e) => { ev.year = Number(e.target.value); ev.studentId = null; ev.data = null; loadEvals(); };
+    $("#ev-month").onchange = (e) => { ev.month = Number(e.target.value); ev.studentId = null; ev.data = null; loadEvals(); };
+  };
+  const main = $("#main");
+  const d = ev.data;
+  if (ev.loading || !d || d.key !== `${ev.year}-${ev.month}`) {
+    main.innerHTML = head + `<div class="card empty">${ev.failed ? "불러오지 못했습니다. 연도나 월을 다시 선택해 보세요." : "불러오는 중..."}</div>`;
+    bind();
+    if (!ev.loading && !ev.failed) loadEvals();
+    return;
+  }
+  if (d.missing) {
+    main.innerHTML = head + `<div class="card"><strong>월말평가서 저장 테이블이 아직 없습니다.</strong>
+      <p class="muted">Supabase SQL Editor에서 최신 <code>schema.sql</code>을 실행한 뒤 이 화면을 새로고침하세요. 테이블이 생기면 평가서를 저장할 수 있습니다.</p></div>`;
+    bind();
+    return;
+  }
+  if (ev.studentId) {
+    const s = state.students.find((x) => x.id === ev.studentId);
+    if (s) return renderEvalDetail(s, d, head, bind);
+    ev.studentId = null;
+  }
+  const students = state.students.filter((s) => s.active);
+  const done = students.filter((s) => (d.rows.find((r) => r.student_id === s.id) || {}).status === "완료").length;
+  const rows = students.map((s) => {
+    const row = d.rows.find((r) => r.student_id === s.id);
+    const sm = evalSummary(s, d);
+    return `<tr class="clickable" data-eid="${esc(s.id)}">
+      <td><strong>${esc(s.name)}</strong><div class="muted">${esc(s.grade || "")}</div></td>
+      <td class="num">${sm.r.lessons.length}회</td>
+      <td class="num">${sm.attRate == null ? "-" : sm.attRate + "%"}</td>
+      <td class="num">${sm.hwRate == null ? "-" : sm.hwRate + "%"}</td>
+      <td class="num">${sm.r.testAvg == null ? "-" : sm.r.testAvg.toFixed(0) + "점"}</td>
+      <td>${evalStatusBadge(row)}</td></tr>`;
+  });
+  main.innerHTML = head + (students.length
+    ? `<p class="muted" style="margin:.2rem 0 .8rem">${students.length}명 중 ${done}명 완료 · 학생을 누르면 평가서를 작성합니다.</p>
+      <div class="card table-wrap"><table>
+        <thead><tr><th>학생</th><th class="num">수업</th><th class="num">출석률</th><th class="num">숙제 완료율</th><th class="num">시험 평균</th><th>평가서</th></tr></thead>
+        <tbody>${rows.join("")}</tbody></table></div>`
+    : `<div class="card empty">재원 중인 학생이 없습니다.</div>`);
+  bind();
+  main.querySelectorAll("tr[data-eid]").forEach((tr) => {
+    tr.onclick = () => { ev.studentId = tr.dataset.eid; renderEvals(); window.scrollTo(0, 0); };
+  });
+}
+
+function evalAutoHtml(s, d, sm) {
+  const r = sm.r;
+  const attParts = ["출석", "지각", "결석", "보강"].filter((k) => r.att[k]).map((k) => `${k} ${r.att[k]}`);
+  const diff = r.testAvg != null && r.prevAvg != null ? Math.round(r.testAvg - r.prevAvg) : null;
+  const books = r.books.length
+    ? `<ul class="eval-list">${r.books.map(({ book, from, to, current }) => `<li>${esc(book.title)}${esc(rangeText(book, { from_unit: from, to_unit: to }))}${current != null ? ` <span class="muted">(현재 ${current}/${book.total_units})</span>` : ""}</li>`).join("")}</ul>`
+    : `<p class="muted" style="margin:0">이번 달 진도 기록이 없습니다.</p>`;
+  const comments = sm.comments.length
+    ? `<ul class="eval-list">${sm.comments.map((l) => `<li><span class="muted">${shortDate(l.lesson_date)}</span> ${esc(l.teacher_comment.trim())}</li>`).join("")}</ul>`
+    : `<p class="muted" style="margin:0">이번 달에 적은 수업 코멘트가 없습니다.</p>`;
+  return `<div class="summary">
+      <div class="card"><strong>${r.lessons.length}회</strong><span>수업${attParts.length ? " · " + attParts.join(" · ") : ""}</span></div>
+      <div class="card"><strong>${sm.attRate == null ? "-" : sm.attRate + "%"}</strong><span>출석률</span></div>
+      <div class="card"><strong>${sm.hwRate == null ? "-" : sm.hwRate + "%"}</strong><span>숙제 완료율</span></div>
+      <div class="card"><strong>${r.testAvg == null ? "-" : r.testAvg.toFixed(0) + "점"}</strong><span>시험 평균${diff == null ? "" : diff === 0 ? " · 전월과 비슷" : ` · 전월 대비 ${diff > 0 ? "+" : ""}${diff}점`}</span></div>
+    </div>
+    <div class="grid eval-auto">
+      <div class="card"><h3>이번 달 진도</h3>${books}</div>
+      <div class="card"><h3>수업 코멘트</h3>${comments}</div>
+    </div>`;
+}
+
+function evalPills(name, value) {
+  return `<div class="pills" role="radiogroup">
+    <label class="pill none"><input type="radio" name="${name}" value="" ${value ? "" : "checked"}><span>-</span></label>
+    ${EVAL_LEVELS.map(([n, t]) => `<label class="pill"><input type="radio" name="${name}" value="${n}" ${value === n ? "checked" : ""}><span>${t}</span></label>`).join("")}
+  </div>`;
+}
+
+function evalValues() {
+  const form = $("#ev-form");
+  const num = (name) => { const c = form.querySelector(`input[name='${name}']:checked`); return c && c.value ? Number(c.value) : null; };
+  const ratings = {};
+  EVAL_SKILLS.forEach(([k]) => { ratings[k] = num("r_" + k); });
+  const attitude = {};
+  EVAL_ATTITUDE.forEach(([k]) => { attitude[k] = num("a_" + k); });
+  const vals = { ratings, attitude, status: form.elements.status.value };
+  EVAL_TEXTS.forEach(([k]) => { vals[k] = form.elements[k].value.trim(); });
+  return vals;
+}
+
+function evalPrintHtml(s, d, sm, vals) {
+  const r = sm.r;
+  const dots = (v) => (v ? `<span class="dots">${"●".repeat(v)}${"○".repeat(5 - v)}</span> ${esc(levelLabel(v))}` : "-");
+  const rateTable = (title, defs, obj) => `<table class="eval-table"><thead><tr><th colspan="2">${title}</th></tr></thead><tbody>${defs.map(([k, t]) => `<tr><th>${t}</th><td>${dots(obj[k])}</td></tr>`).join("")}</tbody></table>`;
+  const attParts = ["출석", "지각", "결석", "보강"].filter((k) => r.att[k]).map((k) => `${k} ${r.att[k]}`);
+  const diff = r.testAvg != null && r.prevAvg != null ? Math.round(r.testAvg - r.prevAvg) : null;
+  const books = r.books.map(({ book, from, to, current }) => `${esc(book.title)}${esc(rangeText(book, { from_unit: from, to_unit: to }))}${current != null ? ` (현재 ${current}/${book.total_units})` : ""}`);
+  const text = (k, t) => (vals[k] ? `<section><h3>${t}</h3><p>${esc(vals[k])}</p></section>` : "");
+  return `<div class="eval-head"><h2>[${esc(ACADEMY_NAME)}] 월말평가서</h2><p>${esc(s.name)} 학생${s.grade ? ` (${esc(s.grade)})` : ""} · ${d.key.split("-")[0]}년 ${Number(d.key.split("-")[1])}월 · 출력일 ${shortDate(todayStr())}</p></div>
+    <table class="eval-table"><tbody>
+      <tr><th>수업</th><td>${r.lessons.length}회${attParts.length ? ` (${attParts.join(", ")})` : ""} · 출석률 ${sm.attRate == null ? "-" : sm.attRate + "%"}</td></tr>
+      <tr><th>숙제</th><td>완료율 ${sm.hwRate == null ? "-" : sm.hwRate + "%"}</td></tr>
+      <tr><th>시험</th><td>${r.testAvg == null ? "-" : "평균 " + r.testAvg.toFixed(0) + "점" + (diff == null ? "" : diff === 0 ? " (전월과 비슷)" : ` (전월 대비 ${diff > 0 ? "+" : ""}${diff}점)`)}</td></tr>
+      <tr><th>진도</th><td>${books.length ? books.join("<br>") : "-"}</td></tr>
+    </tbody></table>
+    <div class="eval-two">${rateTable("영역별 평가", EVAL_SKILLS, vals.ratings)}${rateTable("학습 태도", EVAL_ATTITUDE, vals.attitude)}</div>
+    ${EVAL_TEXTS.map(([k, t]) => text(k, t)).join("")}
+    <p class="eval-sign">${esc(ACADEMY_NAME)}</p>`;
+}
+
+function renderEvalDetail(s, d, head, bindHead) {
+  const ev = state.evals;
+  const row = d.rows.find((r) => r.student_id === s.id) || null;
+  const sm = evalSummary(s, d);
+  const ratings = (row && row.ratings) || {};
+  const attitude = (row && row.attitude) || {};
+  const val = (k) => (row && row[k]) || "";
+  const rateRows = (defs, prefix, obj) => defs.map(([k, t]) => `<div class="rate-row"><span class="rate-name">${t}</span>${evalPills(prefix + k, obj[k] ?? null)}</div>`).join("");
+  $("#main").innerHTML = `
+    <div class="eval-edit">
+      ${head}
+      <div class="toolbar"><button class="btn" type="button" id="ev-back">← 학생 목록</button><strong style="font-size:1.1rem">${esc(s.name)}</strong><span class="muted">${esc(s.grade || "")}</span>${evalStatusBadge(row)}</div>
+      ${evalAutoHtml(s, d, sm)}
+      <form id="ev-form" class="eval-form" autocomplete="off">
+        <div class="grid">
+          <div class="card"><h3>영역별 평가</h3>${rateRows(EVAL_SKILLS, "r_", ratings)}</div>
+          <div class="card"><h3>학습 태도</h3>${rateRows(EVAL_ATTITUDE, "a_", attitude)}</div>
+        </div>
+        ${EVAL_TEXTS.map(([k, t, ph]) => `<label class="card eval-text"><h3>${t}</h3><textarea name="${k}" rows="5" maxlength="3000" placeholder="${esc(ph)}">${esc(val(k))}</textarea></label>`).join("")}
+        <div class="card eval-actions">
+          <label class="check"><span>상태</span><select name="status">${EVAL_STATUS.map((x) => `<option value="${x}" ${(row ? row.status : "작성중") === x ? "selected" : ""}>${x === "작성중" ? "작성 중" : x}</option>`).join("")}</select></label>
+          <span class="spacer"></span>
+          <p id="ev-err" class="error" role="alert"></p>
+          <button class="btn" type="button" id="ev-print">인쇄 / PDF 저장</button>
+          <button class="btn primary" type="submit" id="ev-save">저장</button>
+        </div>
+      </form>
+    </div>
+    <div class="eval-print" id="ev-print-area"></div>`;
+  bindHead();
+  $("#ev-back").onclick = () => { ev.studentId = null; renderEvals(); };
+  $("#ev-print").onclick = () => {
+    $("#ev-print-area").innerHTML = evalPrintHtml(s, d, sm, evalValues());
+    window.print();
+  };
+  $("#ev-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = $("#ev-save");
+    btn.disabled = true;
+    $("#ev-err").textContent = "";
+    try {
+      const vals = evalValues();
+      const payload = { student_id: s.id, year: ev.year, month: ev.month, ...vals, updated_at: new Date().toISOString() };
+      const saved = await run(db.from("monthly_evaluations").upsert(payload, { onConflict: "student_id,year,month" }).select("*").single());
+      const merged = { ...(row || {}), ...payload, ...(saved || {}) };
+      const i = d.rows.findIndex((r) => r.student_id === s.id);
+      if (i >= 0) d.rows[i] = merged; else d.rows.push(merged);
+      toast(vals.status === "완료" ? "저장했습니다 (완료)" : "저장했습니다");
+      renderEvals();
+    } catch (err) {
+      $("#ev-err").textContent = "저장하지 못했습니다: " + (err.message || err);
+      btn.disabled = false;
+    }
+  };
+}
+
 /* ---------- 수업 추천 공통: 기간 필터 + 인쇄 ---------- */
 function recFilterRange() {
   const f = state.recFilter;
@@ -1273,6 +1525,17 @@ function bindEvents() {
     state.studentId = null;
     state.summary.data = null;
     state.summary.failed = false;
+    render();
+  };
+  $("#nav-evals").onclick = () => {
+    const now = new Date();
+    state.view = "evals";
+    state.studentId = null;
+    state.evals.year = now.getFullYear();
+    state.evals.month = now.getMonth() + 1;
+    state.evals.studentId = null;
+    state.evals.data = null;
+    state.evals.failed = false;
     render();
   };
   $("#nav-recs").onclick = async () => {
