@@ -1127,7 +1127,7 @@ const EVAL_TEXTS = [
   ["next_plan", "다음 달 학습 계획", "예: Grammar Zone 1 Unit 9~12 진행, 주 1회 쓰기 활동 추가"],
   ["parent_note", "학부모께 드리는 말씀", "가정에서 도와주실 부분이나 전달 사항을 적어 주세요."],
 ];
-const EVAL_STATUS = ["작성중", "완료"];
+const EVAL_STATUS = ["작성중", "AI 초안", "완료"];
 
 function monthRange(y, m) {
   const pad = (n) => String(n).padStart(2, "0");
@@ -1190,7 +1190,7 @@ function evalSummary(s, d) {
 
 function evalStatusBadge(row) {
   if (!row) return `<span class="badge warn">미작성</span>`;
-  if (row.source === "ai" && row.status !== "완료") return `<span class="badge ai" title="Claude가 쓴 초안입니다. 확인 후 저장하면 선생님 작성으로 바뀝니다">AI 초안</span>`;
+  if (row.status === "AI 초안") return `<span class="badge ai" title="Claude가 쓴 초안입니다. 확인한 뒤 상태를 '작성 중'이나 '완료'로 바꿔 저장하세요">AI 초안</span>`;
   return row.status === "완료" ? `<span class="badge done">완료</span>` : `<span class="badge">작성 중</span>`;
 }
 
@@ -1417,7 +1417,7 @@ function renderEvalDetail(s, d, head, bindHead) {
     <div class="eval-edit">
       ${head}
       <div class="toolbar"><button class="btn" type="button" id="ev-back">← 학생 목록</button><strong style="font-size:1.1rem">${esc(s.name)}</strong><span class="muted">${esc(s.grade || "")}</span>${evalStatusBadge(row)}</div>
-      ${row && row.source === "ai" && row.status !== "완료" ? `<div class="ai-note"><strong>AI 초안</strong> — Claude가 작성했습니다${row.ai_model ? ` (${esc(row.ai_model)})` : ""}. 내용을 확인·수정한 뒤 저장하면 선생님 작성으로 바뀌고, 상태를 '완료'로 바꾸면 확정됩니다.</div>` : ""}
+      ${row && row.status === "AI 초안" ? `<div class="ai-note"><strong>AI 초안</strong> — Claude가 작성했습니다${row.source === "ai" && row.ai_model ? ` (${esc(row.ai_model)})` : ""}. 내용을 확인·수정한 뒤 아래 상태를 '작성 중'이나 '완료'로 바꿔 저장하세요.</div>` : ""}
       ${evalAutoHtml(s, d, sm)}
       <form id="ev-form" class="eval-form" autocomplete="off">
         <div class="grid">

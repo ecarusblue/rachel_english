@@ -78,7 +78,7 @@ create table if not exists public.monthly_evaluations (
   improvement  text check (char_length(improvement) <= 3000),
   next_plan    text check (char_length(next_plan) <= 3000),
   parent_note  text check (char_length(parent_note) <= 3000),
-  status       text not null default '작성중' check (status in ('작성중','완료')),
+  status       text not null default '작성중' check (status in ('작성중','AI 초안','완료')),
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
   unique (student_id, year, month)
@@ -87,6 +87,10 @@ create table if not exists public.monthly_evaluations (
 -- Claude 예약 작업이 쓴 초안 표시(AI 초안). 선생님이 앱에서 저장하면 'teacher' 로 바뀝니다.
 alter table public.monthly_evaluations add column if not exists source   text not null default 'teacher' check (source in ('teacher','ai'));
 alter table public.monthly_evaluations add column if not exists ai_model text;
+-- 기존 DB 업그레이드: 상태에 'AI 초안' 추가(이미 있으면 같은 정의로 다시 만들 뿐), 예전 방식으로 저장된 AI 초안도 새 상태로 맞춤
+alter table public.monthly_evaluations drop constraint if exists monthly_evaluations_status_check;
+alter table public.monthly_evaluations add constraint monthly_evaluations_status_check check (status in ('작성중','AI 초안','완료'));
+update public.monthly_evaluations set status = 'AI 초안' where source = 'ai' and status = '작성중';
 
 -- 수업 시간표 (요일·타임·시간과 배정 학생을 매주 반복으로 저장)
 create table if not exists public.schedule_slots (
@@ -384,7 +388,7 @@ grant execute on function public.api_submit_recommendations(text, jsonb, text) t
 -- ============================================================
 -- 4. 월말평가서용 API (Claude 예약 작업 전용)
 --    - 읽기: api_read_evaluation_source(토큰, 연, 월) -> 학생 이름 없이 가명으로 그 달의 수업·시험 자료를 돌려줌
---    - 쓰기: api_submit_evaluations(토큰, 항목들)     -> monthly_evaluations 에 'AI 초안'(작성중)으로만 저장
+--    - 쓰기: api_submit_evaluations(토큰, 항목들)     -> monthly_evaluations 에 상태 'AI 초안'으로만 저장
 --    선생님이 직접 작성·수정했거나 '완료'인 평가서는 덮어쓰지 않습니다. (사용법: docs/evaluation-api.md)
 -- ============================================================
 
@@ -629,13 +633,13 @@ begin
 
       if not found then
         insert into public.monthly_evaluations (owner, student_id, year, month, ratings, attitude, achievement, improvement, next_plan, parent_note, status, source, ai_model)
-        values (v_owner, v_student, v_year, v_month, v_ratings, v_attitude, v_ach, v_imp, v_next, v_note, '작성중', 'ai', left(coalesce(p_model, 'Claude'), 100));
+        values (v_owner, v_student, v_year, v_month, v_ratings, v_attitude, v_ach, v_imp, v_next, v_note, 'AI 초안', 'ai', left(coalesce(p_model, 'Claude'), 100));
         v_inserted := v_inserted + 1;
-      elsif v_ex.source = 'ai' and v_ex.status = '작성중' then
+      elsif v_ex.source = 'ai' and v_ex.status = 'AI 초안' then
         update public.monthly_evaluations
            set ratings = v_ratings, attitude = v_attitude, achievement = v_ach, improvement = v_imp,
                next_plan = v_next, parent_note = v_note, ai_model = left(coalesce(p_model, 'Claude'), 100), updated_at = now()
-         where id = v_ex.id and source = 'ai' and status = '작성중';
+         where id = v_ex.id and source = 'ai' and status = 'AI 초안';
         v_updated := v_updated + 1;
       else
         v_skipped := v_skipped + 1;   -- 선생님이 쓰거나 고쳤거나 완료된 평가서는 건드리지 않음
