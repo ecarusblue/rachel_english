@@ -47,6 +47,9 @@
 }
 
 * { box-sizing: border-box; }
+/* iOS Safari가 긴 글을 자동으로 키우는 것(글자 크기 자동 조정)을 막음: 평가서 미리보기의 긴 문단이 커 보이던 문제 */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.ev-sheet, .ev-sheet * { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 html, body { margin: 0; height: 100%; }
 body {
   font-family: "Pretendard Variable", Pretendard, system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
