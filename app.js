@@ -2062,11 +2062,9 @@ function bindEvents() {
     const b = $("#btn-side");
     b.textContent = off ? "▶ 메뉴 펼치기" : "◀ 메뉴 숨기기";
     b.setAttribute("aria-expanded", off ? "false" : "true");
-    $("#btn-home").hidden = !off;
     if (save) { try { localStorage.setItem(SIDE_KEY, off ? "1" : "0"); } catch { /* 저장 실패는 무시 */ } }
   };
   $("#btn-side").onclick = () => setSide(!appEl.classList.contains("side-off"));
-  $("#btn-home").onclick = () => $("#nav-overview").click();
   try { setSide(localStorage.getItem(SIDE_KEY) === "1", false); } catch { setSide(false, false); }
   $("#btn-sched-edit").onclick = () => {
     state.view = "overview";
