@@ -410,18 +410,38 @@ function renderLessonsTab(s) {
   bindFilter(state.lessonFilter, "lf", () => renderLessonsTab(s));
 }
 
-function trendSvg(tests) {
-  const pts = [...tests].sort((a, b) => a.test_date.localeCompare(b.test_date)).slice(-15);
-  if (pts.length < 2) return `<p class="muted" style="margin:0">추이 그래프는 시험이 2회 이상 쌓이면 표시됩니다.</p>`;
-  const W = 600, H = 150, L = 28, R = 10, T = 12, B = 22;
-  const x = (i) => L + (i * (W - L - R)) / (pts.length - 1);
-  const y = (v) => T + ((100 - Math.min(100, v)) * (H - T - B)) / 100;
+const TEST_KINDS = ["단어시험", "단원평가", "모의고사", "기타"];
+function kindCard(kind, list, ci) {
+  const pts = [...list].sort((a, b) => a.test_date.localeCompare(b.test_date)).slice(-15);
   const vals = pts.map((t) => pct(t.score, t.max_score));
-  const path = vals.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-  const grid = [0, 50, 100].map((g) => `<line class="axis" x1="${L}" x2="${W - R}" y1="${y(g)}" y2="${y(g)}"/><text x="2" y="${y(g) + 3}">${g}</text>`).join("");
-  const dots = vals.map((v, i) => `<circle class="dot" cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3"><title>${fmtDate(pts[i].test_date)} ${v.toFixed(0)}점</title></circle>`).join("");
-  const labels = [0, pts.length - 1].map((i) => `<text x="${x(i)}" y="${H - 6}" text-anchor="${i ? "end" : "start"}">${fmtDate(pts[i].test_date)}</text>`).join("");
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="시험 점수 추이(100점 만점 환산)">${grid}<path class="line" d="${path}"/>${dots}${labels}</svg>`;
+  const last = Math.round(vals[vals.length - 1]);
+  if (pts.length < 2) {
+    return `<div class="card gc gone k${ci}"><div class="gk">${esc(kind)}</div><div class="gbig">${last}점 <small>· 1회</small></div><div class="muted">다음 시험부터 추이가 표시돼요</div></div>`;
+  }
+  const W = 300, H = 130, L = 30, R = 12, T = 14, B = 24;
+  const x = (i) => L + 14 + (i * (W - L - R - 24)) / (pts.length - 1);
+  const y = (v) => T + ((100 - Math.max(0, Math.min(100, v))) * (H - T - B)) / 100;
+  const line = vals.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(pts.length - 1).toFixed(1)},${y(0)} L${x(0).toFixed(1)},${y(0)} Z`;
+  const grid = [0, 50, 100].map((g) => `<line class="gaxis" x1="${L}" x2="${W - R}" y1="${y(g)}" y2="${y(g)}"/><text class="gtick" x="${L - 6}" y="${y(g) + 3.5}" text-anchor="end">${g}</text>`).join("");
+  const showAll = pts.length <= 8;
+  const dots = vals.map((v, i) => {
+    const isLast = i === vals.length - 1;
+    return `<circle class="gdot${isLast ? " last" : ""}" cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="${isLast ? 5 : 3.2}"><title>${fmtDate(pts[i].test_date)} ${v.toFixed(0)}점</title></circle>${showAll || isLast ? `<text class="gval${isLast ? " last" : ""}" x="${x(i).toFixed(1)}" y="${(y(v) - 9).toFixed(1)}" text-anchor="middle">${Math.round(v)}</text>` : ""}`;
+  }).join("");
+  const dl = (i) => { const d = parseD(pts[i].test_date); return `${d.getMonth() + 1}.${d.getDate()}`; };
+  const labIdx = pts.length <= 7 ? pts.map((_, i) => i) : [0, pts.length - 1];
+  const labels = labIdx.map((i) => `<text class="gtick" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="${pts.length > 7 ? (i ? "end" : "start") : "middle"}">${dl(i)}</text>`).join("");
+  const diff = Math.round(vals[vals.length - 1]) - Math.round(vals[vals.length - 2]);
+  const chg = `<span class="gchg ${diff > 0 ? "up" : diff < 0 ? "dn" : ""}">${diff > 0 ? "▲" : diff < 0 ? "▼" : "–"} ${Math.abs(diff)}</span>`;
+  return `<div class="card gc k${ci}"><div class="gh"><div><div class="gk">${esc(kind)}</div><div class="gs"><b>${last}</b>점 ${chg}</div></div><span class="gm">${list.length}회</span></div>
+    <svg class="gsvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(kind)} 점수 추이(100점 만점 환산)">${grid}<path class="garea" d="${area}"/><path class="gline" d="${line}"/>${dots}${labels}</svg>
+    <div class="gf"><span>평균 <b>${avg(vals).toFixed(0)}</b></span><span>최고 <b>${Math.max(...vals).toFixed(0)}</b></span><span>최저 <b>${Math.min(...vals).toFixed(0)}</b></span></div></div>`;
+}
+function trendCards(rows, scoped) {
+  const kinds = TEST_KINDS.filter((k) => rows.some((t) => t.kind === k));
+  const cards = kinds.map((k) => kindCard(k, rows.filter((t) => t.kind === k), TEST_KINDS.indexOf(k)));
+  return `<h3 class="gtitle">종류별 점수 추이 <small class="muted">· ${scoped ? "선택한 기간" : "전체 기간"} · 100점 환산</small></h3><div class="gg ${kinds.length === 1 ? "one" : ""}">${cards.join("")}</div>`;
 }
 
 function renderTestsTab(s) {
@@ -440,7 +460,7 @@ function renderTestsTab(s) {
             <div class="card"><strong>${Math.max(...pcts).toFixed(0)}점</strong><span>최고점</span></div>
             <div class="card"><strong>${rows.length}회</strong><span>${scoped ? "기간 내 시험" : "누적 시험"}</span></div>
           </div>
-          <div class="card" style="margin-bottom:1rem">${trendSvg(rows)}</div>
+          ${trendCards(rows, scoped)}
           <div class="card table-wrap"><table>
             <thead><tr><th>날짜</th><th>종류</th><th>이름</th><th class="num">점수</th><th class="num">환산</th></tr></thead>
             <tbody>${rows
