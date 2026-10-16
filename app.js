@@ -733,9 +733,7 @@ function renderOverview() {
       const books = r.books.length
         ? `<div class="mini-books">${r.books
             .map(({ p, book }) => {
-              const ratio = Math.min(100, Math.round((p.current_unit / book.total_units) * 100));
-              return `<div class="row"><span>${esc(book.title)}</span><span class="muted">${p.current_unit}/${book.total_units}</span>
-                <div class="bar ${ratio >= 100 ? "done" : ""}"><span style="width:${ratio}%"></span></div></div>`;
+              return `<div class="row"><span>${esc(book.title)}</span><span class="muted">${p.current_unit}/${book.total_units}</span></div>`;
             })
             .join("")}</div>`
         : `<span class="muted">배정된 교재 없음</span>`;
@@ -800,8 +798,7 @@ function renderProgressTab(s) {
   const classDays = studentClassDays(s.id);
   const week = state.progView === "week" && items.length > 0;
   const mini = ({ p, book }) => {
-    const ratio = Math.min(100, Math.round((p.current_unit / book.total_units) * 100));
-    return `<button type="button" class="wk-book" data-act="days" data-pid="${esc(p.id)}" title="누르면 요일을 바꿀 수 있어요"><b>${esc(book.title)}</b><span>${p.current_unit > 0 ? esc(curLabel(book, p.current_unit)) : "시작 전"}</span><div class="bar"><span style="width:${ratio}%"></span></div></button>`;
+    return `<button type="button" class="wk-book" data-act="days" data-pid="${esc(p.id)}" title="누르면 요일을 바꿀 수 있어요"><b>${esc(book.title)}</b><span>${p.current_unit > 0 ? esc(curLabel(book, p.current_unit)) : "시작 전"}</span></button>`;
   };
   const dayCols = (() => {
     const cols = [];
@@ -820,14 +817,12 @@ function renderProgressTab(s) {
     <div class="muted wk-tip">교재를 누르면 요일을 바꿀 수 있어요</div>`;
   const cards = items
     .map(({ p, book }) => {
-      const ratio = Math.min(100, Math.round((p.current_unit / book.total_units) * 100));
       const recent = state.detail.lessons.find((l) => lessonBooks(l).some((b) => b.textbook_id === book.id));
       const recentEnt = recent ? lessonBooks(recent).find((b) => b.textbook_id === book.id) : null;
       return `<div class="card book-card" data-pid="${esc(p.id)}">
         <h3>${esc(book.title)}</h3>
         <div class="dchips">${dayChips(p)}</div>
-        <div class="stat"><strong>${bookLeaves(book) ? (p.current_unit > 0 ? esc(unitName(book, p.current_unit)) : "시작 전") : esc(book.unit_label) + " " + p.current_unit} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong><span class="badge ${ratio >= 100 ? "" : "warn"}">${ratio}%</span></div>
-        <div class="bar ${ratio >= 100 ? "done" : ""}"><span style="width:${ratio}%"></span></div>
+        <div class="stat"><strong>${bookLeaves(book) ? (p.current_unit > 0 ? esc(unitName(book, p.current_unit)) : "시작 전") : esc(book.unit_label) + " " + p.current_unit} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong></div>
         ${recent ? `<div style="font-size:.85rem;margin-top:.5rem">최근 수업 <span class="muted">${fmtDate(recent.lesson_date)}</span> ·${esc(rangeText(book, recentEnt) || " 범위 미입력")}</div>` : ""}
         <div class="muted" style="font-size:.8rem;margin-top:.4rem">진도 갱신 ${fmtDate((p.updated_at || "").slice(0, 10))}</div>
         <div class="book-actions">
@@ -1398,8 +1393,7 @@ function evalPrintHtml(s, d, sm, vals) {
   const diff = r.testAvg != null && r.prevAvg != null ? Math.round(r.testAvg - r.prevAvg) : null;
   const books = r.books.length
     ? `<h3>이번 달 진도</h3>${r.books.map(({ book, from, to, current }) => {
-        const ratio = current != null && book.total_units ? Math.min(100, Math.round((current / book.total_units) * 100)) : 0;
-        return `<div class="rp-bk"><div><b>${esc(book.title)}</b> <span class="rp-mut">${esc(rangeText(book, { from_unit: from, to_unit: to }).trim())}</span></div>${current != null ? `<div class="rp-bar"><span style="width:${ratio}%"></span></div><div class="rp-mut rp-sm">현재 ${esc(curNum(book, current))}</div>` : ""}</div>`;
+        return `<div class="rp-bk"><div><b>${esc(book.title)}</b> <span class="rp-mut">${esc(rangeText(book, { from_unit: from, to_unit: to }).trim())}</span></div>${current != null ? `<div class="rp-mut rp-sm">현재 ${esc(curNum(book, current))}</div>` : ""}</div>`;
       }).join("")}`
     : "";
   const texts = EVAL_TEXTS.filter(([k]) => vals[k]).map(([k, t]) => `<div class="rp-tx"><h4>${t}</h4><p>${esc(vals[k])}</p></div>`).join("");
@@ -1740,14 +1734,14 @@ function planPrintHtml(s, recs) {
     const b = state.textbooks.find((x) => x.id === r.textbook_id);
     const pr = b ? state.progress.find((x) => x.student_id === s.id && x.textbook_id === b.id) : null;
     const d = r.target_date ? parseD(r.target_date) : null;
-    const pct = pr && b && b.total_units ? Math.max(0, Math.min(100, Math.round((pr.current_unit / b.total_units) * 100))) : null;
+    const hasPr = !!(pr && b && b.total_units);
     const range = b ? rangeText(b, r).trim() : `${r.from_unit}–${r.to_unit}단원`;
     return `<div class="pl-card">
       <div class="pl-date">${d ? `<div class="pl-d">${d.getDate()}</div><div class="pl-w">${DOW_FULL[d.getDay()]}</div>` : `<div class="pl-d pl-tbd">예정</div><div class="pl-w">날짜 미정</div>`}</div>
       <div class="pl-main">
         <div class="pl-bk">${esc(b ? b.title : "")}</div>
         <div class="pl-rg">${esc(range)}</div>
-        ${pct !== null ? `<div class="rp-bar pl-bar"><span style="width:${pct}%"></span></div><div class="pl-pg">지금까지 ${bookLeaves(b) ? esc(curNum(b, pr.current_unit)) : esc(b.unit_label) + " " + pr.current_unit + " / " + b.total_units} · ${pct}%</div>` : ""}
+        ${hasPr ? `<div class="pl-pg">지금까지 ${bookLeaves(b) ? esc(curNum(b, pr.current_unit)) : esc(b.unit_label) + " " + pr.current_unit + " / " + b.total_units}</div>` : ""}
         ${r.rationale ? `<div class="pl-pt">${esc(r.rationale)}</div>` : ""}
         <div class="pl-wr"><div class="pl-wr-t">수업 후 기록</div>
           <div class="pl-ln"><span>실제 진도</span><i class="w1"></i><span>~</span><i class="w2"></i></div>
