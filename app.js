@@ -1019,6 +1019,50 @@ function evalPrintHtml(s, d, sm, vals) {
   </div>`;
 }
 
+/* 월말평가서 인쇄 미리보기 (화면에서 A4 모양 확인) */
+function openEvalPreview(html, onPrint, returnTo) {
+  const old = document.getElementById("ev-preview-overlay");
+  if (old) old.remove();
+  const ov = document.createElement("div");
+  ov.id = "ev-preview-overlay";
+  ov.className = "ev-ov";
+  ov.setAttribute("role", "dialog");
+  ov.setAttribute("aria-modal", "true");
+  ov.setAttribute("aria-label", "월말평가서 인쇄 미리보기");
+  ov.innerHTML = `<div class="ev-ov-bar"><strong>인쇄 미리보기</strong><span class="muted" id="ev-ov-note">A4 기준</span><span class="spacer"></span>
+      <button class="btn primary" type="button" id="ev-ov-print">인쇄 / PDF 저장</button>
+      <button class="btn" type="button" id="ev-ov-close">닫기</button></div>
+    <div class="ev-ov-scroll"><div class="ev-sheet" id="ev-sheet">${html}</div></div>`;
+  document.body.appendChild(ov);
+  const sheet = ov.querySelector("#ev-sheet");
+  // A4 한 장(297mm) 기준으로 몇 장이 되는지 계산
+  const pageH = (297 / 25.4) * 96;
+  const pages = Math.max(1, Math.ceil((sheet.offsetHeight - 2) / pageH));
+  ov.querySelector("#ev-ov-note").textContent = pages > 1 ? `A4 기준 · 내용이 길어 ${pages}장으로 인쇄됩니다` : "A4 한 장";
+  // 화면 너비에 맞춰 축소
+  const fit = () => {
+    const avail = ov.querySelector(".ev-ov-scroll").clientWidth - 32;
+    const w = (210 / 25.4) * 96;
+    sheet.style.zoom = String(Math.min(1, avail / w));
+  };
+  fit();
+  const onResize = () => fit();
+  window.addEventListener("resize", onResize);
+  const close = () => {
+    window.removeEventListener("resize", onResize);
+    document.removeEventListener("keydown", onKey, true);
+    ov.remove();
+    if (returnTo && returnTo.isConnected) returnTo.focus();
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape") { e.stopPropagation(); close(); }
+  };
+  document.addEventListener("keydown", onKey, true);
+  ov.querySelector("#ev-ov-close").onclick = close;
+  ov.querySelector("#ev-ov-print").onclick = onPrint;
+  ov.querySelector("#ev-ov-close").focus();
+}
+
 function renderEvalDetail(s, d, head, bindHead) {
   const ev = state.evals;
   const row = d.rows.find((r) => r.student_id === s.id) || null;
@@ -1042,6 +1086,7 @@ function renderEvalDetail(s, d, head, bindHead) {
           <label class="check"><span>상태</span><select name="status">${EVAL_STATUS.map((x) => `<option value="${x}" ${(row ? row.status : "작성중") === x ? "selected" : ""}>${x === "작성중" ? "작성 중" : x}</option>`).join("")}</select></label>
           <span class="spacer"></span>
           <p id="ev-err" class="error" role="alert"></p>
+          <button class="btn" type="button" id="ev-preview">인쇄 미리보기</button>
           <button class="btn" type="button" id="ev-print">인쇄 / PDF 저장</button>
           <button class="btn primary" type="submit" id="ev-save">저장</button>
         </div>
@@ -1050,10 +1095,12 @@ function renderEvalDetail(s, d, head, bindHead) {
     <div class="eval-print" id="ev-print-area"></div>`;
   bindHead();
   $("#ev-back").onclick = () => { ev.studentId = null; renderEvals(); };
-  $("#ev-print").onclick = () => {
+  const doPrint = () => {
     $("#ev-print-area").innerHTML = evalPrintHtml(s, d, sm, evalValues());
     window.print();
   };
+  $("#ev-print").onclick = doPrint;
+  $("#ev-preview").onclick = () => openEvalPreview(evalPrintHtml(s, d, sm, evalValues()), doPrint, $("#ev-preview"));
   $("#ev-form").onsubmit = async (e) => {
     e.preventDefault();
     const btn = $("#ev-save");
