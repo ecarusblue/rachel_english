@@ -2259,23 +2259,31 @@ function lessonForm(s, lesson, rec = null) {
     return bk && pr && pr.current_unit < bk.total_units ? pr.current_unit + 1 : null;
   };
 
+  // 날짜의 요일에 배정된 교재만 기록할 수 있습니다 (요일을 지정하지 않은 교재는 모든 요일).
+  const wdOf = (ds) => { const d = new Date(`${ds}T00:00:00`); return Number.isNaN(d.getTime()) ? null : d.getDay(); };
+  const dayItems = (wd) => bookProgressFor(s.id).filter((x) => !dayList(x.p).length || (wd != null && dayList(x.p).includes(wd)));
+  const defaultBlocks = (wd) => {
+    const items = dayItems(wd);
+    const explicit = items.filter((x) => dayList(x.p).includes(wd));
+    let ids = explicit.map((x) => x.book.id);
+    if (!ids.length && items.length) {
+      const last = (state.detail.lessons.find((l) => l.textbook_id && items.some((x) => x.book.id === l.textbook_id)) || {}).textbook_id;
+      ids = [last || items[0].book.id];
+    }
+    return ids.map((id) => ({ textbook_id: id, from_unit: autoFrom(id), to_unit: null, topic: "" }));
+  };
   // 교재 블록 작업본: 첫 블록은 lessons 의 기존 컬럼, 둘째부터는 extra_books 에 저장됩니다.
   let blocks;
   let values = lesson;
   if (lesson) {
     blocks = lessonBooks(lesson).map((b) => ({ textbook_id: b.textbook_id, from_unit: b.from_unit ?? null, to_unit: b.to_unit ?? null, topic: b.topic || "" }));
-    if (!blocks.length) blocks = [{ textbook_id: "", from_unit: null, to_unit: null, topic: lesson.topic || "" }];
+    if (!blocks.length) blocks = lesson.topic ? [{ textbook_id: "", from_unit: null, to_unit: null, topic: lesson.topic }] : [];
   } else {
-    values = { lesson_date: todayStr(), attendance: "출석" };
-    const lastBookId = (state.detail.lessons.find((l) => l.textbook_id && assigned.some((x) => x.id === l.textbook_id)) || {}).textbook_id || (assigned[0] && assigned[0].id);
-    blocks = [{ textbook_id: lastBookId && bookOf(lastBookId) ? lastBookId : "", from_unit: lastBookId ? autoFrom(lastBookId) : null, to_unit: null, topic: "" }];
-    const todayWd = new Date(`${values.lesson_date}T00:00:00`).getDay();
-    const dayBooks = bookProgressFor(s.id).filter((x) => dayList(x.p).includes(todayWd));
-    if (dayBooks.length) blocks = dayBooks.map((x) => ({ textbook_id: x.book.id, from_unit: autoFrom(x.book.id), to_unit: null, topic: "" }));
-    if (rec) blocks = [blocks[0]];
-    if (rec) blocks[0] = { textbook_id: rec.textbook_id || blocks[0].textbook_id, from_unit: rec.from_unit ?? null, to_unit: rec.to_unit ?? null, topic: "" };
-    values = { ...values, lesson_date: (rec && rec.target_date) || values.lesson_date };
+    values = { lesson_date: (rec && rec.target_date) || todayStr(), attendance: "출석" };
+    blocks = defaultBlocks(wdOf(values.lesson_date));
+    if (rec && rec.textbook_id) blocks = [{ textbook_id: rec.textbook_id, from_unit: rec.from_unit ?? null, to_unit: rec.to_unit ?? null, topic: "" }];
   }
+  let curWd = wdOf(values.lesson_date);
 
   const fields = [
     { name: "lesson_date", label: "날짜", type: "date", required: true, half: true },
@@ -2363,9 +2371,6 @@ function lessonForm(s, lesson, rec = null) {
   });
 
   const host = $("#ls-books");
-  const keepIds = new Set(blocks.map((b) => b.textbook_id).filter(Boolean)); // 수정 시 이미 기록된 교재는 배정 해제돼도 유지
-  const assignedIds = new Set(assigned.map((x) => x.id));
-  const extraOpts = [...keepIds].filter((id) => !assignedIds.has(id) && bookOf(id)).map((id) => bookOf(id));
   let focusIdx = null;
   const leafNo = (book, top, child) => bookLeaves(book).findIndex((l) => l.top === top && l.child === child) + 1;
   const topRange = (book, top) => { const lv = bookLeaves(book); const ix = lv.map((l, n) => (l.top === top ? n + 1 : 0)).filter(Boolean); return [ix[0], ix[ix.length - 1]]; };
@@ -2386,31 +2391,46 @@ function lessonForm(s, lesson, rec = null) {
   };
   const paint = () => {
     const usedIds = new Set(blocks.map((b) => b.textbook_id).filter(Boolean));
+    const allowed = dayItems(curWd);
+    const skipped = allowed.filter((x) => !usedIds.has(x.book.id));
+    const dn = curWd != null ? DAY_NAME[curWd] + "요일 " : "";
     const blockHtml = blocks.map((b, i) => {
-      const opts = [["", i === 0 ? "(교재 없음)" : "(교재 선택)"], ...assigned.map((x) => [x.id, x.title]), ...extraOpts.map((x) => [x.id, `${x.title} (배정 해제됨)`])]
-        .filter(([id]) => id === "" || id === b.textbook_id || !usedIds.has(id));
       const book = bookOf(b.textbook_id);
-      const pr = book ? progOf(book.id) : null;
+      const p = book ? progOf(book.id) : null;
+      const pr = p;
       const hint = book ? `<div class="ls-hint">${pr ? `현재 진도 ${esc(curLabel(book, pr.current_unit))}` : "배정이 해제된 교재예요"}${b.from_unit != null && b.to_unit != null && b.from_unit <= b.to_unit && b.from_unit >= 1 ? ` · 기록 <b>${esc(unitName(book, b.from_unit))} – ${esc(unitName(book, b.to_unit))} (${b.to_unit - b.from_unit + 1}${bookLeaves(book) ? "단원" : ""})</b>` : ""}</div>` : "";
+      const days = p ? dayList(p) : [];
       return `<div class="ls-block">
         <div class="ls-head"><span class="tb-n">${i + 1}</span>
-          <select data-i="${i}" data-k="textbook_id" aria-label="교재 ${i + 1}" class="ls-book">${opts.map(([id, t]) => `<option value="${esc(id)}" ${id === (b.textbook_id || "") ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>
-          ${book ? `<span class="ls-kind">${bookLeaves(book) && bookLeaves(book).some((l) => l.child >= 0) ? "1레벨 → 2레벨" : "1레벨만"}</span>` : ""}
-          ${blocks.length > 1 ? `<button type="button" class="tb-x" data-ls="del" data-i="${i}" aria-label="이 교재 빼기">✕</button>` : ""}</div>
+          <strong class="ls-name">${esc(book ? book.title : "교재 없음")}</strong>
+          ${book ? `<span class="ls-kind">${days.length ? SCH_ORDER.filter((d) => days.includes(d)).map((d) => DAY_NAME[d]).join(" · ") : "모든 수업"}</span><span class="ls-kind">${bookLeaves(book) && bookLeaves(book).some((l) => l.child >= 0) ? "1레벨 → 2레벨" : "1레벨만"}</span>` : ""}
+          <button type="button" class="btn small" data-ls="skip" data-i="${i}">오늘은 안 나감</button></div>
         ${book ? `<div class="ls-units ${bookLeaves(book) ? "tree" : ""}">${unitField(b, i, "from_unit", "시작 단원")}${unitField(b, i, "to_unit", "종료 단원")}</div>${hint}` : ""}
         <label>학습 내용 (예: 현재완료, 본문 읽기)<input type="text" maxlength="200" data-i="${i}" data-k="topic" value="${esc(b.topic || "")}"></label></div>`;
     }).join("");
-    const chips = assigned.filter((x) => !usedIds.has(x.id)).map((x) => `<button type="button" class="tb-sub" data-ls="addbook" data-id="${esc(x.id)}">+ ${esc(x.title)}</button>`).join("");
-    host.innerHTML = `<div class="ls-title"><strong>수업 교재 · 진도</strong><span class="muted">교재 ${blocks.filter((b) => b.textbook_id).length}개</span></div>${blockHtml}
-      <div class="ls-add">${assigned.length ? `<span class="muted">배정된 교재 추가</span>` : ""}${chips}${!assigned.length ? `<span class="muted">배정된 교재가 없어요. 학생 화면에서 먼저 교재를 배정해 주세요.</span>` : !chips ? `<span class="muted">배정된 교재를 모두 추가했어요</span>` : ""}</div>`;
-    if (focusIdx != null) { const el = host.querySelector(`select[data-i="${focusIdx}"][data-k="textbook_id"], input[data-i="${focusIdx}"]`); if (el) el.focus(); focusIdx = null; }
+    const skippedHtml = skipped.map((x) => `<div class="ls-skip"><strong>${esc(x.book.title)}</strong><span class="muted">오늘은 안 나감</span><button type="button" class="btn small" data-ls="addbook" data-id="${esc(x.book.id)}">+ 넣기</button></div>`).join("");
+    const empty = !blocks.length && !skipped.length
+      ? `<div class="ls-empty"><strong>${curWd != null ? DAY_NAME[curWd] + "요일에 " : ""}배정된 교재가 없어요</strong><span class="muted">교재 진도 탭에서 교재의 요일을 바꾸면 이 날에도 기록할 수 있어요. 진도 없이 출결·숙제·메모는 그대로 저장돼요.</span>${bookProgressFor(s.id).length ? `<span class="muted">현재 배정: ${bookProgressFor(s.id).map((x) => `${esc(x.book.title)} (${dayList(x.p).length ? SCH_ORDER.filter((d) => dayList(x.p).includes(d)).map((d) => DAY_NAME[d]).join("·") : "모든 수업"})`).join(", ")}</span>` : ""}</div>`
+      : "";
+    host.innerHTML = `${curWd != null ? `<div class="ls-banner"><b>${DAY_NAME[curWd]}요일</b> 수업 교재만 기록할 수 있어요</div>` : ""}
+      <div class="ls-title"><strong>${dn}수업 교재 · 진도</strong><span class="muted">${allowed.length ? `${allowed.length}개 중 ${blocks.filter((b) => b.textbook_id).length}개 포함` : "0개"}</span></div>${blockHtml}${skippedHtml}${empty}`;
   };
   host.addEventListener("click", (e) => {
     const b = e.target.closest("[data-ls]");
     if (!b) return;
-    if (b.dataset.ls === "del") blocks.splice(Number(b.dataset.i), 1);
-    else if (b.dataset.ls === "addbook") { blocks.push({ textbook_id: b.dataset.id, from_unit: autoFrom(b.dataset.id), to_unit: null, topic: "" }); focusIdx = blocks.length - 1; }
-    else if (b.dataset.ls === "addblank") { blocks.push({ textbook_id: "", from_unit: null, to_unit: null, topic: "" }); focusIdx = blocks.length - 1; }
+    if (b.dataset.ls === "skip") blocks.splice(Number(b.dataset.i), 1);
+    else if (b.dataset.ls === "addbook") blocks.push({ textbook_id: b.dataset.id, from_unit: autoFrom(b.dataset.id), to_unit: null, topic: "" });
+    paint();
+  });
+  const dateEl = $("#dlg-form [name='lesson_date']");
+  let prevDate = dateEl.value;
+  dateEl.addEventListener("change", () => {
+    const wd = wdOf(dateEl.value);
+    if (wd == null || wd === curWd) { if (wd != null) prevDate = dateEl.value; return; }
+    const dirty = blocks.some((b) => b.to_unit != null || (b.topic || "").trim());
+    if (dirty && !confirm(`날짜를 바꾸면 교재 목록이 ${DAY_NAME[wd]}요일 교재로 바뀌고, 입력한 진도·학습 내용은 지워져요. 계속할까요?`)) { dateEl.value = prevDate; return; }
+    curWd = wd; prevDate = dateEl.value;
+    blocks = defaultBlocks(wd);
     paint();
   });
   const onField = (e) => {
