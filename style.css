@@ -194,6 +194,8 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .chart .line { fill: none; stroke: var(--progress); stroke-width: 2; }
 .chart .dot { fill: var(--progress); }
 .memo-cell { white-space: pre-wrap; max-width: 420px; }
+.lesson-comment { margin-top: .4rem; padding: .35rem .6rem; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 6px 6px 0; font-size: .88rem; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.lesson-comment strong { display: block; font-size: .78rem; color: var(--accent); margin-bottom: .1rem; }
 .next-plan { color: var(--accent); font-size: .82rem; margin-top: .15rem; }
 .next-card { margin-bottom: 1rem; background: var(--accent-soft); border-color: transparent; }
 .next-card strong { display: block; color: var(--accent); font-size: .85rem; margin-bottom: .2rem; }
@@ -217,9 +219,10 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 
 /* 다이얼로그 */
 dialog { border: 1px solid var(--border); border-radius: 12px; padding: 0; width: min(460px, 94vw); background: var(--surface); color: var(--text); }
+dialog.wide { width: min(640px, 94vw); }
 dialog::backdrop { background: rgba(0, 0, 0, .45); }
-.dlg-form { padding: 1.2rem 1.3rem; }
-.dlg-actions { display: flex; gap: .5rem; align-items: center; margin-top: .6rem; }
+.dlg-form { padding: 1.2rem 1.3rem 0; max-height: 92vh; max-height: 92dvh; overflow-y: auto; }
+.dlg-actions { display: flex; gap: .5rem; align-items: center; margin-top: .6rem; padding: .7rem 0 1.1rem; position: sticky; bottom: 0; background: var(--surface); }
 .dlg-row { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
 
 .toast {

@@ -63,6 +63,7 @@ alter table public.lessons add column if not exists to_unit integer check (to_un
 alter table public.lessons add column if not exists topic text;
 alter table public.lessons add column if not exists next_plan text;
 alter table public.lessons add column if not exists homework_note text;   -- 숙제 내용(예: 단어 Day 5 쓰기)
+alter table public.lessons add column if not exists teacher_comment text check (char_length(teacher_comment) <= 5000);   -- 선생님 코멘트(긴 글)
 
 -- 시험 / 단어 점수
 create table if not exists public.tests (

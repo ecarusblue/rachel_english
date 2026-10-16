@@ -89,7 +89,7 @@ function fieldHtml(f, value) {
       .map(([val, text]) => `<option value="${esc(val)}" ${String(val) === String(v) ? "selected" : ""}>${esc(text)}</option>`)
       .join("")}</select>`;
   } else if (f.type === "textarea") {
-    control = `<textarea name="${name}" ${req} maxlength="${f.maxlength || 2000}">${esc(v)}</textarea>`;
+    control = `<textarea name="${name}" ${req} rows="${f.rows || 4}" maxlength="${f.maxlength || 2000}">${esc(v)}</textarea>`;
   } else if (f.type === "checkbox") {
     return `<label class="check"><input type="checkbox" name="${name}" ${v ? "checked" : ""}> ${label}</label>`;
   } else {
@@ -99,8 +99,9 @@ function fieldHtml(f, value) {
   return `<label>${label}${control}</label>`;
 }
 
-function openForm({ title, fields, values = {}, submitLabel = "저장", onSubmit, onDelete }) {
+function openForm({ title, fields, values = {}, submitLabel = "저장", onSubmit, onDelete, wide = false }) {
   const dlg = $("#dlg");
+  dlg.classList.toggle("wide", wide);
   const form = $("#dlg-form");
   $("#dlg-title").textContent = title;
   $("#dlg-err").textContent = "";
@@ -398,7 +399,7 @@ function renderLessonsTab(s) {
                   <td class="att-${esc(l.attendance)}">${esc(l.attendance)}</td>
                   <td>${esc(coverText(l)) || '<span class="muted">-</span>'}${l.topic ? `<div class="muted">${esc(l.topic)}</div>` : ""}</td>
                   <td>${esc(l.homework || "-")}${l.homework_note ? `<div class="muted">${esc(l.homework_note)}</div>` : ""}</td>
-                  <td class="memo-cell">${esc(l.memo || "")}${l.next_plan ? `<div class="next-plan">다음: ${esc(l.next_plan)}</div>` : ""}</td></tr>`
+                  <td class="memo-cell">${esc(l.memo || "")}${l.next_plan ? `<div class="next-plan">다음: ${esc(l.next_plan)}</div>` : ""}${l.teacher_comment ? `<div class="lesson-comment"><strong>코멘트</strong>${esc(l.teacher_comment)}</div>` : ""}</td></tr>`
               )
               .join("")}</tbody></table></div>
           <p class="muted" style="font-size:.85rem;margin-top:.6rem">행을 누르면 수정·삭제할 수 있습니다. 최근 300건까지 표시됩니다.</p>`
@@ -548,6 +549,11 @@ function buildMessage(s, label, start, end, r, comment) {
         const parts = [cover, l.topic].filter(Boolean).join(" · ");
         out.push(`- ${shortDate(l.lesson_date)} ${parts || "수업 진행"}${l.memo ? ` (${l.memo.replace(/\s+/g, " ")})` : ""}`);
       });
+    }
+    const withComment = r.lessons.filter((l) => l.teacher_comment && l.teacher_comment.trim());
+    if (withComment.length) {
+      out.push("■ 선생님 코멘트");
+      withComment.forEach((l) => out.push(`- ${shortDate(l.lesson_date)} ${l.teacher_comment.trim()}`));
     }
     if (r.books.length) {
       out.push("■ 진도");
@@ -1116,12 +1122,14 @@ function lessonForm(s, lesson, rec = null) {
     { name: "homework", label: "숙제", type: "select", options: [["", "-"], ["완료", "완료"], ["일부", "일부"], ["미제출", "미제출"]] },
     { name: "homework_note", label: "숙제 내용 (예: 단어 Day 5 쓰기)", maxlength: 200 },
     { name: "memo", label: "수업 메모", type: "textarea" },
+    { name: "teacher_comment", label: "선생님 코멘트 (길게 적을 수 있어요, 최대 5,000자)", type: "textarea", rows: 9, maxlength: 5000 },
     { name: "next_plan", label: "다음 수업 예정 진도", maxlength: 200 },
   ];
   if (!lesson) fields.push({ name: "sync_progress", label: "저장할 때 교재 진도도 종료 단원으로 갱신 (결석은 제외)", type: "checkbox", default: true });
 
   openForm({
     title: lesson ? "수업 기록 수정" : "수업 기록",
+    wide: true,
     fields,
     values,
     onSubmit: async (d) => {
@@ -1135,6 +1143,7 @@ function lessonForm(s, lesson, rec = null) {
       const row = { ...data, textbook_id: data.textbook_id || null, homework: data.homework || null };
       // 숙제 내용 칸이 비어 있고 기존 기록에도 없으면 컬럼을 보내지 않음(스키마 업그레이드 전에도 저장되도록)
       if (row.homework_note == null && !(lesson && "homework_note" in lesson)) delete row.homework_note;
+      if (row.teacher_comment == null && !(lesson && "teacher_comment" in lesson)) delete row.teacher_comment;
       let newId = null;
       if (lesson) await run(db.from("lessons").update(row).eq("id", lesson.id));
       else {
