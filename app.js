@@ -1783,8 +1783,6 @@ function renderRecsTab(s) {
       <div class="toolbar" style="margin:0">
         <span class="badge ${cls}">${esc(r.status)}</span>
         <strong>${esc(b ? b.title + rangeText(b, r) : r.from_unit + "–" + r.to_unit + "단원")}</strong>
-        <span class="spacer"></span>
-        ${r.status === "제안" ? `${has ? `<button class="btn small" type="button" disabled>기록 있음</button>` : `<button class="btn small primary" data-rec-use="${esc(r.id)}" type="button">수업 기록에 반영</button>`}<button class="btn small danger" data-rec-no="${esc(r.id)}" type="button">거절</button>` : ""}
       </div>
       ${r.rationale ? `<div class="memo-cell" style="margin-top:.4rem">${esc(r.rationale)}</div>` : ""}
       <div class="muted" style="font-size:.8rem;margin-top:.3rem">${pr && b ? `현재 진도 ${esc(curLabel(b, pr.current_unit))} · ` : ""}${fmtDate((r.created_at || "").slice(0, 10))} 생성${r.model ? " · " + esc(r.model) : ""}${r.decided_at ? " · " + fmtDate(r.decided_at.slice(0, 10)) + " 처리" : ""}</div>
@@ -1807,7 +1805,7 @@ function renderRecsTab(s) {
         <div class="rec-gt"><strong>${date ? `${Number(date.slice(5, 7))}월 ${Number(date.slice(8, 10))}일${wd ? ` (${wd})` : ""}` : "수업일 미정"}</strong><span class="muted">${isDone ? "수업" : "수업 예정"} · 교재 ${items.length}개</span></div>
         ${has ? lessonChip(has) : ""}
         <span class="spacer"></span>
-        ${open.length > 1 ? `<button class="btn small primary" type="button" data-rec-use="${esc(open[0].id)}"${has ? " disabled" : ""}>${has ? "기록 있음" : `이날 ${open.length}개 한꺼번에 반영`}</button>` : ""}
+        ${open.length ? `${has ? `<button class="btn small" type="button" disabled>기록 있음</button>` : `<button class="btn small primary" type="button" data-rec-use="${esc(open[0].id)}">수업 기록 반영</button>`}<button class="btn small danger" type="button" data-rec-no="${open.map((r) => esc(r.id)).join(",")}">거절</button>` : ""}
       </div>
       ${items.map(card).join("")}
     </section>`;
@@ -1815,7 +1813,7 @@ function renderRecsTab(s) {
   $("#tab-body").innerHTML = `<div class="eval-edit">` + filterHtml(state.recFilter, "rf", "수업 안내 미리보기") + (recs.length
     ? `${pending.length ? groups(pending, false).map((g) => group(g, false)).join("") : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
        ${done.length ? `<h3 style="margin-top:1.2rem">지난 추천</h3>${groups(done, true).map((g) => group(g, true)).join("")}` : ""}
-       <p class="muted" style="font-size:.85rem">"수업 기록에 반영"을 누르면 수업 기록 창이 추천 교재·단원으로 채워집니다. 같은 날 추천이 여러 교재면 한 번에 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록됩니다. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`
+       <p class="muted" style="font-size:.85rem">날짜별 "수업 기록 반영"을 누르면 수업 기록 창이 그날 추천 교재·단원으로 한 번에 채워집니다. "거절"은 그날 추천 전체에 적용됩니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록됩니다. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`
     : `<div class="card empty">${allForStudent.length ? "이 기간에는 추천이 없습니다. 위에서 기간을 바꿔 보세요." : "아직 추천이 없습니다. Claude 예약 작업이 실행되면 여기에 표시됩니다."}</div>`) + `</div><div class="eval-print" id="plan-print-area"></div>`;
   bindRecFilter(() => renderRecsTab(s));
   const doPrint = () => {
@@ -1840,9 +1838,10 @@ function renderRecsTab(s) {
   });
   $("#tab-body").querySelectorAll("[data-rec-no]").forEach((b) => {
     b.onclick = async () => {
-      if (!confirm("이 추천을 거절로 기록할까요?")) return;
+      const ids = b.dataset.recNo.split(",").filter(Boolean);
+      if (!confirm(ids.length > 1 ? `이날 추천 ${ids.length}개를 모두 거절로 기록할까요?` : "이 추천을 거절로 기록할까요?")) return;
       try {
-        await run(db.from("recommendations").update({ status: "거절", decided_at: new Date().toISOString() }).eq("id", b.dataset.recNo));
+        await run(db.from("recommendations").update({ status: "거절", decided_at: new Date().toISOString() }).in("id", ids));
         await refresh();
       } catch (err) {
         fail(err);
