@@ -333,6 +333,9 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 .menu-btn { display: none; }
+.app.side-off { grid-template-columns: 1fr; }
+.app.side-off .sidebar { display: none; }
+.app.side-off .main { max-width: none; }
 .btn, .tab { white-space: nowrap; }
 td.name-cell, td:first-child { white-space: nowrap; }
 .table-wrap table { min-width: 560px; }
@@ -340,6 +343,8 @@ td.name-cell, td:first-child { white-space: nowrap; }
 @media (max-width: 800px) {
   .app { grid-template-columns: 1fr; }
   .menu-btn { display: inline-block; }
+  .side-btn { display: none !important; }
+  .app.side-off .sidebar { display: flex; }
   .sidebar {
     position: fixed; left: 0; top: 0; bottom: 0; width: min(300px, 86vw); height: 100%;
     z-index: 40; transform: translateX(-102%); transition: transform .18s ease; visibility: hidden;
@@ -534,3 +539,25 @@ html:not([data-theme="light"]) .sch-day em { color: #0b1220; }
 .tl-n .tp-name { font-size: 13pt; text-align: center; }
 .tl-n .tp-empty { text-align: center; }
 .tp-land .rp-foot { margin: 0 14mm 7mm; }
+
+/* 수업 시간표: 넓은 화면은 요일을 열로 펼친 격자 */
+.sch-narrow { display: none; }
+.sch-grid { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.sch-grid th, .sch-grid td { padding: .7rem; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); vertical-align: top; text-align: left; }
+.sch-grid tr > :last-child { border-right: 0; }
+.sch-grid tbody tr:last-child > * { border-bottom: 0; }
+.sch-grid thead th { text-align: center; font-size: 1.05rem; font-weight: 800; background: var(--bg); color: var(--text); padding: .65rem; }
+.sch-grid thead th em { display: inline-block; font-style: normal; font-size: .68rem; font-weight: 700; color: #fff; background: var(--accent); border-radius: 999px; padding: .05em .55em; margin-left: .4rem; vertical-align: middle; }
+html:not([data-theme="light"]) .sch-grid thead th em { color: #0b1220; }
+.sch-grid thead th.today { background: var(--accent-soft); color: var(--accent); }
+.sch-grid td.today { background: color-mix(in srgb, var(--accent-soft) 40%, transparent); }
+.sch-grid th.sg-rt { width: 104px; vertical-align: middle; background: var(--bg); }
+.sch-grid th.sg-rt b { display: block; font-size: .9rem; }
+.sch-grid th.sg-rt span { font-size: .76rem; color: var(--muted); font-weight: 400; }
+.sch-grid td.off { background: repeating-linear-gradient(135deg, transparent, transparent 6px, color-mix(in srgb, var(--border) 45%, transparent) 6px, color-mix(in srgb, var(--border) 45%, transparent) 12px); }
+.sg-top { display: flex; justify-content: space-between; font-size: .74rem; color: var(--muted); min-height: 1.1em; margin-bottom: .4rem; }
+.sg-chips { display: flex; flex-wrap: wrap; gap: .35rem; }
+@media (max-width: 800px) {
+  .sch-wide { display: none; }
+  .sch-narrow { display: block; }
+}

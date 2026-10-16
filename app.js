@@ -308,7 +308,26 @@ function scheduleHtml() {
       <td class="sch-names"><div class="w">${names.length ? names.map((s) => `<button type="button" class="sch-chip" data-sch-sid="${esc(s.id)}">${esc(s.name)}</button>`).join("") : `<span class="muted">-</span>`}</div></td>
       <td class="sch-cnt">${names.length}명</td></tr>`;
   }).join("")).join("");
-  return `<section class="sch">${head}<div class="card sch-card"><table class="sch-table"><tbody>${rows}</tbody></table></div></section>`;
+  // 넓은 화면: 요일을 열로 펼친 격자 / 좁은 화면: 위의 요일별 목록
+  const rowsN = Math.max(...days.map((d) => d.slots.length));
+  const grid = Array.from({ length: rowsN }, (_, i) => {
+    const first = (days.find((d) => d.slots[i]) || { slots: [] }).slots[i];
+    const same = days.every((d) => !d.slots[i] || timeText(d.slots[i].start_time, d.slots[i].end_time) === timeText(first.start_time, first.end_time));
+    const rtime = same ? timeText(first.start_time, first.end_time) : "";
+    const cells = days.map((d) => {
+      const sl = d.slots[i];
+      const cls = d.wd === today ? "today" : "";
+      if (!sl) return `<td class="off ${cls}"></td>`;
+      const names = active.filter((s) => (sl.student_ids || []).includes(s.id));
+      const tm = rtime ? "" : timeText(sl.start_time, sl.end_time);
+      return `<td class="${cls}"><div class="sg-top"><span>${esc(tm)}</span><span>${names.length}명</span></div><div class="sg-chips">${names.length ? names.map((s) => `<button type="button" class="sch-chip" data-sch-sid="${esc(s.id)}">${esc(s.name)}</button>`).join("") : `<span class="muted">-</span>`}</div></td>`;
+    }).join("");
+    return `<tr><th class="sg-rt" scope="row"><b>${esc(first.label || "타임 " + (i + 1))}</b>${rtime ? `<span>${rtime}</span>` : ""}</th>${cells}</tr>`;
+  }).join("");
+  const gridHead = days.map((d) => `<th scope="col" class="${d.wd === today ? "today" : ""}">${DAY_NAME[d.wd]}${d.wd === today ? "<em>오늘</em>" : ""}</th>`).join("");
+  return `<section class="sch">${head}
+    <div class="card sch-card sch-wide"><table class="sch-grid"><thead><tr><th></th>${gridHead}</tr></thead><tbody>${grid}</tbody></table></div>
+    <div class="card sch-card sch-narrow"><table class="sch-table"><tbody>${rows}</tbody></table></div></section>`;
 }
 function schedulePrintHtml(orient = "p") {
   const days = groupDays(state.schedule.slots);
@@ -2032,6 +2051,18 @@ function bindEvents() {
   };
   $("#btn-add-student").onclick = addStudent;
   $("#btn-textbooks").onclick = manageTextbooks;
+  const SIDE_KEY = "rachel_side_off";
+  const setSide = (off, save = true) => {
+    appEl.classList.toggle("side-off", off);
+    const b = $("#btn-side");
+    b.textContent = off ? "▶ 메뉴 펼치기" : "◀ 메뉴 숨기기";
+    b.setAttribute("aria-expanded", off ? "false" : "true");
+    $("#btn-home").hidden = !off;
+    if (save) { try { localStorage.setItem(SIDE_KEY, off ? "1" : "0"); } catch { /* 저장 실패는 무시 */ } }
+  };
+  $("#btn-side").onclick = () => setSide(!appEl.classList.contains("side-off"));
+  $("#btn-home").onclick = () => $("#nav-overview").click();
+  try { setSide(localStorage.getItem(SIDE_KEY) === "1", false); } catch { setSide(false, false); }
   $("#btn-sched-edit").onclick = () => {
     state.view = "overview";
     state.studentId = null;
