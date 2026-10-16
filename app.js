@@ -2336,3 +2336,10 @@ async function init() {
 }
 
 init();
+
+// PWA: 홈 화면에 설치할 수 있도록 서비스 워커 등록 (실패해도 앱 동작에는 영향 없음)
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}

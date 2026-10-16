@@ -36,8 +36,9 @@ if (parts.length === 3) {
 
 rmSync("dist", { recursive: true, force: true });
 mkdirSync("dist");
-for (const f of ["index.html", "app.js", "style.css", "_headers"]) copyFileSync(f, `dist/${f}`);
+for (const f of ["index.html", "app.js", "style.css", "_headers", "manifest.webmanifest", "sw.js"]) copyFileSync(f, `dist/${f}`);
 cpSync("fonts", "dist/fonts", { recursive: true });
+cpSync("icons", "dist/icons", { recursive: true });
 cpSync("vendor", "dist/vendor", { recursive: true });
 writeFileSync(
   "dist/config.js",
