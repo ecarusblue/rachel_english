@@ -602,7 +602,8 @@ begin
       end if;
 
       -- 평가 점수: 허용된 항목만, 1~5 정수만
-      v_ratings := '{}'::jsonb;
+      -- 보내지 않은 항목은 기본값 3(보통)
+      v_ratings := '{"listening":3,"speaking":3,"reading":3,"writing":3,"vocab":3,"grammar":3}'::jsonb;
       if v_item ? 'ratings' and jsonb_typeof(v_item->'ratings') = 'object' then
         for k, val in select * from jsonb_each(v_item->'ratings') loop
           if k not in ('listening','speaking','reading','writing','vocab','grammar') then raise exception 'unknown rating key: %', k; end if;
@@ -612,7 +613,7 @@ begin
           v_ratings := v_ratings || jsonb_build_object(k, (val::text)::integer);
         end loop;
       end if;
-      v_attitude := '{}'::jsonb;
+      v_attitude := '{"participation":3,"focus":3,"homework":3}'::jsonb;
       if v_item ? 'attitude' and jsonb_typeof(v_item->'attitude') = 'object' then
         for k, val in select * from jsonb_each(v_item->'attitude') loop
           if k not in ('participation','focus','homework') then raise exception 'unknown attitude key: %', k; end if;

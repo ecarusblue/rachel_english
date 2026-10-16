@@ -50,7 +50,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   https://rachel-english.ecarusblue.workers.dev/api/evaluations
 ```
 응답: `{"ok":true,"data":{"inserted":1,"updated":0,"skipped":0,"errors":[]}}`
-- `ratings` 는 `listening, speaking, reading, writing, vocab, grammar`, `attitude` 는 `participation, focus, homework` 만 허용하며 값은 **1~5 정수**입니다. **자료로 뒷받침되지 않는 항목은 보내지 말고 비워 두세요.** (앱에서 선생님이 직접 채웁니다)
+- `ratings` 는 `listening, speaking, reading, writing, vocab, grammar`, `attitude` 는 `participation, focus, homework` 만 허용하며 값은 **1~5 정수**입니다. **자료로 뒷받침되지 않는 항목은 보내지 말고 비워 두세요.** 보내지 않은 항목은 서버가 기본값 3(보통)으로 저장합니다. (앱에서 선생님이 고칩니다)
 - 글 항목은 각각 3000자까지입니다. 한 번에 최대 100명, 본문 100KB 까지입니다.
 - 평가서가 없으면 새로 저장(`inserted`), 상태가 AI 초안이면 수정(`updated`), 그 외 상태면 건너뜀(`skipped`). 잘못된 항목은 그 항목만 `errors` 에 담기고 나머지는 저장됩니다.
 - 오류: 401(토큰 없음/틀림), 400(형식 오류), 405(메서드 오류), 413(너무 큼), 502(DB 연결 문제).
@@ -65,7 +65,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 1. GET https://rachel-english.ecarusblue.workers.dev/api/evaluation-source 를 Authorization: Bearer <토큰> 헤더로 호출합니다. (연·월 생략 = 이번 달)
 2. students 중 existing 이 null 이거나 existing.status 가 "AI 초안" 인 학생만 작성합니다. 나머지는 건너뜁니다.
 3. 학생마다 아래 자료로만 작성합니다. 자료에 없는 내용은 쓰지 않습니다.
-   - ratings: 단어시험 점수(tests·test_trend)가 있을 때만 vocab 을 매기고, 나머지 영역(듣기·말하기·읽기·쓰기·문법)은 선생님 코멘트에 분명한 근거가 있을 때만 매깁니다. 근거가 없으면 보내지 않습니다.
+   - ratings: 단어시험 점수(tests·test_trend)가 있을 때만 vocab 을 매기고, 나머지 영역(듣기·말하기·읽기·쓰기·문법)은 선생님 코멘트에 분명한 근거가 있을 때만 매깁니다. 근거가 없으면 보내지 않습니다(서버가 '보통'으로 저장).
    - attitude: homework 는 숙제 완료/일부/미제출 횟수로, participation 은 출석·지각·결석으로 매깁니다. focus 는 코멘트에 근거가 있을 때만 매깁니다.
    - achievement(이달의 성취): 교재 진도(books), 시험 추이, 선생님 코멘트의 긍정적 내용. 2~4문장.
    - improvement(보완할 점): 숙제·출석·시험에서 보이는 약점과 선생님 코멘트. 2~3문장, 부드러운 표현.
