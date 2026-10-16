@@ -346,7 +346,7 @@ function renderStudent() {
     </div>
     ${s.memo ? `<p class="card muted memo-cell" style="margin:0 0 1rem">${esc(s.memo)}</p>` : ""}
     <div class="tabs" role="tablist">
-      ${[["progress", "교재 진도"], ["lessons", "수업 기록"], ["tests", "시험·단어"], ["report", "리포트"], ["recs", "수업 추천"]]
+      ${[["progress", "교재 진도"], ["lessons", "수업 기록"], ["tests", "시험·단어"], ["recs", "수업 추천"]]
         .map(([k, t]) => `<button class="tab ${state.tab === k ? "active" : ""}" role="tab" data-tab="${k}">${t}${k === "recs" && pendingRecs ? ` <span class="badge warn">${pendingRecs}</span>` : ""}</button>`)
         .join("")}
     </div>
@@ -804,7 +804,7 @@ function renderSummary() {
       <div class="card table-wrap"><table>
         <thead><tr><th>학생</th><th class="num">수업</th><th>학습 교재 · 범위</th><th class="num">숙제 완료율</th><th class="num">시험 평균</th><th>다음 수업 예정</th><th>안내문</th></tr></thead>
         <tbody>${body}</tbody></table></div>
-      <p class="muted" style="margin-top:.8rem;font-size:.85rem">학생 행을 누르면 그 학생의 리포트(안내문 초안)로 이동합니다. 시험 평균 아래 숫자는 직전 같은 길이 기간 대비 변화입니다.${d.logs === null ? " 안내문 발송 기록을 보려면 최신 schema.sql 을 실행하세요." : ""}</p>`
+      <p class="muted" style="margin-top:.8rem;font-size:.85rem">학생 행을 누르면 그 학생 화면으로 이동합니다. 시험 평균 아래 숫자는 직전 같은 길이 기간 대비 변화입니다.${d.logs === null ? " 안내문 발송 기록을 보려면 최신 schema.sql 을 실행하세요." : ""}</p>`
     : `<div class="card empty">재원 중인 학생이 없습니다.</div>`);
   bind();
   $("#main tbody").onclick = async (e) => {
@@ -814,7 +814,7 @@ function renderSummary() {
     state.report.start = range.start;
     state.report.end = range.end;
     await selectStudent(tr.dataset.sid);
-    state.tab = "report";
+    state.tab = "progress";
     render();
   };
 }
