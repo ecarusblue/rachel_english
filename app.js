@@ -2167,7 +2167,6 @@ async function recDateHasLesson(s, rec) {
 
 function lessonForm(s, lesson, rec = null) {
   const assigned = bookProgressFor(s.id).map((x) => x.book);
-  const rest = state.textbooks.filter((b) => !assigned.some((a) => a.id === b.id));
   const bookOf = (id) => state.textbooks.find((b) => b.id === id);
   const progOf = (id) => state.progress.find((x) => x.student_id === s.id && x.textbook_id === id);
   const autoFrom = (id) => {
@@ -2183,7 +2182,7 @@ function lessonForm(s, lesson, rec = null) {
     if (!blocks.length) blocks = [{ textbook_id: "", from_unit: null, to_unit: null, topic: lesson.topic || "" }];
   } else {
     values = { lesson_date: todayStr(), attendance: "출석" };
-    const lastBookId = (state.detail.lessons.find((l) => l.textbook_id) || {}).textbook_id || (assigned[0] && assigned[0].id);
+    const lastBookId = (state.detail.lessons.find((l) => l.textbook_id && assigned.some((x) => x.id === l.textbook_id)) || {}).textbook_id || (assigned[0] && assigned[0].id);
     blocks = [{ textbook_id: lastBookId && bookOf(lastBookId) ? lastBookId : "", from_unit: lastBookId ? autoFrom(lastBookId) : null, to_unit: null, topic: "" }];
     if (rec) blocks[0] = { textbook_id: rec.textbook_id || blocks[0].textbook_id, from_unit: rec.from_unit ?? null, to_unit: rec.to_unit ?? null, topic: "" };
     values = { ...values, lesson_date: (rec && rec.target_date) || values.lesson_date };
@@ -2275,6 +2274,9 @@ function lessonForm(s, lesson, rec = null) {
   });
 
   const host = $("#ls-books");
+  const keepIds = new Set(blocks.map((b) => b.textbook_id).filter(Boolean)); // 수정 시 이미 기록된 교재는 배정 해제돼도 유지
+  const assignedIds = new Set(assigned.map((x) => x.id));
+  const extraOpts = [...keepIds].filter((id) => !assignedIds.has(id) && bookOf(id)).map((id) => bookOf(id));
   let focusIdx = null;
   const unitCtl = (b, i, key, label) => {
     const lv = bookLeaves(bookOf(b.textbook_id));
@@ -2287,11 +2289,11 @@ function lessonForm(s, lesson, rec = null) {
   const paint = () => {
     const usedIds = new Set(blocks.map((b) => b.textbook_id).filter(Boolean));
     const blockHtml = blocks.map((b, i) => {
-      const opts = [["", i === 0 ? "(교재 없음)" : "(교재 선택)"], ...assigned.map((x) => [x.id, x.title]), ...rest.map((x) => [x.id, `${x.title} (미배정)`])]
+      const opts = [["", i === 0 ? "(교재 없음)" : "(교재 선택)"], ...assigned.map((x) => [x.id, x.title]), ...extraOpts.map((x) => [x.id, `${x.title} (배정 해제됨)`])]
         .filter(([id]) => id === "" || id === b.textbook_id || !usedIds.has(id));
       const book = bookOf(b.textbook_id);
       const pr = book ? progOf(book.id) : null;
-      const hint = book ? `<div class="ls-hint">${pr ? `현재 진도 ${esc(curLabel(book, pr.current_unit))}` : "아직 이 교재가 배정되지 않았어요 (저장하면 배정됩니다)"}</div>` : "";
+      const hint = book ? `<div class="ls-hint">${pr ? `현재 진도 ${esc(curLabel(book, pr.current_unit))}` : "배정이 해제된 교재예요"}</div>` : "";
       return `<div class="ls-block">
         <div class="ls-head"><span class="tb-n">${i + 1}</span>
           <select data-i="${i}" data-k="textbook_id" aria-label="교재 ${i + 1}" class="ls-book">${opts.map(([id, t]) => `<option value="${esc(id)}" ${id === (b.textbook_id || "") ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>
@@ -2301,7 +2303,7 @@ function lessonForm(s, lesson, rec = null) {
     }).join("");
     const chips = assigned.filter((x) => !usedIds.has(x.id)).map((x) => `<button type="button" class="tb-sub" data-ls="addbook" data-id="${esc(x.id)}">+ ${esc(x.title)}</button>`).join("");
     host.innerHTML = `<div class="ls-title"><strong>수업 교재 · 진도</strong><span class="muted">교재 ${blocks.filter((b) => b.textbook_id).length}개</span></div>${blockHtml}
-      <div class="ls-add"><span class="muted">교재 추가</span>${chips}<button type="button" class="tb-sub plain" data-ls="addblank">+ 다른 교재 선택…</button></div>`;
+      <div class="ls-add">${assigned.length ? `<span class="muted">배정된 교재 추가</span>` : ""}${chips}${!assigned.length ? `<span class="muted">배정된 교재가 없어요. 학생 화면에서 먼저 교재를 배정해 주세요.</span>` : !chips ? `<span class="muted">배정된 교재를 모두 추가했어요</span>` : ""}</div>`;
     if (focusIdx != null) { const el = host.querySelector(`select[data-i="${focusIdx}"][data-k="textbook_id"], input[data-i="${focusIdx}"]`); if (el) el.focus(); focusIdx = null; }
   };
   host.addEventListener("click", (e) => {
