@@ -293,10 +293,10 @@ function groupDays(slots) {
 }
 function scheduleHtml() {
   const sc = state.schedule;
-  const head = `<div class="sch-head"><h3>수업 시간표</h3><span class="muted">매주 반복 · 이름을 누르면 학생 화면으로 이동</span><span class="spacer"></span>${sc.missing ? "" : `${sc.slots.length ? `<button class="btn small" id="sch-print" type="button">시간표 미리보기</button>` : ""}<button class="btn small" id="sch-edit" type="button">시간표 편집</button>`}</div>`;
+  const head = `<div class="sch-head"><h3>수업 시간표</h3><span class="muted">매주 반복 · 이름을 누르면 학생 화면으로 이동</span><span class="spacer"></span>${sc.missing ? "" : `${sc.slots.length ? `<button class="btn small" id="sch-print" type="button">시간표 미리보기</button>` : ""}`}</div>`;
   if (sc.missing) return `<section class="sch">${head}<div class="card empty">시간표를 쓰려면 최신 <code>schema.sql</code> 을 Supabase SQL Editor에서 한 번 실행하세요.</div></section>`;
   const days = groupDays(sc.slots);
-  if (!days.length) return `<section class="sch">${head}<div class="card empty">아직 시간표가 없습니다. 오른쪽 위 <strong>시간표 편집</strong>에서 요일과 타임을 만들어 보세요.</div></section>`;
+  if (!days.length) return `<section class="sch">${head}<div class="card empty">아직 시간표가 없습니다. 왼쪽 아래 <strong>시간표 편집</strong>에서 요일과 타임을 만들어 보세요.</div></section>`;
   const active = state.students.filter((s) => s.active);
   const today = new Date().getDay();
   const rows = days.map((d) => d.slots.map((sl, i) => {
@@ -363,8 +363,6 @@ function openSchedPreview(returnTo, orient = schedOrient()) {
   });
 }
 function bindSchedule() {
-  const eb = $("#sch-edit");
-  if (eb) eb.onclick = startScheduleEdit;
   const pb = $("#sch-print");
   if (pb) {
     pb.onclick = () => openSchedPreview(pb);
@@ -1986,7 +1984,7 @@ function bindEvents() {
   };
   $("#btn-menu").onclick = () => setMenu(!appEl.classList.contains("menu-open"));
   $("#sidebar").addEventListener("click", (e) => {
-    if (e.target.closest(".nav-btn, button[data-id], #btn-textbooks")) setMenu(false);
+    if (e.target.closest(".nav-btn, button[data-id], #btn-textbooks, #btn-sched-edit")) setMenu(false);
   });
   document.addEventListener("click", (e) => {
     if (appEl.classList.contains("menu-open") && !e.target.closest("#sidebar, #btn-menu")) setMenu(false);
@@ -2034,6 +2032,12 @@ function bindEvents() {
   };
   $("#btn-add-student").onclick = addStudent;
   $("#btn-textbooks").onclick = manageTextbooks;
+  $("#btn-sched-edit").onclick = () => {
+    state.view = "overview";
+    state.studentId = null;
+    render();
+    if (!state.schedule.missing) startScheduleEdit();
+  };
   document.querySelectorAll(".js-logout").forEach((b) => {
     b.onclick = logout;
   });
