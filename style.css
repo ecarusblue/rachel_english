@@ -638,7 +638,7 @@ td.name-cell, td:first-child { white-space: nowrap; }
 .dp-d i.dot { background: #2c5fd1; } .dp-d.on i.dot { background: #fff; }
 .dp-leg { display: flex; align-items: center; gap: .35rem; font-size: .78rem; color: var(--muted); margin-top: .4rem; }
 .dp-leg i.dot { width: 5px; height: 5px; border-radius: 50%; background: #2c5fd1; }
-.dp-note { margin-top: .6rem; background: #eef3fb; border-radius: 8px; padding: .55rem .8rem; font-size: .85rem; line-height: 1.6; }
+.dp-note { margin-top: .6rem; background: var(--accent-soft, #eef3fb); color: var(--text); border-radius: 8px; padding: .55rem .8rem; font-size: .85rem; line-height: 1.6; }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: var(--surface); }
 .seg button { min-height: 38px; padding: 0 .9rem; border: 0; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
 .seg button[aria-pressed="true"] { background: #1f2c47; color: #fff; font-weight: 700; }
