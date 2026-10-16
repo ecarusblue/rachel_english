@@ -733,3 +733,10 @@ td.name-cell, td:first-child { white-space: nowrap; }
 .check { align-items: flex-start; }
 .check input { flex: 0 0 auto; margin-top: .2em; }
 td[class^="att-"] { white-space: nowrap; }
+
+/* 수업 안내 미리보기: 쪽 나눔 */
+.ev-sheet.paged { background: transparent; box-shadow: none; }
+.ev-sheet.paged .rp-page { position: relative; background: #fff; box-shadow: 0 8px 36px rgba(0, 0, 0, .45); margin-bottom: 14px; height: 297mm; min-height: 297mm; overflow: hidden; }
+.ev-sheet.paged .pl-cont .pl-bd { padding-top: 14mm; }
+.pl-pn { position: absolute; top: 4mm; right: 6mm; font-size: 8.5pt; color: #8b95a5; }
+.ev-sheet.paged .pl-hd + .pl-bd { }

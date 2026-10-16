@@ -1867,10 +1867,10 @@ function openEvalPreview(html, onPrint, returnTo, label = "평가서 미리보�
     <div class="ev-ov-scroll"><div class="ev-sheet ${opts.land ? "land" : ""}" id="ev-sheet">${html}</div></div>`;
   document.body.appendChild(ov);
   const sheet = ov.querySelector("#ev-sheet");
-  if (opts.onRender) opts.onRender(sheet);
-  // A4 한 장(297mm) 기준으로 몇 장이 되는지 계산
+  const paged = opts.onRender ? opts.onRender(sheet) : null;
+  // A4 한 장(297mm) 기준으로 몇 장이 되는지 계산 (쪽을 나눠 보여 준 화면은 그 쪽 수)
   const pageH = ((opts.land ? 210 : 297) / 25.4) * 96;
-  const pages = Math.max(1, Math.ceil((sheet.offsetHeight - 2) / pageH));
+  const pages = typeof paged === "number" ? paged : Math.max(1, Math.ceil((sheet.offsetHeight - 2) / pageH));
   const pg = opts.land ? "A4 가로" : "A4";
   ov.querySelector("#ev-ov-note").textContent = pages > 1 ? `${pg} 기준 · 내용이 길어 ${pages}장으로 인쇄됩니다` : `${pg} 한 장`;
   // 화면 너비에 맞춰 축소
@@ -2067,6 +2067,39 @@ function planTitle(f) {
   return t ? `${t} 수업 안내` : "수업 안내";
 }
 const DOW_FULL = "일요일 월요일 화요일 수요일 목요일 금요일 토요일".split(" ");
+/* 수업 안내 미리보기: 긴 내용을 A4 쪽 단위로 나눠 보여 줍니다 (카드는 쪽 사이에서 잘리지 않음) */
+function paginatePlanPreview(sheet) {
+  const first = sheet.querySelector(".pl-page");
+  if (!first) return null;
+  const pageH = (297 / 25.4) * 96;
+  const foot = first.querySelector(".rp-foot");
+  const items = (bd) => [...bd.querySelectorAll(":scope > .pl-card, :scope > .pl-memo")];
+  const pagesEls = [first];
+  let page = first;
+  for (let guard = 0; guard < 60; guard++) {
+    const bd = page.querySelector(".pl-bd");
+    let next = null;
+    while (page.offsetHeight > pageH + 1) {
+      const kids = items(bd);
+      if (kids.length <= 1) break;
+      if (!next) {
+        next = document.createElement("div");
+        next.className = "rp-page pl-page pl-cont";
+        next.innerHTML = `<div class="pl-bd"></div>`;
+        next.appendChild(foot.cloneNode(true));
+        page.after(next);
+      }
+      next.querySelector(".pl-bd").prepend(kids[kids.length - 1]);
+    }
+    if (!next) break;
+    pagesEls.push(next);
+    page = next;
+  }
+  sheet.classList.add("paged");
+  pagesEls.forEach((p, i) => { const n = document.createElement("div"); n.className = "pl-pn"; n.textContent = `${i + 1} / ${pagesEls.length}쪽`; p.appendChild(n); });
+  return pagesEls.length;
+}
+
 function planPrintHtml(s, recs) {
   const rg = filterRange(state.recFilter);
   const title = planTitle(state.recFilter);
@@ -2214,7 +2247,7 @@ function renderRecsTab(s) {
     document.body.classList.add("print-plan"); // 학생 머리글·메모는 인쇄에서 제외
     try { window.print(); } finally { document.body.classList.remove("print-plan"); }
   };
-  $("#rf-print").onclick = () => openEvalPreview(planPrintHtml(s, recs), doPrint, $("#rf-print"), "수업 안내 미리보기");
+  $("#rf-print").onclick = () => openEvalPreview(planPrintHtml(s, recs), doPrint, $("#rf-print"), "수업 안내 미리보기", { onRender: paginatePlanPreview });
 
   $("#tab-body").querySelectorAll("[data-rec-use]").forEach((b) => {
     b.onclick = async () => {
