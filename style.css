@@ -729,3 +729,7 @@ td.name-cell, td:first-child { white-space: nowrap; }
 .ls-head .ls-kind { flex: 0 0 auto; }
 @media (max-width: 520px) { .ls-head .ls-name { flex-basis: calc(100% - 2.6rem); } .ls-head [data-ls] { margin-left: auto; } }
 @media (prefers-color-scheme: dark) { .dlg-form input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(.75); } }
+/* 모바일: 긴 체크박스 문구는 체크칸 옆에서 줄바꿈, 출결 칸은 한 줄 */
+.check { align-items: flex-start; }
+.check input { flex: 0 0 auto; margin-top: .2em; }
+td[class^="att-"] { white-space: nowrap; }
