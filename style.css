@@ -690,3 +690,23 @@ td.name-cell, td:first-child { white-space: nowrap; }
 .pl-book + .pl-book { border-top: 1px dashed #c4cedd; padding-top: 5mm; }
 .pl-book:last-child { padding-bottom: 0; }
 .pl-book .pl-rg { margin-bottom: 1mm; }
+
+/* 수업 기록 엑셀 */
+.xl-sep { width: 1px; height: 24px; background: var(--border); }
+.xl-btn { display: inline-flex; align-items: center; gap: .45em; }
+.xl-btn svg { width: 1.05em; height: 1.05em; }
+.xl-file { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; background: var(--accent-soft); border-radius: 8px; padding: .55rem .8rem; font-size: .9rem; margin-bottom: .7rem; }
+.xl-warn { color: var(--bad); font-size: .88rem; margin: 0 0 .6rem; }
+.xl-sum { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: .7rem; }
+.xl-sum > div { flex: 1 1 140px; border: 1px solid var(--border); border-radius: 10px; padding: .5rem .8rem; background: var(--surface); }
+.xl-sum > div span { display: block; font-size: .78rem; font-weight: 700; color: var(--muted); }
+.xl-sum > div b { font-size: 1.25rem; }
+.xl-sum > div.ok { border-color: #b6e1c9; background: #f1faf5; } .xl-sum > div.ok span { color: #17724a; }
+.xl-sum > div.err { border-color: #f1b9b9; background: var(--bad-soft); } .xl-sum > div.err span { color: var(--bad); }
+.xl-tbl { max-height: 40vh; overflow: auto; margin-bottom: .6rem; }
+.xl-tbl tr.xl-err td { background: #fff8f8; }
+.xl-tbl td { vertical-align: top; }
+.xl-msg { font-size: .76rem; color: var(--bad); margin-top: .2rem; }
+.xl-msg.muted { color: var(--muted); }
+.xl-dup { margin: 0 0 .6rem; font-size: .85rem; }
+@media (prefers-color-scheme: dark) { .xl-sum > div.ok { background: #14301f; border-color: #2f6a4a; } .xl-tbl tr.xl-err td { background: #2a1717; } }
