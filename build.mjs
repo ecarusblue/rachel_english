@@ -2,7 +2,7 @@
 // 환경변수 SUPABASE_URL, SUPABASE_KEY 로 dist/config.js 를 생성해 키를 저장소에 올리지 않게 합니다.
 //
 // 사용: SUPABASE_URL="https://xxxx.supabase.co" SUPABASE_KEY="공개용키" node build.mjs
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 function die(msg) {
   console.error("빌드 실패: " + msg);
@@ -37,6 +37,7 @@ if (parts.length === 3) {
 rmSync("dist", { recursive: true, force: true });
 mkdirSync("dist");
 for (const f of ["index.html", "app.js", "style.css", "_headers"]) copyFileSync(f, `dist/${f}`);
+cpSync("fonts", "dist/fonts", { recursive: true });
 writeFileSync(
   "dist/config.js",
   `window.APP_CONFIG = ${JSON.stringify({ SUPABASE_URL: url, SUPABASE_KEY: key }, null, 2)};\n`
