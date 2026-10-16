@@ -864,7 +864,7 @@ function renderRecsTab(s) {
     ? `${pending.length ? `<h3>확인할 추천 (${pending.length})</h3>${pending.map(card).join("")}` : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
        ${done.length ? `<h3 style="margin-top:1.2rem">지난 추천</h3>${done.map(card).join("")}` : ""}
        <p class="muted" style="font-size:.85rem">"수업 기록에 반영"을 누르면 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록됩니다. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`
-    : `<div class="card empty">${allForStudent.length ? "이 기간에는 추천이 없습니다." : "아직 추천이 없습니다. Claude 예약 작업이 실행되면 여기에 표시됩니다."}</div>`);
+    : `<div class="card empty">${allForStudent.length ? "이 기간에는 추천이 없습니다. 위에서 기간을 바꿔 보세요." : "아직 추천이 없습니다. Claude 예약 작업이 실행되면 여기에 표시됩니다."}</div>`);
   bindRecFilter(() => renderRecsTab(s));
 
   $("#tab-body").querySelectorAll("[data-rec-use]").forEach((b) => {
@@ -1240,6 +1240,18 @@ async function selectStudent(id) {
 }
 
 function bindEvents() {
+  const appEl = $("#app-view");
+  const setMenu = (open) => {
+    appEl.classList.toggle("menu-open", open);
+    $("#btn-menu").setAttribute("aria-expanded", open ? "true" : "false");
+  };
+  $("#btn-menu").onclick = () => setMenu(!appEl.classList.contains("menu-open"));
+  $("#sidebar").addEventListener("click", (e) => {
+    if (e.target.closest(".nav-btn, button[data-id], #btn-textbooks")) setMenu(false);
+  });
+  document.addEventListener("click", (e) => {
+    if (appEl.classList.contains("menu-open") && !e.target.closest("#sidebar, #btn-menu")) setMenu(false);
+  });
   $("#nav-overview").onclick = () => {
     state.view = "overview";
     state.studentId = null;

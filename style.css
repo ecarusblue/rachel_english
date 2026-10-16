@@ -6,6 +6,7 @@
   --border: #e3e6eb;
   --accent: #2563eb;
   --accent-soft: #e8efff;
+  --progress: #5b6b82;
   --good: #15803d;
   --warn: #b45309;
   --bad: #b91c1c;
@@ -22,6 +23,7 @@
     --border: #2b3340;
     --accent: #6c9bff;
     --accent-soft: #1d2a47;
+    --progress: #8ea0b8;
     --good: #4ade80;
     --warn: #fbbf24;
     --bad: #f87171;
@@ -148,7 +150,7 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 
 /* 진도 바 */
 .bar { height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; }
-.bar > span { display: block; height: 100%; background: var(--accent); }
+.bar > span { display: block; height: 100%; background: var(--progress); }
 .bar.done > span { background: var(--good); }
 .mini-books { display: grid; gap: .35rem; min-width: 200px; }
 .mini-books .row { display: grid; grid-template-columns: 1fr auto; gap: .1rem .6rem; font-size: .82rem; }
@@ -174,8 +176,8 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .chart { width: 100%; height: 150px; display: block; }
 .chart text { fill: var(--muted); font-size: 10px; }
 .chart .axis { stroke: var(--border); }
-.chart .line { fill: none; stroke: var(--accent); stroke-width: 2; }
-.chart .dot { fill: var(--accent); }
+.chart .line { fill: none; stroke: var(--progress); stroke-width: 2; }
+.chart .dot { fill: var(--progress); }
 .memo-cell { white-space: pre-wrap; max-width: 420px; }
 .next-plan { color: var(--accent); font-size: .82rem; margin-top: .15rem; }
 .next-card { margin-bottom: 1rem; background: var(--accent-soft); border-color: transparent; }
@@ -212,10 +214,37 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+.menu-btn { display: none; }
+.btn, .tab { white-space: nowrap; }
+td.name-cell, td:first-child { white-space: nowrap; }
+.table-wrap table { min-width: 560px; }
+
 @media (max-width: 800px) {
   .app { grid-template-columns: 1fr; }
-  .sidebar { position: static; height: auto; max-height: 55vh; border-right: 0; border-bottom: 1px solid var(--border); }
+  .menu-btn { display: inline-block; }
+  .sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0; width: min(300px, 86vw); height: 100%;
+    z-index: 40; border-right: 1px solid var(--border);
+    transform: translateX(-102%); transition: transform .18s ease; visibility: hidden;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, .18);
+  }
+  .app.menu-open .sidebar { transform: none; visibility: visible; }
+  .topbar { padding: .4rem .8rem; gap: .4rem; }
+  .user-line { display: none; }
   .main { padding: 1rem; }
+  .tabs { overflow-x: auto; scrollbar-width: none; }
+  .tab { flex: none; }
+}
+@media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
+
+/* 터치 기기·좁은 화면: 눌러야 하는 영역을 키운다 */
+@media (pointer: coarse), (max-width: 800px) {
+  .btn { min-height: 44px; }
+  .btn.small { min-height: 40px; padding: .4em .8em; }
+  .nav-btn, .student-list button { min-height: 44px; }
+  .small-check { padding: .5em 0; }
+  .tab { min-height: 44px; }
+  input[type=checkbox] { width: 1.2em; height: 1.2em; }
 }
 
 @media print {
