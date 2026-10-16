@@ -157,6 +157,7 @@ create table if not exists public.recommendations (
   applied_lesson_id  uuid references public.lessons(id) on delete set null,
   created_at         timestamptz not null default now(),
   decided_at         timestamptz,                -- 선생님이 채택/수정/거절한 시각
+  edited_at          timestamptz,                -- 선생님이 '제안' 내용을 직접 고친 시각 (예약 작업이 덮어쓰지 않음)
   check (to_unit >= from_unit)
 );
 
@@ -177,6 +178,7 @@ create index if not exists idx_progress_student on public.progress(student_id);
 create index if not exists idx_lessons_student_date on public.lessons(student_id, lesson_date desc);
 create index if not exists idx_lessons_textbook on public.lessons(textbook_id);
 create index if not exists idx_tests_student_date on public.tests(student_id, test_date desc);
+alter table public.recommendations add column if not exists edited_at timestamptz;
 create index if not exists idx_recs_student_created on public.recommendations(student_id, created_at desc);
 
 -- ============================================================
@@ -376,7 +378,7 @@ begin
       -- 같은 학생·교재·수업일: 이미 처리된(채택/수정/거절) 기록이 있으면 건너뜀, '제안'이면 최신 내용으로 갱신, 없으면 추가
       if exists (select 1 from public.recommendations r
                   where r.student_id = v_student and r.textbook_id = v_book.id
-                    and r.target_date = v_target and r.status <> '제안') then
+                    and r.target_date = v_target and (r.status <> '제안' or r.edited_at is not null)) then
         v_skipped := v_skipped + 1;
       else
         select r.id, (r.from_unit = v_from and r.to_unit = v_to

@@ -710,3 +710,11 @@ td.name-cell, td:first-child { white-space: nowrap; }
 .xl-msg.muted { color: var(--muted); }
 .xl-dup { margin: 0 0 .6rem; font-size: .85rem; }
 @media (prefers-color-scheme: dark) { .xl-sum > div.ok { background: #14301f; border-color: #2f6a4a; } .xl-tbl tr.xl-err td { background: #2a1717; } }
+
+/* 추천 수정 창 */
+.re-box { border: 1px solid var(--border); border-radius: 10px; padding: .7rem .9rem .9rem; margin: 0 0 .7rem; background: var(--surface); }
+.re-box legend { font-weight: 700; padding: 0 .4rem; }
+.re-row { display: flex; gap: .7rem; flex-wrap: wrap; margin-bottom: .6rem; }
+.re-row label { flex: 1 1 200px; }
+.re-box label { display: flex; flex-direction: column; gap: .25rem; font-size: .85rem; color: var(--muted); }
+.re-box select, .re-box textarea { font: inherit; font-size: .95rem; color: var(--text, inherit); }

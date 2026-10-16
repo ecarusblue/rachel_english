@@ -100,3 +100,5 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 ## 교재별 수업 요일
 `books[].weekdays` 는 그 교재를 쓰는 수업 요일 배열입니다(0=일 … 6=토, 예: `[1,3]` = 월·수). **빈 배열이면 모든 수업**에서 쓰는 교재입니다.
 추천할 날짜의 요일에 맞는 교재만 추천하세요(서버도 요일이 맞지 않는 항목은 거절합니다). 학생의 수업 요일은 `class_weekdays`(시간표)입니다. (최신 `schema.sql` 을 다시 실행해야 `weekdays` 컬럼이 생깁니다.)
+
+> 선생님이 앱에서 '추천 수정'으로 직접 고친 추천(`edited_at` 있음)은 같은 학생·교재·수업일로 다시 제출해도 덮어쓰지 않고 건너뜁니다.

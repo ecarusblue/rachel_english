@@ -2110,6 +2110,58 @@ function planPrintHtml(s, recs) {
 }
 
 /* ---------- 수업 추천 (Claude 예약 작업이 저장한 제안을 확인) ---------- */
+const REC_ICON = {
+  lock: '<svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true" style="vertical-align:-2px;margin-right:.3em"><rect x="4.5" y="9" width="11" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7 9V6.5a3 3 0 016 0V9" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>',
+  pen: '<svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true" style="vertical-align:-2px;margin-right:.3em"><path d="M3 17h3.5L16.5 7a2.1 2.1 0 00-3-3L3.5 14 3 17z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+};
+
+/* 추천 수정: 그날 '제안' 상태인 추천의 단원·추천 이유를 직접 고칩니다 (수업 기록이 있는 날은 불가) */
+function editRecsForm(s, ids) {
+  const list = (state.detail.recs || []).filter((r) => ids.includes(r.id) && r.status === "제안");
+  if (!list.length) { toast("수정할 추천이 없습니다"); return; }
+  const date = list[0].target_date;
+  if (date && recLessonOn(s.id, { target_date: date })) { alert("이 날은 수업 기록이 있어 추천을 수정할 수 없어요."); return; }
+  const unitOpts = (b, sel) => { const o = []; for (let n = 1; n <= b.total_units; n++) o.push(`<option value="${n}" ${n === sel ? "selected" : ""}>${esc(unitName(b, n))}</option>`); return o.join(""); };
+  const items = list.map((r) => ({ r, b: state.textbooks.find((x) => x.id === r.textbook_id) })).filter((x) => x.b);
+  const wd = date ? DAY_NAME[new Date(`${date}T00:00:00`).getDay()] : "";
+  openForm({
+    title: `추천 수정 · ${date ? `${Number(date.slice(5, 7))}월 ${Number(date.slice(8, 10))}일 (${wd})` : "수업일 미정"}`,
+    wide: true,
+    fields: [{ name: "re-slot", type: "slot" }],
+    values: {},
+    submitLabel: "수정 저장",
+    onSubmit: async () => {
+      const upd = [];
+      for (const { r, b } of items) {
+        const from = Number(document.querySelector(`[data-re-from="${r.id}"]`).value);
+        const to = Number(document.querySelector(`[data-re-to="${r.id}"]`).value);
+        const why = document.querySelector(`[data-re-why="${r.id}"]`).value.trim().slice(0, 600);
+        if (from > to) throw new Error(`${b.title}: 시작 단원이 종료 단원보다 뒤예요.`);
+        if (from < 1 || to > b.total_units) throw new Error(`${b.title}: 전체 단원 수(${b.total_units})를 벗어났어요.`);
+        if (from !== r.from_unit || to !== r.to_unit || why !== (r.rationale || "")) upd.push({ r, patch: { from_unit: from, to_unit: to, rationale: why || null } });
+      }
+      if (!upd.length) throw new Error("바뀐 내용이 없습니다.");
+      const when = new Date().toISOString();
+      for (const { r, patch } of upd) {
+        try {
+          await run(db.from("recommendations").update({ ...patch, edited_at: when }).eq("id", r.id).eq("status", "제안"));
+        } catch (e) {
+          if (!/edited_at/i.test((e && e.message) || "")) throw e;
+          await run(db.from("recommendations").update(patch).eq("id", r.id).eq("status", "제안")); // schema.sql 미적용: 표시 없이 저장
+          toast("저장했어요. '직접 수정' 표시와 예약 작업 보호는 최신 schema.sql 실행 후 적용됩니다.");
+        }
+      }
+      await refresh();
+      toast(`추천 ${upd.length}개를 수정했습니다`);
+    },
+  });
+  $("#re-slot").innerHTML = `<p class="muted" style="margin:0 0 .6rem">아직 수업 기록에 반영되지 않은 추천입니다. 저장해도 "제안" 상태로 남고 "직접 수정" 표시가 붙습니다.</p>` +
+    items.map(({ r, b }) => `<fieldset class="re-box"><legend>${esc(b.title)}</legend>
+      <div class="re-row"><label>시작 단원<select data-re-from="${esc(r.id)}">${unitOpts(b, r.from_unit)}</select></label>
+      <label>종료 단원<select data-re-to="${esc(r.id)}">${unitOpts(b, r.to_unit)}</select></label></div>
+      <label>추천 이유<textarea rows="2" maxlength="600" data-re-why="${esc(r.id)}">${esc(r.rationale || "")}</textarea></label></fieldset>`).join("");
+}
+
 function renderRecsTab(s) {
   const allForStudent = state.detail.recs || [];
   const recs = filterRecs(allForStudent);
@@ -2122,11 +2174,11 @@ function renderRecsTab(s) {
     const has = r.status === "거절" ? null : recLessonOn(s.id, r);
     return `<div class="card ${has ? "rec-has" : ""}" style="margin-bottom:.7rem">
       <div class="toolbar" style="margin:0">
-        <span class="badge ${cls}">${esc(r.status)}</span>
+        <span class="badge ${cls}">${esc(r.status)}</span>${r.edited_at ? '<span class="badge done">직접 수정</span>' : ""}
         <strong>${esc(b ? b.title + rangeText(b, r) : r.from_unit + "–" + r.to_unit + "단원")}</strong>
       </div>
       ${r.rationale ? `<div class="memo-cell" style="margin-top:.4rem">${esc(r.rationale)}</div>` : ""}
-      <div class="muted" style="font-size:.8rem;margin-top:.3rem">${pr && b ? `현재 진도 ${esc(curLabel(b, pr.current_unit))} · ` : ""}${fmtDate((r.created_at || "").slice(0, 10))} 생성${r.model ? " · " + esc(r.model) : ""}${r.decided_at ? " · " + fmtDate(r.decided_at.slice(0, 10)) + " 처리" : ""}</div>
+      <div class="muted" style="font-size:.8rem;margin-top:.3rem">${pr && b ? `현재 진도 ${esc(curLabel(b, pr.current_unit))} · ` : ""}${fmtDate((r.created_at || "").slice(0, 10))} 생성${r.model ? " · " + esc(r.model) : ""}${r.edited_at ? " · " + fmtDate(r.edited_at.slice(0, 10)) + " 수정" : ""}${r.decided_at ? " · " + fmtDate(r.decided_at.slice(0, 10)) + " 처리" : ""}</div>
     </div>`;
   };
   // 같은 수업일의 추천은 날짜(요일)별 그룹으로 묶어 보여줍니다.
@@ -2146,7 +2198,7 @@ function renderRecsTab(s) {
         <div class="rec-gt"><strong>${date ? `${Number(date.slice(5, 7))}월 ${Number(date.slice(8, 10))}일${wd ? ` (${wd})` : ""}` : "수업일 미정"}</strong><span class="muted">${isDone ? "수업" : "수업 예정"} · 교재 ${items.length}개</span></div>
         ${has ? lessonChip(has) : ""}
         <span class="spacer"></span>
-        ${open.length ? `${has ? `<button class="btn small" type="button" disabled>기록 있음</button>` : `<button class="btn small primary" type="button" data-rec-use="${esc(open[0].id)}">수업 기록 반영</button>`}<button class="btn small danger" type="button" data-rec-no="${open.map((r) => esc(r.id)).join(",")}">거절</button>` : ""}
+        ${open.length ? `${has ? `<button class="btn small" type="button" disabled title="수업 기록이 있어 수정할 수 없어요">${REC_ICON.lock}추천 수정</button><button class="btn small" type="button" disabled>기록 있음</button>` : `<button class="btn small" type="button" data-rec-edit="${open.map((r) => esc(r.id)).join(",")}">${REC_ICON.pen}추천 수정</button><button class="btn small primary" type="button" data-rec-use="${esc(open[0].id)}">수업 기록 반영</button>`}<button class="btn small danger" type="button" data-rec-no="${open.map((r) => esc(r.id)).join(",")}">거절</button>` : ""}
       </div>
       ${items.map(card).join("")}
     </section>`;
@@ -2176,6 +2228,9 @@ function renderRecsTab(s) {
       const l = state.detail.lessons.find((x) => x.lesson_date === b.dataset.lessonChip);
       if (l) lessonForm(s, l);
     };
+  });
+  $("#tab-body").querySelectorAll("[data-rec-edit]").forEach((b) => {
+    b.onclick = () => editRecsForm(s, b.dataset.recEdit.split(",").filter(Boolean));
   });
   $("#tab-body").querySelectorAll("[data-rec-no]").forEach((b) => {
     b.onclick = async () => {
