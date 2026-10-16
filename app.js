@@ -527,7 +527,7 @@ function buildReport(studentId, start, end, src = state.detail) {
   return { lessons, attended, att, hw, hwNotes, books, tests, testAvg, prevAvg, nextPlan, hasData: lessons.length + tests.length > 0 };
 }
 
-const ACADEMY_NAME = "레이첼잉글리쉬";
+const ACADEMY_NAME = "Rachel English";
 
 function buildMessage(s, label, start, end, r, comment) {
   const out = [];
