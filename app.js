@@ -326,7 +326,8 @@ function scheduleHtml() {
     <div class="card sch-card sch-wide"><table class="sch-grid"><thead><tr><th></th>${gridHead}</tr></thead><tbody>${grid}</tbody></table></div>
     <div class="card sch-card sch-narrow"><table class="sch-table"><tbody>${rows}</tbody></table></div></section>`;
 }
-function schedulePrintHtml(orient = "p") {
+function schedulePrintHtml(orient = "p", zoom = 1) {
+  const zs = zoom < 1 ? ` style="zoom:${zoom}"` : "";
   const days = groupDays(state.schedule.slots);
   const active = state.students.filter((s) => s.active);
   const namesOf = (sl) => active.filter((s) => (sl.student_ids || []).includes(s.id));
@@ -347,7 +348,7 @@ function schedulePrintHtml(orient = "p") {
     }).join("")}</tr>`).join("");
     return `<div class="rp-page tp-page tp-land">
       <div class="tl-hd"><div><div class="pl-br">${esc(ACADEMY_NAME).toUpperCase()}</div><h1>수업 시간표</h1></div><span>매주 반복</span></div>
-      <div class="tl-bd"><table class="tl-table"><thead><tr><th></th>${days.map((d) => `<th class="tl-d">${DAY_NAME[d.wd]}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>
+      <div class="tl-bd"${zs}><table class="tl-table"><thead><tr><th></th>${days.map((d) => `<th class="tl-d">${DAY_NAME[d.wd]}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>
       ${foot}</div>`;
   }
   const block = (d) => `<div class="tp-day"><div class="tp-d">${DAY_NAME[d.wd]}</div><div class="tp-slots">${d.slots.map((sl, i) => {
@@ -357,7 +358,7 @@ function schedulePrintHtml(orient = "p") {
   }).join("")}</div></div>`;
   return `<div class="rp-page tp-page">
     <div class="pl-hd"><div class="pl-br">${esc(ACADEMY_NAME).toUpperCase()}</div><h1>수업 시간표</h1><div class="pl-who"><span>매주 반복</span></div></div>
-    <div class="tp-bd">${days.map(block).join("")}</div>
+    <div class="tp-bd"${zs}>${days.map(block).join("")}</div>
     ${foot}
   </div>`;
 }
@@ -365,16 +366,32 @@ const SCH_ORIENT_KEY = "rachel_sched_orient";
 function schedOrient() {
   try { return localStorage.getItem(SCH_ORIENT_KEY) === "l" ? "l" : "p"; } catch { return "p"; }
 }
+// 내용이 한 장을 넘으면 본문을 줄여서 A4 한 장에 맞춥니다 (잘리지 않게).
+function fitSchedSheet(sheet, land) {
+  const bd = sheet.querySelector(land ? ".tl-bd" : ".tp-bd");
+  const page = sheet.querySelector(".rp-page");
+  if (!bd || !page) return 1;
+  const pageH = (297 / 25.4) * 96;
+  const over = () => (land ? bd.scrollHeight > bd.clientHeight + 1 : page.offsetHeight > pageH + 1);
+  let s = 1;
+  while (over() && s > 0.45) {
+    s = Math.round((s - 0.04) * 100) / 100;
+    bd.style.zoom = String(s);
+  }
+  return s;
+}
 function openSchedPreview(returnTo, orient = schedOrient()) {
   try { localStorage.setItem(SCH_ORIENT_KEY, orient); } catch { /* 저장 실패는 무시 */ }
+  let sc = 1;
   openEvalPreview(schedulePrintHtml(orient), () => {
     const area = $("#sched-print-area");
-    area.innerHTML = schedulePrintHtml(orient);
+    area.innerHTML = schedulePrintHtml(orient, sc);
     area.classList.toggle("land", orient === "l");
     document.body.classList.add("print-sched");
     try { window.print(); } finally { document.body.classList.remove("print-sched"); area.classList.remove("land"); }
   }, returnTo, "시간표 미리보기", {
     land: orient === "l",
+    onRender: (sheet) => { sc = fitSchedSheet(sheet, orient === "l"); },
     orient: { value: orient, options: [["p", "세로"], ["l", "가로"]], onChange: (v) => openSchedPreview(returnTo, v) },
   });
 }
@@ -1341,6 +1358,7 @@ function openEvalPreview(html, onPrint, returnTo, label = "평가서 미리보�
     <div class="ev-ov-scroll"><div class="ev-sheet ${opts.land ? "land" : ""}" id="ev-sheet">${html}</div></div>`;
   document.body.appendChild(ov);
   const sheet = ov.querySelector("#ev-sheet");
+  if (opts.onRender) opts.onRender(sheet);
   // A4 한 장(297mm) 기준으로 몇 장이 되는지 계산
   const pageH = ((opts.land ? 210 : 297) / 25.4) * 96;
   const pages = Math.max(1, Math.ceil((sheet.offsetHeight - 2) / pageH));
