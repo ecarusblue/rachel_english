@@ -163,6 +163,10 @@ label input, label select, label textarea { margin-top: .25em; color: var(--text
 .page-head h2 { margin: 0; }
 .badge { display: inline-block; font-size: .75rem; padding: .1em .6em; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
 .badge.warn { background: var(--warn-soft); color: var(--warn); }
+.badge.ai { background: #efe4fb; color: #6b2fb0; }
+@media (prefers-color-scheme: dark) { .badge.ai { background: #3a2a55; color: #d8bff7; } }
+.ai-note { margin: 0 0 .8rem; padding: .6rem .9rem; border-radius: 10px; background: #f4ecfd; color: #4b2380; font-size: .9rem; }
+@media (prefers-color-scheme: dark) { .ai-note { background: #2f2347; color: #dcc8f5; } }
 .badge.done { background: #dff3e6; color: var(--good); }
 .badge.bad { background: var(--bad-soft); color: var(--bad); }
 
@@ -461,7 +465,7 @@ td.name-cell, td:first-child { white-space: nowrap; }
 .sch-day { width: 64px; text-align: center !important; background: var(--bg); border-right: 1px solid var(--border); font-size: 1.1rem; color: var(--text); }
 .sch-day b { display: block; }
 .sch-day em { display: inline-block; font-style: normal; font-size: .68rem; font-weight: 700; color: #fff; background: var(--accent); border-radius: 999px; padding: .05em .55em; margin-top: .25rem; }
-html:not([data-theme="light"]) .sch-day em { color: #0b1220; }
+@media (prefers-color-scheme: dark) { .sch-day em { color: #0b1220; } }
 .sch-day.today { background: var(--accent-soft); color: var(--accent); }
 .sch-today td { background: color-mix(in srgb, var(--accent-soft) 40%, transparent); }
 .sch-slot { width: 140px; white-space: nowrap; }
@@ -548,7 +552,7 @@ html:not([data-theme="light"]) .sch-day em { color: #0b1220; }
 .sch-grid tbody tr:last-child > * { border-bottom: 0; }
 .sch-grid thead th { text-align: center; font-size: 1.05rem; font-weight: 800; background: var(--bg); color: var(--text); padding: .65rem; }
 .sch-grid thead th em { display: inline-block; font-style: normal; font-size: .68rem; font-weight: 700; color: #fff; background: var(--accent); border-radius: 999px; padding: .05em .55em; margin-left: .4rem; vertical-align: middle; }
-html:not([data-theme="light"]) .sch-grid thead th em { color: #0b1220; }
+@media (prefers-color-scheme: dark) { .sch-grid thead th em { color: #0b1220; } }
 .sch-grid thead th.today { background: var(--accent-soft); color: var(--accent); }
 .sch-grid td.today { background: color-mix(in srgb, var(--accent-soft) 40%, transparent); }
 .sch-grid th.sg-rt { width: 104px; vertical-align: middle; background: var(--bg); }

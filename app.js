@@ -1190,6 +1190,7 @@ function evalSummary(s, d) {
 
 function evalStatusBadge(row) {
   if (!row) return `<span class="badge warn">미작성</span>`;
+  if (row.source === "ai" && row.status !== "완료") return `<span class="badge ai" title="Claude가 쓴 초안입니다. 확인 후 저장하면 선생님 작성으로 바뀝니다">AI 초안</span>`;
   return row.status === "완료" ? `<span class="badge done">완료</span>` : `<span class="badge">작성 중</span>`;
 }
 
@@ -1416,6 +1417,7 @@ function renderEvalDetail(s, d, head, bindHead) {
     <div class="eval-edit">
       ${head}
       <div class="toolbar"><button class="btn" type="button" id="ev-back">← 학생 목록</button><strong style="font-size:1.1rem">${esc(s.name)}</strong><span class="muted">${esc(s.grade || "")}</span>${evalStatusBadge(row)}</div>
+      ${row && row.source === "ai" && row.status !== "완료" ? `<div class="ai-note"><strong>AI 초안</strong> — Claude가 작성했습니다${row.ai_model ? ` (${esc(row.ai_model)})` : ""}. 내용을 확인·수정한 뒤 저장하면 선생님 작성으로 바뀌고, 상태를 '완료'로 바꾸면 확정됩니다.</div>` : ""}
       ${evalAutoHtml(s, d, sm)}
       <form id="ev-form" class="eval-form" autocomplete="off">
         <div class="grid">
@@ -1447,7 +1449,7 @@ function renderEvalDetail(s, d, head, bindHead) {
     $("#ev-err").textContent = "";
     try {
       const vals = evalValues();
-      const payload = { student_id: s.id, year: ev.year, month: ev.month, ...vals, updated_at: new Date().toISOString() };
+      const payload = { student_id: s.id, year: ev.year, month: ev.month, ...vals, source: "teacher", ai_model: null, updated_at: new Date().toISOString() };
       const saved = await run(db.from("monthly_evaluations").upsert(payload, { onConflict: "student_id,year,month" }).select("*").single());
       const merged = { ...(row || {}), ...payload, ...(saved || {}) };
       const i = d.rows.findIndex((r) => r.student_id === s.id);

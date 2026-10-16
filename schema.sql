@@ -84,6 +84,10 @@ create table if not exists public.monthly_evaluations (
   unique (student_id, year, month)
 );
 
+-- Claude 예약 작업이 쓴 초안 표시(AI 초안). 선생님이 앱에서 저장하면 'teacher' 로 바뀝니다.
+alter table public.monthly_evaluations add column if not exists source   text not null default 'teacher' check (source in ('teacher','ai'));
+alter table public.monthly_evaluations add column if not exists ai_model text;
+
 -- 수업 시간표 (요일·타임·시간과 배정 학생을 매주 반복으로 저장)
 create table if not exists public.schedule_slots (
   id           uuid primary key default gen_random_uuid(),
@@ -376,3 +380,276 @@ revoke all on function public.api_read_progress(text) from public;
 revoke all on function public.api_submit_recommendations(text, jsonb, text) from public;
 grant execute on function public.api_read_progress(text) to anon, authenticated;
 grant execute on function public.api_submit_recommendations(text, jsonb, text) to anon, authenticated;
+
+-- ============================================================
+-- 4. 월말평가서용 API (Claude 예약 작업 전용)
+--    - 읽기: api_read_evaluation_source(토큰, 연, 월) -> 학생 이름 없이 가명으로 그 달의 수업·시험 자료를 돌려줌
+--    - 쓰기: api_submit_evaluations(토큰, 항목들)     -> monthly_evaluations 에 'AI 초안'(작성중)으로만 저장
+--    선생님이 직접 작성·수정했거나 '완료'인 평가서는 덮어쓰지 않습니다. (사용법: docs/evaluation-api.md)
+-- ============================================================
+
+-- 학생 실명(전체 이름·이름 부분)을 가명으로 바꿉니다. 선생님 코멘트를 내보내기 전에 사용합니다.
+create or replace function public._api_mask_names(p_owner uuid, p_text text)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  r record;
+  v text := p_text;
+begin
+  if v is null then return null; end if;
+  for r in
+    select q.name, q.alias from (
+      select s.name,
+             'S' || lpad((row_number() over (order by s.created_at, s.id))::text, 2, '0') as alias
+        from public.students s where s.owner = p_owner) q
+     order by char_length(q.name) desc
+  loop
+    if char_length(r.name) >= 2 then v := replace(v, r.name, r.alias); end if;
+    if char_length(r.name) >= 3 then v := replace(v, substr(r.name, 2), r.alias); end if;
+  end loop;
+  return v;
+end;
+$$;
+revoke all on function public._api_mask_names(uuid, text) from public, anon, authenticated;
+
+create or replace function public.api_read_evaluation_source(p_token text, p_year integer default null, p_month integer default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_owner uuid;
+  v_hash  text := encode(extensions.digest(convert_to(coalesce(p_token, ''), 'UTF8'), 'sha256'), 'hex');
+  v_today date := (now() at time zone 'Asia/Seoul')::date;
+  v_year  integer := coalesce(p_year, extract(year from (now() at time zone 'Asia/Seoul'))::integer);
+  v_month integer := coalesce(p_month, extract(month from (now() at time zone 'Asia/Seoul'))::integer);
+  v_start date;
+  v_end   date;
+  v_out   jsonb;
+begin
+  select t.owner into v_owner from public.api_tokens t where t.token_hash = v_hash and t.revoked_at is null;
+  if v_owner is null then
+    raise exception 'unauthorized' using errcode = '28000';
+  end if;
+  update public.api_tokens set last_used_at = now() where token_hash = v_hash;
+
+  if v_year < 2000 or v_year > 2100 or v_month < 1 or v_month > 12 then
+    raise exception 'invalid year/month';
+  end if;
+  v_start := make_date(v_year, v_month, 1);
+  v_end   := (v_start + interval '1 month' - interval '1 day')::date;
+
+  with st as (
+    select s.id, s.grade, s.active,
+           'S' || lpad((row_number() over (order by s.created_at, s.id))::text, 2, '0') as alias
+      from public.students s
+     where s.owner = v_owner
+  )
+  select jsonb_build_object(
+    'generated_at', now(),
+    'today', v_today,
+    'year', v_year,
+    'month', v_month,
+    'period', jsonb_build_object('start', v_start, 'end', v_end),
+    'form', jsonb_build_object(
+      'scale', '1~5 (5가 가장 좋음)',
+      'skills', jsonb_build_array('listening', 'speaking', 'reading', 'writing', 'vocab', 'grammar'),
+      'attitude', jsonb_build_array('participation', 'focus', 'homework'),
+      'texts', jsonb_build_array('achievement', 'improvement', 'next_plan', 'parent_note'),
+      'text_max_chars', 3000),
+    'students', coalesce(jsonb_agg(
+      jsonb_build_object(
+        'alias', st.alias,
+        'grade', st.grade,
+        'existing', (
+          select jsonb_build_object('status', e.status, 'source', e.source)
+            from public.monthly_evaluations e
+           where e.student_id = st.id and e.year = v_year and e.month = v_month),
+        'attendance', (
+          select jsonb_build_object(
+            '출석', count(*) filter (where l.attendance = '출석'),
+            '지각', count(*) filter (where l.attendance = '지각'),
+            '결석', count(*) filter (where l.attendance = '결석'),
+            '보강', count(*) filter (where l.attendance = '보강'))
+            from public.lessons l
+           where l.student_id = st.id and l.lesson_date between v_start and v_end),
+        'homework', (
+          select jsonb_build_object(
+            '완료', count(*) filter (where l.homework = '완료'),
+            '일부', count(*) filter (where l.homework = '일부'),
+            '미제출', count(*) filter (where l.homework = '미제출'))
+            from public.lessons l
+           where l.student_id = st.id and l.lesson_date between v_start and v_end and l.attendance <> '결석'),
+        'books', coalesce((
+          select jsonb_agg(jsonb_build_object(
+            'title', t.title,
+            'unit_label', t.unit_label,
+            'total_units', t.total_units,
+            'current_unit', p.current_unit,
+            'month_from_unit', (select min(l.from_unit) from public.lessons l
+                                 where l.student_id = st.id and l.textbook_id = t.id and l.attendance <> '결석'
+                                   and l.lesson_date between v_start and v_end),
+            'month_to_unit', (select max(l.to_unit) from public.lessons l
+                               where l.student_id = st.id and l.textbook_id = t.id and l.attendance <> '결석'
+                                 and l.lesson_date between v_start and v_end),
+            'month_lessons', (select count(*) from public.lessons l
+                               where l.student_id = st.id and l.textbook_id = t.id and l.attendance <> '결석'
+                                 and l.lesson_date between v_start and v_end)
+          ) order by t.title)
+          from public.progress p join public.textbooks t on t.id = p.textbook_id
+         where p.student_id = st.id and p.owner = v_owner), '[]'::jsonb),
+        'lessons', coalesce((
+          select jsonb_agg(x.r order by x.d) from (
+            select l.lesson_date as d,
+                   jsonb_build_object('date', l.lesson_date, 'attendance', l.attendance,
+                     'homework', l.homework,
+                     'homework_note', public._api_mask_names(v_owner, left(l.homework_note, 300)),
+                     'topic', public._api_mask_names(v_owner, left(l.topic, 300)),
+                     'next_plan', public._api_mask_names(v_owner, left(l.next_plan, 300)),
+                     'teacher_comment', public._api_mask_names(v_owner, left(l.teacher_comment, 1500))) as r
+              from public.lessons l
+             where l.student_id = st.id and l.lesson_date between v_start and v_end
+             order by l.lesson_date limit 40) x), '[]'::jsonb),
+        'tests', coalesce((
+          select jsonb_agg(x.r order by x.d) from (
+            select t.test_date as d,
+                   jsonb_build_object('date', t.test_date, 'kind', t.kind,
+                     'percent', round((t.score / nullif(t.max_score, 0) * 100)::numeric, 0)) as r
+              from public.tests t
+             where t.student_id = st.id and t.test_date between v_start and v_end
+             order by t.test_date limit 40) x), '[]'::jsonb),
+        'test_trend', coalesce((
+          select jsonb_agg(jsonb_build_object('month', y.m, 'kind', y.kind, 'avg_percent', y.a, 'count', y.n) order by y.m, y.kind)
+            from (
+              select to_char(t.test_date, 'YYYY-MM') as m, t.kind,
+                     round(avg(t.score / nullif(t.max_score, 0) * 100)::numeric, 0) as a, count(*) as n
+                from public.tests t
+               where t.student_id = st.id
+                 and t.test_date >= (v_start - interval '3 months')::date and t.test_date <= v_end
+               group by 1, 2) y), '[]'::jsonb)
+      ) order by st.alias) filter (where st.active), '[]'::jsonb)
+  ) into v_out
+  from st;
+
+  return v_out;
+end;
+$$;
+
+create or replace function public.api_submit_evaluations(p_token text, p_items jsonb, p_model text default 'Claude(예약 작업)')
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_owner    uuid;
+  v_hash     text := encode(extensions.digest(convert_to(coalesce(p_token, ''), 'UTF8'), 'sha256'), 'hex');
+  v_item     jsonb;
+  v_student  uuid;
+  v_year     integer;
+  v_month    integer;
+  v_ratings  jsonb;
+  v_attitude jsonb;
+  v_ach      text;
+  v_imp      text;
+  v_next     text;
+  v_note     text;
+  v_ex       public.monthly_evaluations%rowtype;
+  v_inserted integer := 0;
+  v_updated  integer := 0;
+  v_skipped  integer := 0;
+  v_errors   jsonb := '[]'::jsonb;
+  k          text;
+  val        jsonb;
+
+begin
+  select t.owner into v_owner from public.api_tokens t where t.token_hash = v_hash and t.revoked_at is null;
+  if v_owner is null then
+    raise exception 'unauthorized' using errcode = '28000';
+  end if;
+  update public.api_tokens set last_used_at = now() where token_hash = v_hash;
+
+  if p_items is null or jsonb_typeof(p_items) <> 'array' then
+    raise exception 'items must be a JSON array';
+  end if;
+  if jsonb_array_length(p_items) > 100 then
+    raise exception 'too many items (max 100)';
+  end if;
+
+  for v_item in select * from jsonb_array_elements(p_items) loop
+    begin
+      v_student := null;
+      select q.id into v_student from (
+        select s.id, s.active,
+               'S' || lpad((row_number() over (order by s.created_at, s.id))::text, 2, '0') as alias
+          from public.students s where s.owner = v_owner) q
+       where q.alias = v_item->>'alias' and q.active;
+      if v_student is null then raise exception 'unknown student alias'; end if;
+
+      v_year  := (v_item->>'year')::integer;
+      v_month := (v_item->>'month')::integer;
+      if v_year is null or v_month is null or v_year < 2000 or v_year > 2100 or v_month < 1 or v_month > 12 then
+        raise exception 'invalid year/month';
+      end if;
+
+      -- 평가 점수: 허용된 항목만, 1~5 정수만
+      v_ratings := '{}'::jsonb;
+      if v_item ? 'ratings' and jsonb_typeof(v_item->'ratings') = 'object' then
+        for k, val in select * from jsonb_each(v_item->'ratings') loop
+          if k not in ('listening','speaking','reading','writing','vocab','grammar') then raise exception 'unknown rating key: %', k; end if;
+          if jsonb_typeof(val) <> 'number' or (val::text)::numeric <> trunc((val::text)::numeric) or (val::text)::numeric not between 1 and 5 then
+            raise exception 'rating % must be an integer 1..5', k;
+          end if;
+          v_ratings := v_ratings || jsonb_build_object(k, (val::text)::integer);
+        end loop;
+      end if;
+      v_attitude := '{}'::jsonb;
+      if v_item ? 'attitude' and jsonb_typeof(v_item->'attitude') = 'object' then
+        for k, val in select * from jsonb_each(v_item->'attitude') loop
+          if k not in ('participation','focus','homework') then raise exception 'unknown attitude key: %', k; end if;
+          if jsonb_typeof(val) <> 'number' or (val::text)::numeric <> trunc((val::text)::numeric) or (val::text)::numeric not between 1 and 5 then
+            raise exception 'attitude % must be an integer 1..5', k;
+          end if;
+          v_attitude := v_attitude || jsonb_build_object(k, (val::text)::integer);
+        end loop;
+      end if;
+
+      v_ach  := left(nullif(trim(coalesce(v_item->>'achievement', '')), ''), 3000);
+      v_imp  := left(nullif(trim(coalesce(v_item->>'improvement', '')), ''), 3000);
+      v_next := left(nullif(trim(coalesce(v_item->>'next_plan', '')), ''), 3000);
+      v_note := left(nullif(trim(coalesce(v_item->>'parent_note', '')), ''), 3000);
+
+      select e.* into v_ex from public.monthly_evaluations e
+       where e.student_id = v_student and e.year = v_year and e.month = v_month;
+
+      if not found then
+        insert into public.monthly_evaluations (owner, student_id, year, month, ratings, attitude, achievement, improvement, next_plan, parent_note, status, source, ai_model)
+        values (v_owner, v_student, v_year, v_month, v_ratings, v_attitude, v_ach, v_imp, v_next, v_note, '작성중', 'ai', left(coalesce(p_model, 'Claude'), 100));
+        v_inserted := v_inserted + 1;
+      elsif v_ex.source = 'ai' and v_ex.status = '작성중' then
+        update public.monthly_evaluations
+           set ratings = v_ratings, attitude = v_attitude, achievement = v_ach, improvement = v_imp,
+               next_plan = v_next, parent_note = v_note, ai_model = left(coalesce(p_model, 'Claude'), 100), updated_at = now()
+         where id = v_ex.id and source = 'ai' and status = '작성중';
+        v_updated := v_updated + 1;
+      else
+        v_skipped := v_skipped + 1;   -- 선생님이 쓰거나 고쳤거나 완료된 평가서는 건드리지 않음
+      end if;
+    exception when others then
+      v_errors := v_errors || jsonb_build_array(jsonb_build_object('alias', v_item->>'alias', 'error', sqlerrm));
+    end;
+  end loop;
+
+  return jsonb_build_object('inserted', v_inserted, 'updated', v_updated, 'skipped', v_skipped, 'errors', v_errors);
+end;
+$$;
+
+revoke all on function public.api_read_evaluation_source(text, integer, integer) from public;
+revoke all on function public.api_submit_evaluations(text, jsonb, text) from public;
+grant execute on function public.api_read_evaluation_source(text, integer, integer) to anon, authenticated;
+grant execute on function public.api_submit_evaluations(text, jsonb, text) to anon, authenticated;

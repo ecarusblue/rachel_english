@@ -1,4 +1,4 @@
-// Cloudflare Worker: Claude 예약 작업용 추천 API (읽기 / 쓰기)
+// Cloudflare Worker: Claude 예약 작업용 API (수업 추천 + 월말평가서, 읽기 / 쓰기)
 // build.mjs 가 __SUPABASE_URL__ / __SUPABASE_KEY__ 를 공개용 값으로 바꿔 build/worker.js 를 만듭니다.
 // 비밀 키는 사용하지 않습니다. 실제 권한 검사와 데이터 접근은 DB 함수(api_read_progress / api_submit_recommendations)가
 // 토큰 해시를 확인한 뒤에만 수행합니다.
@@ -84,6 +84,39 @@ export default {
       if (!body || !Array.isArray(body.items)) return json({ ok: false, error: "items array required" }, 400);
       const model = typeof body.model === "string" ? body.model.slice(0, 100) : undefined;
       return rpc("api_submit_recommendations", model ? { p_token: token, p_items: body.items, p_model: model } : { p_token: token, p_items: body.items });
+    }
+
+    // 월말평가서: 그 달의 수업·시험 자료 읽기 (연·월을 생략하면 한국 시간의 이번 달)
+    if (path === "/api/evaluation-source") {
+      if (request.method !== "GET") return json({ ok: false, error: "method not allowed" }, 405);
+      const token = bearer(request);
+      if (!token) return json({ ok: false, error: "unauthorized" }, 401);
+      const num = (k) => {
+        const v = url.searchParams.get(k);
+        if (v === null || v === "") return null;
+        return /^\d{1,4}$/.test(v) ? Number(v) : NaN;
+      };
+      const y = num("year"), m = num("month");
+      if (Number.isNaN(y) || Number.isNaN(m)) return json({ ok: false, error: "invalid year/month" }, 400);
+      return rpc("api_read_evaluation_source", { p_token: token, p_year: y, p_month: m });
+    }
+
+    // 월말평가서: AI 초안 쓰기 (작성중·AI 초안으로만 저장)
+    if (path === "/api/evaluations") {
+      if (request.method !== "POST") return json({ ok: false, error: "method not allowed" }, 405);
+      const token = bearer(request);
+      if (!token) return json({ ok: false, error: "unauthorized" }, 401);
+      const raw = await request.text();
+      if (raw.length > MAX_BODY) return json({ ok: false, error: "body too large" }, 413);
+      let body;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        return json({ ok: false, error: "invalid JSON" }, 400);
+      }
+      if (!body || !Array.isArray(body.items)) return json({ ok: false, error: "items array required" }, 400);
+      const model = typeof body.model === "string" ? body.model.slice(0, 100) : undefined;
+      return rpc("api_submit_evaluations", model ? { p_token: token, p_items: body.items, p_model: model } : { p_token: token, p_items: body.items });
     }
 
     return json({ ok: false, error: "not found" }, 404);
