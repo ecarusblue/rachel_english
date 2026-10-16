@@ -235,9 +235,6 @@ function renderSidebar() {
   $("#nav-summary").classList.toggle("active", state.view === "summary");
   $("#nav-evals").classList.toggle("active", state.view === "evals");
   $("#nav-recs").classList.toggle("active", state.view === "recs");
-  const rb = $("#recs-badge");
-  rb.hidden = !state.pendingRecs;
-  rb.textContent = state.pendingRecs;
   const list = state.students.filter((s) => s.active || state.showInactive);
   $("#student-list").innerHTML = list.length
     ? list
@@ -1229,7 +1226,7 @@ function renderRecsTab(s) {
     </div>`;
   };
   $("#tab-body").innerHTML = `<div class="eval-edit">` + filterHtml(state.recFilter, "rf", "수업 안내 미리보기") + (recs.length
-    ? `${pending.length ? `<h3>확인할 추천 (${pending.length})</h3>${pending.map(card).join("")}` : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
+    ? `${pending.length ? `${pending.map(card).join("")}` : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
        ${done.length ? `<h3 style="margin-top:1.2rem">지난 추천</h3>${done.map(card).join("")}` : ""}
        <p class="muted" style="font-size:.85rem">"수업 기록에 반영"을 누르면 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록됩니다. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`
     : `<div class="card empty">${allForStudent.length ? "이 기간에는 추천이 없습니다. 위에서 기간을 바꿔 보세요." : "아직 추천이 없습니다. Claude 예약 작업이 실행되면 여기에 표시됩니다."}</div>`) + `</div><div class="eval-print" id="plan-print-area"></div>`;
@@ -1296,7 +1293,7 @@ function renderAllRecs() {
     <tbody>${rows.map(row).join("")}</tbody></table></div>`;
   $("#main").innerHTML = `
     <div class="page-head"><h2>수업 추천</h2><span class="muted">이번 주 ${shortDate(wk.start)} ~ ${shortDate(wk.end)} · 학생별 다음 수업 진도 추천</span></div>
-    ${pending.length ? `<h3>확인할 추천 (${pending.length})</h3>${table(pending)}` : `<div class="card empty">이번 주에 확인할 새 추천이 없습니다. 다른 주의 추천은 학생 화면의 수업 추천 탭에서 기간을 바꿔 볼 수 있습니다.</div>`}
+    ${pending.length ? `${table(pending)}` : `<div class="card empty">이번 주에 확인할 새 추천이 없습니다. 다른 주의 추천은 학생 화면의 수업 추천 탭에서 기간을 바꿔 볼 수 있습니다.</div>`}
     ${done.length ? `<h3 style="margin-top:1.2rem">최근 처리한 추천</h3>${table(done)}` : ""}
     <p class="muted" style="font-size:.85rem;margin-top:.8rem">"반영"을 누르면 그 학생의 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록되고, 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`;
 
