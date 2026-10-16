@@ -293,7 +293,7 @@ function groupDays(slots) {
 }
 function scheduleHtml() {
   const sc = state.schedule;
-  const head = `<div class="sch-head"><h3>수업 시간표</h3><span class="muted">매주 반복 · 이름을 누르면 학생 화면으로 이동</span><span class="spacer"></span>${sc.missing ? "" : `<button class="btn small" id="sch-edit" type="button">시간표 편집</button>`}</div>`;
+  const head = `<div class="sch-head"><h3>수업 시간표</h3><span class="muted">매주 반복 · 이름을 누르면 학생 화면으로 이동</span><span class="spacer"></span>${sc.missing ? "" : `${sc.slots.length ? `<button class="btn small" id="sch-print" type="button">시간표 미리보기</button>` : ""}<button class="btn small" id="sch-edit" type="button">시간표 편집</button>`}</div>`;
   if (sc.missing) return `<section class="sch">${head}<div class="card empty">시간표를 쓰려면 최신 <code>schema.sql</code> 을 Supabase SQL Editor에서 한 번 실행하세요.</div></section>`;
   const days = groupDays(sc.slots);
   if (!days.length) return `<section class="sch">${head}<div class="card empty">아직 시간표가 없습니다. 오른쪽 위 <strong>시간표 편집</strong>에서 요일과 타임을 만들어 보세요.</div></section>`;
@@ -310,9 +310,32 @@ function scheduleHtml() {
   }).join("")).join("");
   return `<section class="sch">${head}<div class="card sch-card"><table class="sch-table"><tbody>${rows}</tbody></table></div></section>`;
 }
+function schedulePrintHtml() {
+  const days = groupDays(state.schedule.slots);
+  const active = state.students.filter((s) => s.active);
+  const block = (d) => `<div class="tp-day"><div class="tp-d">${DAY_NAME[d.wd]}</div><div class="tp-slots">${d.slots.map((sl, i) => {
+    const names = active.filter((s) => (sl.student_ids || []).includes(s.id));
+    const tm = timeText(sl.start_time, sl.end_time);
+    return `<div class="tp-slot"><div class="tp-t"><b>${esc(sl.label || "타임 " + (i + 1))}</b>${tm ? `<span>${tm}</span>` : ""}</div>
+      <div class="tp-n">${names.length ? names.map((s) => `<span class="tp-name">${esc(s.name)}</span>`).join("") : `<span class="tp-empty">-</span>`}</div></div>`;
+  }).join("")}</div></div>`;
+  return `<div class="rp-page tp-page">
+    <div class="pl-hd"><div class="pl-br">${esc(ACADEMY_NAME).toUpperCase()}</div><h1>수업 시간표</h1><div class="pl-who"><span>매주 반복</span></div></div>
+    <div class="tp-bd">${days.map(block).join("")}</div>
+    <div class="rp-foot"><span>${esc(ACADEMY_NAME)}</span><span>${shortDate(todayStr())} 출력</span></div>
+  </div>`;
+}
 function bindSchedule() {
   const eb = $("#sch-edit");
   if (eb) eb.onclick = startScheduleEdit;
+  const pb = $("#sch-print");
+  if (pb) {
+    pb.onclick = () => openEvalPreview(schedulePrintHtml(), () => {
+      $("#sched-print-area").innerHTML = schedulePrintHtml();
+      document.body.classList.add("print-sched");
+      try { window.print(); } finally { document.body.classList.remove("print-sched"); }
+    }, pb, "시간표 미리보기");
+  }
   $("#main").querySelectorAll("[data-sch-sid]").forEach((b) => {
     b.onclick = (e) => { e.stopPropagation(); selectStudent(b.dataset.schSid); };
   });
@@ -527,7 +550,8 @@ function renderOverview() {
         <tbody>${body}</tbody>
       </table>
     </div>
-    <p class="muted" style="margin-top:.8rem;font-size:.85rem">행을 누르면 학생 상세로 이동합니다. 시험 평균은 점수를 100점 만점으로 환산한 값입니다.</p>`;
+    <p class="muted" style="margin-top:.8rem;font-size:.85rem">행을 누르면 학생 상세로 이동합니다. 시험 평균은 점수를 100점 만점으로 환산한 값입니다.</p>
+    <div class="eval-print" id="sched-print-area"></div>`;
   bindSchedule();
 }
 

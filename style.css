@@ -370,6 +370,7 @@ td.name-cell, td:first-child { white-space: nowrap; }
   .ev-ov { display: none !important; }
   .eval-edit { display: none !important; }
   .print-plan #main > :not(#tab-body) { display: none !important; }
+  .print-sched #main > :not(#sched-print-area) { display: none !important; }
   .eval-print { display: block; page: evalreport; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .print-head { display: block; margin-bottom: 1rem; }
   .print-head h2 { margin: 0 0 .2rem; }
@@ -491,3 +492,16 @@ html:not([data-theme="light"]) .sch-day em { color: #0b1220; }
   .sch-cnt { display: none; }
   .sch-pop { left: auto; right: 0; }
 }
+
+/* 수업 시간표 출력 (벽 게시용, A4 세로) */
+.tp-bd { padding: 9mm 16mm 6mm; flex: 1; display: flex; flex-direction: column; gap: 5mm; }
+.tp-day { display: grid; grid-template-columns: 22mm 1fr; border: 1px solid #b9c6dc; border-radius: 3mm; overflow: hidden; break-inside: avoid; flex: 1; max-height: 70mm; }
+.tp-d { background: #1f2c47; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 26pt; font-weight: 800; }
+.tp-slots { display: flex; flex-direction: column; }
+.tp-slot { display: grid; grid-template-columns: 38mm 1fr; gap: 4mm; align-items: center; padding: 3mm 5mm; flex: 1; border-top: 1px solid #d3dbe7; }
+.tp-slot:first-child { border-top: 0; }
+.tp-t b { display: block; font-size: 12pt; color: #1b2536; }
+.tp-t span { font-size: 10pt; color: #55657a; }
+.tp-n { display: flex; flex-wrap: wrap; gap: 2mm; }
+.tp-name { font-size: 13.5pt; font-weight: 700; color: #1b2536; padding: 1.2mm 4mm; border: 1.2px solid #9fb0cc; border-radius: 99px; background: #f5f8fd; }
+.tp-empty { color: #55657a; }
