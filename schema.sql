@@ -26,6 +26,11 @@ create table if not exists public.textbooks (
   created_at   timestamptz not null default now()
 );
 
+-- 교재 구조(선택): {"items":[{"name":"Unit 1"},{"name":"Unit 2","children":["Part A","Part B"]}]}
+-- 비어 있으면 예전처럼 Unit 1~N 한 줄 번호. 진도 번호는 항상 맨 끝 항목을 위에서부터 센 누적 번호입니다.
+alter table public.textbooks add column if not exists structure jsonb
+  check (structure is null or jsonb_typeof(structure) = 'object');
+
 -- 학생별 교재 진도 (학생 x 교재 당 1행)
 create table if not exists public.progress (
   id            uuid primary key default gen_random_uuid(),
@@ -247,6 +252,7 @@ begin
             'textbook_id', t.id,
             'title', t.title,
             'unit_label', t.unit_label,
+            'structure', t.structure,
             'total_units', t.total_units,
             'current_unit', p.current_unit,
             'remaining_units', greatest(t.total_units - p.current_unit, 0),
@@ -493,6 +499,7 @@ begin
           select jsonb_agg(jsonb_build_object(
             'title', t.title,
             'unit_label', t.unit_label,
+            'structure', t.structure,
             'total_units', t.total_units,
             'current_unit', p.current_unit,
             'month_from_unit', (select min(l.from_unit) from public.lessons l

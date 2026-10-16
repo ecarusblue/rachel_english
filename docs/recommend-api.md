@@ -79,3 +79,10 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 3. 결과를 POST /api/recommendations 로 보냅니다. items 의 각 항목은 alias, textbook_id, from_unit, to_unit, target_date(다음 수업 예정일을 알면), rationale(한국어 1~3문장).
 4. 응답의 inserted / updated / unchanged / skipped / errors 를 요약해서 보고합니다. 학생 실명은 알 수 없으며 추측하지 않습니다.
 ```
+
+## 교재 구조(`structure`)
+`books[].structure` 가 `null` 이면 `unit_label` 에 번호를 붙인 한 줄 단원입니다(Unit 1~N).
+값이 있으면 `{"items":[{"name":"Unit 1"},{"name":"Unit 2","children":["Part A","Part B"]}]}` 형태이며,
+**하위가 없는 항목과 하위 항목을 위에서부터 센 누적 번호**가 `current_unit`, `from_unit`, `to_unit` 입니다
+(위 예: Unit 1=1, Unit 2›Part A=2, Unit 2›Part B=3). 추천(`from_unit`/`to_unit`)은 항상 이 누적 번호로 보내고,
+`rationale` 에는 이름("Unit 2 › Part B")으로 풀어 쓰면 읽기 좋습니다.

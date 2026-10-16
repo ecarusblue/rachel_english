@@ -75,3 +75,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 4. POST /api/evaluations 로 items(alias, year, month, ratings, attitude, achievement, improvement, next_plan, parent_note)를 보냅니다. year, month 는 읽기 응답의 값을 그대로 씁니다.
 5. 응답의 inserted / updated / skipped / errors 를 요약해서 보고합니다.
 ```
+
+## 교재 구조
+`books[].structure` 가 있으면 `current_unit`, `month_from_unit`, `month_to_unit` 은 항목 트리를 위에서부터 센 누적 번호입니다
+(하위가 없는 항목과 하위 항목이 각각 1칸). 글을 쓸 때는 번호 대신 `structure.items` 에서 찾은 이름(예: "Unit 2 › Part B")을 쓰세요.

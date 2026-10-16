@@ -253,12 +253,109 @@ function bookProgressFor(studentId) {
     .filter((x) => x.book);
 }
 
+/* 교재 구조(트리): structure = { items: [{ name, children?: [이름…] }] }
+   하위가 없는 1레벨 항목과 2레벨 항목이 "단원"이고, 위에서부터 세어 1~total_units 번호를 붙입니다.
+   진도·수업 기록·추천은 이 누적 번호만 쓰고, 화면에서만 "Unit 2 › Part B" 로 풀어서 보여줍니다.
+   structure 가 없는 교재는 예전처럼 "Unit 1~N" 한 줄 번호입니다. */
+function bookLeaves(book) {
+  if (!book || !book.structure || !Array.isArray(book.structure.items)) return null;
+  if (book._leavesSrc !== book.structure) {
+    const out = [];
+    book.structure.items.forEach((it, ti) => {
+      const kids = Array.isArray(it.children) ? it.children : [];
+      if (kids.length) kids.forEach((k, ci) => out.push({ top: ti, child: ci, label: `${it.name} › ${k}`, topName: it.name, kidName: k }));
+      else out.push({ top: ti, child: -1, label: it.name, topName: it.name, kidName: null });
+    });
+    book._leaves = out;
+    book._leavesSrc = book.structure;
+  }
+  return book._leaves;
+}
+function unitName(book, n) {
+  const lv = bookLeaves(book);
+  if (lv) return lv[n - 1] ? lv[n - 1].label : `${n}번째`;
+  return `${book.unit_label} ${n}`;
+}
+function curNum(book, n) {
+  if (!bookLeaves(book)) return `${n}/${book.total_units}`;
+  return n > 0 ? `${unitName(book, n)} (${n}/${book.total_units})` : `시작 전 (0/${book.total_units})`;
+}
+function curLabel(book, n) {
+  return bookLeaves(book) ? curNum(book, n) : `${book.unit_label} ${n}/${book.total_units}`;
+}
 function rangeText(book, l) {
+  const a = l.from_unit, b = l.to_unit;
+  const lv = bookLeaves(book);
+  if (lv) {
+    if (a != null && b != null) {
+      if (a === b) return ` ${unitName(book, a)}`;
+      const x = lv[a - 1], y = lv[b - 1];
+      if (x && y && x.top === y.top && x.kidName && y.kidName) return ` ${x.topName} › ${x.kidName}–${y.kidName}`;
+      return ` ${unitName(book, a)} ~ ${unitName(book, b)}`;
+    }
+    if (b != null) return ` ~${unitName(book, b)}`;
+    if (a != null) return ` ${unitName(book, a)}~`;
+    return "";
+  }
   const lab = book.unit_label;
-  if (l.from_unit != null && l.to_unit != null) return l.from_unit === l.to_unit ? ` ${lab} ${l.from_unit}` : ` ${lab} ${l.from_unit}–${l.to_unit}`;
-  if (l.to_unit != null) return ` ${lab} ~${l.to_unit}`;
-  if (l.from_unit != null) return ` ${lab} ${l.from_unit}~`;
+  if (a != null && b != null) return a === b ? ` ${lab} ${a}` : ` ${lab} ${a}–${b}`;
+  if (b != null) return ` ${lab} ~${b}`;
+  if (a != null) return ` ${lab} ${a}~`;
   return "";
+}
+
+/* 들여쓰기 목록 ↔ 구조: 한 줄에 항목 하나, 앞에 공백(또는 탭)을 두면 바로 윗 항목의 하위 */
+function parseOutline(text) {
+  const items = [];
+  const lines = String(text || "").split(/\r?\n/);
+  lines.forEach((raw, i) => {
+    if (!raw.trim()) return;
+    const sub = /^[ \t\u3000]/.test(raw);
+    const name = raw.trim().replace(/^[-•*]\s*/, "").slice(0, 60);
+    if (!name) return;
+    if (sub) {
+      if (!items.length) throw new Error(`${i + 1}번째 줄: 하위 항목 위에 상위 항목이 필요합니다.`);
+      (items[items.length - 1].children ||= []).push(name);
+    } else items.push({ name });
+  });
+  if (!items.length) throw new Error("항목을 한 줄 이상 입력하세요.");
+  const leaves = items.reduce((n, it) => n + (it.children ? it.children.length : 1), 0);
+  if (leaves > 500) throw new Error(`단원이 너무 많습니다 (${leaves}개, 최대 500개).`);
+  return { structure: { items }, leaves };
+}
+function outlineText(structure) {
+  return ((structure && structure.items) || []).map((it) => [it.name, ...(it.children || []).map((c) => "  " + c)].join("\n")).join("\n");
+}
+
+/* 번호 입력칸 ↔ 선택 목록: 트리형 교재는 이름으로 고르게 바꿔 줌 (값은 누적 번호 그대로) */
+function swapUnitCtl(form, name, book, opts = {}) {
+  const el = form.elements[name];
+  if (!el) return;
+  const lv = bookLeaves(book);
+  const cur = el.value;
+  let nel;
+  if (lv) {
+    nel = document.createElement("select");
+    nel.innerHTML = `<option value="${opts.zero ? "0" : ""}">${opts.zero ? "시작 전" : "-"}</option>` + lv.map((l, i) => `<option value="${i + 1}">${esc(l.label)}</option>`).join("");
+    nel.value = cur && Number(cur) >= (opts.zero ? 0 : 1) && Number(cur) <= lv.length ? String(Number(cur)) : (opts.zero ? "0" : "");
+  } else {
+    if (el.tagName === "INPUT") return;
+    nel = document.createElement("input");
+    nel.type = "number";
+    nel.min = "0";
+    nel.value = cur;
+  }
+  nel.name = name;
+  el.replaceWith(nel);
+}
+function bindUnitCtls(form, names, opts = {}) {
+  const sel = form.elements.textbook_id;
+  const apply = () => {
+    const b = state.textbooks.find((x) => x.id === sel.value);
+    names.forEach((nm) => swapUnitCtl(form, nm, b, opts));
+  };
+  sel.addEventListener("change", apply);
+  apply();
 }
 
 function coverText(l) {
@@ -656,7 +753,7 @@ function renderProgressTab(s) {
       const recent = state.detail.lessons.find((l) => l.textbook_id === book.id);
       return `<div class="card book-card" data-pid="${esc(p.id)}">
         <h3>${esc(book.title)}</h3>
-        <div class="stat"><strong>${esc(book.unit_label)} ${p.current_unit} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong><span class="badge ${ratio >= 100 ? "" : "warn"}">${ratio}%</span></div>
+        <div class="stat"><strong>${bookLeaves(book) ? (p.current_unit > 0 ? esc(unitName(book, p.current_unit)) : "시작 전") : esc(book.unit_label) + " " + p.current_unit} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong><span class="badge ${ratio >= 100 ? "" : "warn"}">${ratio}%</span></div>
         <div class="bar ${ratio >= 100 ? "done" : ""}"><span style="width:${ratio}%"></span></div>
         ${recent ? `<div style="font-size:.85rem;margin-top:.5rem">최근 수업 <span class="muted">${fmtDate(recent.lesson_date)}</span> ·${esc(rangeText(book, recent) || " 범위 미입력")}</div>` : ""}
         <div class="muted" style="font-size:.8rem;margin-top:.4rem">진도 갱신 ${fmtDate((p.updated_at || "").slice(0, 10))}</div>
@@ -880,9 +977,8 @@ function buildMessage(s, label, start, end, r, comment) {
     if (r.books.length) {
       out.push("■ 진도");
       r.books.forEach(({ book, from, to, current }) => {
-        const lab = book.unit_label;
-        const span = from != null && to != null ? (from === to ? `${lab} ${from}` : `${lab} ${from}–${to}`) : "";
-        out.push(`- ${book.title}${span ? ` ${span}` : ""}${current != null ? ` (현재 ${current}/${book.total_units})` : ""}`);
+        const span = from != null && to != null ? rangeText(book, { from_unit: from, to_unit: to }).trim() : "";
+        out.push(`- ${book.title}${span ? ` ${span}` : ""}${current != null ? ` (현재 ${curNum(book, current)})` : ""}`);
       });
     }
     const hwParts = ["완료", "일부", "미제출"].filter((k) => r.hw[k]).map((k) => `${k} ${r.hw[k]}회`);
@@ -1153,7 +1249,7 @@ function evalAutoHtml(s, d, sm) {
   const attParts = ["출석", "지각", "결석", "보강"].filter((k) => r.att[k]).map((k) => `${k} ${r.att[k]}`);
   const diff = r.testAvg != null && r.prevAvg != null ? Math.round(r.testAvg - r.prevAvg) : null;
   const books = r.books.length
-    ? `<ul class="eval-list">${r.books.map(({ book, from, to, current }) => `<li>${esc(book.title)}${esc(rangeText(book, { from_unit: from, to_unit: to }))}${current != null ? ` <span class="muted">(현재 ${current}/${book.total_units})</span>` : ""}</li>`).join("")}</ul>`
+    ? `<ul class="eval-list">${r.books.map(({ book, from, to, current }) => `<li>${esc(book.title)}${esc(rangeText(book, { from_unit: from, to_unit: to }))}${current != null ? ` <span class="muted">(현재 ${esc(curNum(book, current))})</span>` : ""}</li>`).join("")}</ul>`
     : `<p class="muted" style="margin:0">이번 달 진도 기록이 없습니다.</p>`;
   const comments = sm.comments.length
     ? `<ul class="eval-list">${sm.comments.map((l) => `<li><span class="muted">${shortDate(l.lesson_date)}</span> ${esc(l.teacher_comment.trim())}</li>`).join("")}</ul>`
@@ -1225,7 +1321,7 @@ function evalPrintHtml(s, d, sm, vals) {
   const books = r.books.length
     ? `<h3>이번 달 진도</h3>${r.books.map(({ book, from, to, current }) => {
         const ratio = current != null && book.total_units ? Math.min(100, Math.round((current / book.total_units) * 100)) : 0;
-        return `<div class="rp-bk"><div><b>${esc(book.title)}</b> <span class="rp-mut">${esc(rangeText(book, { from_unit: from, to_unit: to }).trim())}</span></div>${current != null ? `<div class="rp-bar"><span style="width:${ratio}%"></span></div><div class="rp-mut rp-sm">현재 ${current}/${book.total_units}</div>` : ""}</div>`;
+        return `<div class="rp-bk"><div><b>${esc(book.title)}</b> <span class="rp-mut">${esc(rangeText(book, { from_unit: from, to_unit: to }).trim())}</span></div>${current != null ? `<div class="rp-bar"><span style="width:${ratio}%"></span></div><div class="rp-mut rp-sm">현재 ${esc(curNum(book, current))}</div>` : ""}</div>`;
       }).join("")}`
     : "";
   const texts = EVAL_TEXTS.filter(([k]) => vals[k]).map(([k, t]) => `<div class="rp-tx"><h4>${t}</h4><p>${esc(vals[k])}</p></div>`).join("");
@@ -1573,7 +1669,7 @@ function planPrintHtml(s, recs) {
       <div class="pl-main">
         <div class="pl-bk">${esc(b ? b.title : "")}</div>
         <div class="pl-rg">${esc(range)}</div>
-        ${pct !== null ? `<div class="rp-bar pl-bar"><span style="width:${pct}%"></span></div><div class="pl-pg">지금까지 ${esc(b.unit_label)} ${pr.current_unit} / ${b.total_units} · ${pct}%</div>` : ""}
+        ${pct !== null ? `<div class="rp-bar pl-bar"><span style="width:${pct}%"></span></div><div class="pl-pg">지금까지 ${bookLeaves(b) ? esc(curNum(b, pr.current_unit)) : esc(b.unit_label) + " " + pr.current_unit + " / " + b.total_units} · ${pct}%</div>` : ""}
         ${r.rationale ? `<div class="pl-pt">${esc(r.rationale)}</div>` : ""}
       </div></div>`;
   };
@@ -1610,7 +1706,7 @@ function renderRecsTab(s) {
         ${r.status === "제안" ? `${has ? `<button class="btn small" type="button" disabled>기록 있음</button>` : `<button class="btn small primary" data-rec-use="${esc(r.id)}" type="button">수업 기록에 반영</button>`}<button class="btn small danger" data-rec-no="${esc(r.id)}" type="button">거절</button>` : ""}
       </div>
       ${r.rationale ? `<div class="memo-cell" style="margin-top:.4rem">${esc(r.rationale)}</div>` : ""}
-      <div class="muted" style="font-size:.8rem;margin-top:.3rem">${pr && b ? `현재 진도 ${esc(b.unit_label)} ${pr.current_unit}/${b.total_units} · ` : ""}${fmtDate((r.created_at || "").slice(0, 10))} 생성${r.model ? " · " + esc(r.model) : ""}${r.decided_at ? " · " + fmtDate(r.decided_at.slice(0, 10)) + " 처리" : ""}</div>
+      <div class="muted" style="font-size:.8rem;margin-top:.3rem">${pr && b ? `현재 진도 ${esc(curLabel(b, pr.current_unit))} · ` : ""}${fmtDate((r.created_at || "").slice(0, 10))} 생성${r.model ? " · " + esc(r.model) : ""}${r.decided_at ? " · " + fmtDate(r.decided_at.slice(0, 10)) + " 처리" : ""}</div>
     </div>`;
   };
   $("#tab-body").innerHTML = `<div class="eval-edit">` + filterHtml(state.recFilter, "rf", "수업 안내 미리보기") + (recs.length
@@ -1670,7 +1766,7 @@ function renderAllRecs() {
     const has = r.status === "거절" ? null : recLessonOn(r.student_id, r);
     return `<tr data-rid="${esc(r.id)}" class="${has ? "rec-has-row" : ""}">
       <td><strong>${esc(name(r.student_id))}</strong></td>
-      <td>${esc(b ? b.title + rangeText(b, r) : r.from_unit + "–" + r.to_unit + "단원")}${pr && b ? `<div class="muted" style="font-size:.8rem">현재 ${esc(b.unit_label)} ${pr.current_unit}/${b.total_units}</div>` : ""}</td>
+      <td>${esc(b ? b.title + rangeText(b, r) : r.from_unit + "–" + r.to_unit + "단원")}${pr && b ? `<div class="muted" style="font-size:.8rem">현재 ${esc(curLabel(b, pr.current_unit))}</div>` : ""}</td>
       <td style="white-space:nowrap">${r.target_date ? fmtDate(r.target_date) : "-"}${has ? `<div style="margin-top:.3rem">${lessonChip(has)}</div>` : ""}</td>
       <td class="memo-cell">${esc(r.rationale || "")}</td>
       <td style="white-space:nowrap"><span class="badge ${cls}">${esc(r.status)}</span>
@@ -1786,7 +1882,7 @@ function manageTextbooks() {
           ? `<ul style="list-style:none;margin:0;padding:0">${state.textbooks
               .map(
                 (b) => `<li style="display:flex;gap:.5rem;align-items:center;padding:.45rem 0;border-bottom:1px solid var(--border)">
-                  <span style="flex:1"><strong>${esc(b.title)}</strong> <span class="muted">${b.total_units} ${esc(b.unit_label)}</span></span>
+                  <span style="flex:1"><strong>${esc(b.title)}</strong> <span class="muted">${bookLeaves(b) ? `${b.structure.items.length}개 항목 · ${b.total_units}단원` : `${b.total_units} ${esc(b.unit_label)}`}</span></span>
                   <button type="button" class="btn small" data-edit="${esc(b.id)}">수정</button></li>`
               )
               .join("")}</ul>`
@@ -1815,17 +1911,39 @@ function manageTextbooks() {
 }
 
 function editTextbook(book) {
+  const tree = !!bookLeaves(book);
   openForm({
     title: book ? "교재 수정" : "교재 추가",
+    wide: true,
     fields: [
       { name: "title", label: "교재명", required: true, maxlength: 100 },
-      { name: "total_units", label: "전체 단원 수", type: "number", min: 1, max: 500, required: true, half: true },
-      { name: "unit_label", label: "단위 이름 (Unit, Lesson 등)", required: true, half: true, maxlength: 20 },
+      { name: "mode", label: "구조", type: "select", options: [["flat", "한 줄 번호 (Unit 1, 2, 3 …)"], ["tree", "항목 + 하위 항목 (이름을 직접 입력, 하위는 선택)"]] },
+      { name: "total_units", label: "전체 단원 수", type: "number", min: 1, max: 500, half: true },
+      { name: "unit_label", label: "단위 이름 (Unit, Lesson 등)", half: true, maxlength: 20 },
+      { name: "outline", label: "항목 목록 (한 줄에 하나, 앞에 공백을 넣으면 위 항목의 하위)", type: "textarea", rows: 10, maxlength: 12000 },
     ],
-    values: book || { total_units: 20, unit_label: "Unit" },
+    values: book ? { ...book, mode: tree ? "tree" : "flat", outline: tree ? outlineText(book.structure) : "" } : { total_units: 20, unit_label: "Unit", mode: "flat", outline: "Unit 1\nUnit 2\n  Part A\n  Part B\nUnit 3" },
     onSubmit: async (d) => {
-      if (book) await run(db.from("textbooks").update(d).eq("id", book.id));
-      else await run(db.from("textbooks").insert(d));
+      const out = { title: d.title };
+      if (d.mode === "tree") {
+        const { structure, leaves } = parseOutline(d.outline);
+        out.structure = structure;
+        out.total_units = leaves;
+        out.unit_label = (d.unit_label || "Unit").slice(0, 20);
+      } else {
+        if (!d.total_units || d.total_units < 1) throw new Error("전체 단원 수를 입력하세요.");
+        if (!d.unit_label) throw new Error("단위 이름을 입력하세요.");
+        out.total_units = d.total_units;
+        out.unit_label = d.unit_label;
+        if (book && book.structure) out.structure = null;
+      }
+      try {
+        if (book) await run(db.from("textbooks").update(out).eq("id", book.id));
+        else await run(db.from("textbooks").insert(out));
+      } catch (e) {
+        if (/structure/i.test((e && e.message) || "")) throw new Error("교재 구조를 저장하려면 최신 schema.sql 을 Supabase 에서 먼저 실행하세요.");
+        throw e;
+      }
       await refresh();
       manageTextbooks();
     },
@@ -1837,6 +1955,17 @@ function editTextbook(book) {
         }
       : null,
   });
+  const form = $("#dlg-form");
+  const modeEl = form.elements.mode;
+  const toggle = () => {
+    const t = modeEl.value === "tree";
+    ["total_units"].forEach((n) => { form.elements[n].closest("label").hidden = t; });
+    form.elements.outline.closest("label").hidden = !t;
+    form.elements.unit_label.closest("label").hidden = t;
+  };
+  modeEl.addEventListener("change", toggle);
+  toggle();
+  if (book && tree) $("#dlg-err").textContent = "이미 진도가 있는 교재는 목록 중간에 항목을 끼워 넣으면 번호가 밀립니다. 새 항목은 뒤쪽에 추가하세요.";
 }
 
 /* ---------- 학생 상세 동작 ---------- */
@@ -1852,7 +1981,7 @@ async function setProgress(pid, unit) {
 
 function assignBook(s) {
   const assigned = new Set(bookProgressFor(s.id).map((x) => x.book.id));
-  const options = state.textbooks.filter((b) => !assigned.has(b.id)).map((b) => [b.id, `${b.title} (${b.total_units} ${b.unit_label})`]);
+  const options = state.textbooks.filter((b) => !assigned.has(b.id)).map((b) => [b.id, `${b.title} (${bookLeaves(b) ? b.total_units + "단원" : b.total_units + " " + b.unit_label})`]);
   openForm({
     title: "교재 배정",
     fields: [
@@ -1865,6 +1994,7 @@ function assignBook(s) {
       toast("교재를 배정했습니다");
     },
   });
+  bindUnitCtls($("#dlg-form"), ["current_unit"], { zero: true });
 }
 
 /* 추천 날짜에 이미 있는 수업 기록 찾기 (화면에 불러 둔 기록 기준) */
@@ -1976,6 +2106,7 @@ function lessonForm(s, lesson, rec = null) {
         }
       : null,
   });
+  bindUnitCtls($("#dlg-form"), ["from_unit", "to_unit"]);
 }
 
 function testForm(s, test) {
@@ -2151,6 +2282,16 @@ function bindEvents() {
         if (act.dataset.act === "inc") await setProgress(pid, p.current_unit + 1);
         else if (act.dataset.act === "dec") await setProgress(pid, p.current_unit - 1);
         else if (act.dataset.act === "set") {
+          if (bookLeaves(book)) {
+            openForm({
+              title: `현재 진도 · ${book.title}`,
+              fields: [{ name: "current_unit", label: "끝낸 마지막 단원", type: "number", min: 0 }],
+              values: { current_unit: p.current_unit },
+              onSubmit: async (d) => { await setProgress(pid, d.current_unit || 0); },
+            });
+            swapUnitCtl($("#dlg-form"), "current_unit", book, { zero: true });
+            return;
+          }
           const v = prompt(`현재 진도를 입력하세요 (0~${book.total_units})`, String(p.current_unit));
           if (v !== null && v.trim() !== "" && !Number.isNaN(Number(v))) await setProgress(pid, Math.round(Number(v)));
         } else if (act.dataset.act === "unassign") {
