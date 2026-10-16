@@ -1691,7 +1691,7 @@ function planPrintHtml(s, recs) {
         ${r.rationale ? `<div class="pl-pt">${esc(r.rationale)}</div>` : ""}
         <div class="pl-wr"><div class="pl-wr-t">수업 후 기록</div>
           <div class="pl-ln"><span>실제 진도</span><i class="w1"></i><span>~</span><i class="w2"></i></div>
-          <div class="pl-ln"><span>학습 내용</span><i></i></div>
+          <div class="pl-ln"><span>선생님 코멘트</span><i></i></div>
           <div class="pl-ln"><i></i></div></div>
       </div></div>`;
   };
