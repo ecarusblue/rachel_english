@@ -1730,15 +1730,12 @@ function planPrintHtml(s, recs) {
   const rg = filterRange(state.recFilter);
   const title = planTitle(state.recFilter);
   const list = recs.filter((r) => r.status !== "거절").sort((a, b) => recDate(a).localeCompare(recDate(b)));
-  const card = (r) => {
+  const book = (r) => {
     const b = state.textbooks.find((x) => x.id === r.textbook_id);
     const pr = b ? state.progress.find((x) => x.student_id === s.id && x.textbook_id === b.id) : null;
-    const d = r.target_date ? parseD(r.target_date) : null;
     const hasPr = !!(pr && b && b.total_units);
     const range = b ? rangeText(b, r).trim() : `${r.from_unit}–${r.to_unit}단원`;
-    return `<div class="pl-card">
-      <div class="pl-date">${d ? `<div class="pl-d">${d.getDate()}</div><div class="pl-w">${DOW_FULL[d.getDay()]}</div>` : `<div class="pl-d pl-tbd">예정</div><div class="pl-w">날짜 미정</div>`}</div>
-      <div class="pl-main">
+    return `<div class="pl-book">
         <div class="pl-bk">${esc(b ? b.title : "")}</div>
         <div class="pl-rg">${esc(range)}</div>
         ${hasPr ? `<div class="pl-pg">지금까지 ${bookLeaves(b) ? esc(curNum(b, pr.current_unit)) : esc(b.unit_label) + " " + pr.current_unit + " / " + b.total_units}</div>` : ""}
@@ -1747,7 +1744,16 @@ function planPrintHtml(s, recs) {
           <div class="pl-ln"><span>실제 진도</span><i class="w1"></i><span>~</span><i class="w2"></i></div>
           <div class="pl-ln"><span>선생님 코멘트</span><i></i></div>
           <div class="pl-ln"><i></i></div></div>
-      </div></div>`;
+      </div>`;
+  };
+  // 같은 수업일의 교재는 한 그룹(날짜 칸 한 번)으로 묶습니다.
+  const byDate = new Map();
+  list.forEach((r) => { const k = r.target_date || ""; if (!byDate.has(k)) byDate.set(k, []); byDate.get(k).push(r); });
+  const group = ([date, items]) => {
+    const d = date ? parseD(date) : null;
+    return `<div class="pl-card pl-grp">
+      <div class="pl-date">${d ? `<div class="pl-d">${d.getDate()}</div><div class="pl-w">${DOW_FULL[d.getDay()]}</div>` : `<div class="pl-d pl-tbd">예정</div><div class="pl-w">날짜 미정</div>`}<div class="pl-cnt">교재 ${items.length}개</div></div>
+      <div class="pl-books">${items.map(book).join("")}</div></div>`;
   };
   return `<div class="rp-page pl-page">
     <div class="pl-hd"><div class="pl-br">${esc(ACADEMY_NAME).toUpperCase()}</div><h1>${esc(title)}</h1>
@@ -1755,7 +1761,7 @@ function planPrintHtml(s, recs) {
     <div class="pl-bd">
       <p class="pl-hello">${esc(title)}입니다. 수업 전에 한 번 훑어보고 오면 더 쉬워져요!</p>
       <h2 class="pl-h2">${esc(title.replace(/ 안내$/, ""))}</h2>
-      ${list.length ? list.map(card).join("") : `<p class="pl-empty">이 기간에 예정된 수업이 없습니다.</p>`}
+      ${list.length ? [...byDate.entries()].map(group).join("") : `<p class="pl-empty">이 기간에 예정된 수업이 없습니다.</p>`}
       ${list.length ? `<div class="pl-ln pl-memo"><span>메모</span><i></i></div>` : ""}
     </div>
     <div class="rp-foot"><span>${esc(ACADEMY_NAME)}</span><span>궁금한 점은 선생님께 언제든 물어보세요</span></div>

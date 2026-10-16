@@ -681,3 +681,12 @@ td.name-cell, td:first-child { white-space: nowrap; }
 .rec-gt .muted { font-size: .8rem; }
 @media (max-width: 640px) { .rec-gh .btn.primary { order: 9; width: 100%; min-height: 44px; } .rec-grp .card .btn.small { min-height: 44px; } }
 @media print { .rec-grp { background: none; padding: 0; } }
+
+/* 수업 안내: 수업일별 그룹 (날짜 칸 한 번, 교재는 오른쪽에 나열) */
+.pl-grp { break-inside: auto; }
+.pl-cnt { margin: 3mm 3.5mm 0; border-top: 1px solid #b9c9ef; padding-top: 2.5mm; font-size: 9pt; font-weight: 600; }
+.pl-books { min-width: 0; }
+.pl-book { break-inside: avoid; padding-bottom: 5mm; }
+.pl-book + .pl-book { border-top: 1px dashed #c4cedd; padding-top: 5mm; }
+.pl-book:last-child { padding-bottom: 0; }
+.pl-book .pl-rg { margin-bottom: 1mm; }
