@@ -174,8 +174,9 @@ async function loadCore() {
   state.recentLessons = lessons;
   state.recentTests = tests;
   try {
-    const pend = await run(db.from("recommendations").select("id").eq("status", "제안").limit(500));
-    state.pendingRecs = pend.length;
+    const pend = await run(db.from("recommendations").select("id, target_date, created_at").eq("status", "제안").limit(500));
+    const wk = periodRange("thisWeek");
+    state.pendingRecs = pend.filter((r) => recDate(r) >= wk.start && recDate(r) <= wk.end).length;
   } catch {
     state.pendingRecs = 0;
   }
@@ -889,7 +890,8 @@ async function loadAllRecs() {
 }
 
 function renderAllRecs() {
-  const recs = state.allRecs;
+  const wk = periodRange("thisWeek");
+  const recs = state.allRecs.filter((r) => recDate(r) >= wk.start && recDate(r) <= wk.end);
   const name = (id) => (state.students.find((s) => s.id === id) || {}).name || "(삭제된 학생)";
   const pending = recs.filter((r) => r.status === "제안");
   const done = recs.filter((r) => r.status !== "제안").slice(0, 30);
@@ -909,8 +911,8 @@ function renderAllRecs() {
     <thead><tr><th>학생</th><th>추천 교재 · 범위</th><th>수업 예정일</th><th>근거</th><th>상태</th></tr></thead>
     <tbody>${rows.map(row).join("")}</tbody></table></div>`;
   $("#main").innerHTML = `
-    <div class="page-head"><h2>수업 추천</h2><span class="muted">Claude 예약 작업이 저장한 학생별 다음 수업 진도 추천</span></div>
-    ${pending.length ? `<h3>확인할 추천 (${pending.length})</h3>${table(pending)}` : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
+    <div class="page-head"><h2>수업 추천</h2><span class="muted">이번 주 ${shortDate(wk.start)} ~ ${shortDate(wk.end)} · 학생별 다음 수업 진도 추천</span></div>
+    ${pending.length ? `<h3>확인할 추천 (${pending.length})</h3>${table(pending)}` : `<div class="card empty">이번 주에 확인할 새 추천이 없습니다. 다른 주의 추천은 학생 화면의 수업 추천 탭에서 기간을 바꿔 볼 수 있습니다.</div>`}
     ${done.length ? `<h3 style="margin-top:1.2rem">최근 처리한 추천</h3>${table(done)}` : ""}
     <p class="muted" style="font-size:.85rem;margin-top:.8rem">"반영"을 누르면 그 학생의 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록되고, 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`;
 
