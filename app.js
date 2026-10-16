@@ -1190,7 +1190,7 @@ function evalSummary(s, d) {
 
 function evalStatusBadge(row) {
   if (!row) return `<span class="badge warn">미작성</span>`;
-  if (row.status === "AI 초안") return `<span class="badge ai" title="Claude가 쓴 초안입니다. 확인한 뒤 상태를 '작성 중'이나 '완료'로 바꿔 저장하세요">AI 초안</span>`;
+  if (row.status === "AI 초안") return `<span class="badge ai" title="Claude가 쓴 초안입니다. 확인한 뒤 상태를 '작성 중'이나 '완료'로 바꿔 저장하세요(AI 초안 상태는 다음 예약 작업이 덮어씁니다)">AI 초안</span>`;
   return row.status === "완료" ? `<span class="badge done">완료</span>` : `<span class="badge">작성 중</span>`;
 }
 
@@ -1417,7 +1417,7 @@ function renderEvalDetail(s, d, head, bindHead) {
     <div class="eval-edit">
       ${head}
       <div class="toolbar"><button class="btn" type="button" id="ev-back">← 학생 목록</button><strong style="font-size:1.1rem">${esc(s.name)}</strong><span class="muted">${esc(s.grade || "")}</span>${evalStatusBadge(row)}</div>
-      ${row && row.status === "AI 초안" ? `<div class="ai-note"><strong>AI 초안</strong> — Claude가 작성했습니다${row.source === "ai" && row.ai_model ? ` (${esc(row.ai_model)})` : ""}. 내용을 확인·수정한 뒤 아래 상태를 '작성 중'이나 '완료'로 바꿔 저장하세요.</div>` : ""}
+      ${row && row.status === "AI 초안" ? `<div class="ai-note"><strong>AI 초안</strong> — Claude가 작성했습니다${row.source === "ai" && row.ai_model ? ` (${esc(row.ai_model)})` : ""}. 내용을 확인·수정한 뒤 아래 상태를 '작성 중'이나 '완료'로 바꿔 저장하세요. 상태가 'AI 초안'으로 남아 있으면 다음 예약 작업이 내용을 다시 씁니다.</div>` : ""}
       ${evalAutoHtml(s, d, sm)}
       <form id="ev-form" class="eval-form" autocomplete="off">
         <div class="grid">
