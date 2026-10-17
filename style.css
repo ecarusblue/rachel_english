@@ -749,8 +749,7 @@ td[class^="att-"] { white-space: nowrap; }
 .ev-ov-scroll { overflow-x: hidden; }
 
 /* 시험 종류 관리 */
-.sidebar .wide-btn { flex: 1 1 100%; }
-.sidebar .wide-btn.active { border-color: var(--side-text); font-weight: 700; }
+.sidebar #btn-kinds.active { border-color: var(--side-text); }
 .kd-list { display: flex; flex-direction: column; gap: .6rem; margin-bottom: 1rem; }
 .kd-row { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; padding: .7rem 1rem; }
 .kd-row.mine { border-color: var(--accent); }
