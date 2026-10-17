@@ -161,9 +161,18 @@ function openForm({ title, fields, values = {}, submitLabel = "저장", onSubmit
     }
   };
 
+  // 첫 칸이 날짜면 열자마자 달력이 뜨므로, 날짜는 건너뛰고 첫 입력 대상에 포커스한다.
+  // (터치 기기에서는 키보드가 올라오지 않도록 선택 목록만 대상으로 함)
+  form.querySelectorAll("[autofocus]").forEach((el) => el.removeAttribute("autofocus"));
+  const coarse = !!(window.matchMedia && matchMedia("(pointer: coarse)").matches);
+  const target = [...form.querySelectorAll("input, select, textarea")].find(
+    (el) => el.type !== "date" && el.type !== "hidden" && el.type !== "radio" && (!coarse || el.tagName === "SELECT")
+  );
+  if (target) target.setAttribute("autofocus", "");
+  else { const t = $("#dlg-title"); t.tabIndex = -1; t.setAttribute("autofocus", ""); }
   dlg.showModal();
-  const first = form.querySelector("input, select, textarea");
-  if (first) first.focus();
+  if (target) target.focus({ preventScroll: true });
+  else $("#dlg-title").focus({ preventScroll: true });
 }
 
 /* ---------- 데이터 로딩 ---------- */
