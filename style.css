@@ -763,3 +763,4 @@ td[class^="att-"] { white-space: nowrap; }
 .kd-sw span { width: 30px; height: 30px; border-radius: 50%; display: block; }
 .kd-sw input:checked + span { outline: 3px solid var(--text); outline-offset: 2px; }
 .kd-sw input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
+.kd-units { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }

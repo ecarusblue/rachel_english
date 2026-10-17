@@ -147,11 +147,13 @@ create table if not exists public.test_kinds (
   owner       uuid not null default auth.uid() references auth.users(id) on delete cascade,
   name        text not null check (char_length(name) between 1 and 30),
   default_max numeric not null default 100 check (default_max > 0),
+  unit        text not null default '점',
   color       text,
   memo        text,
   created_at  timestamptz not null default now(),
   unique (owner, name)
 );
+alter table public.test_kinds add column if not exists unit text not null default '점';
 alter table public.test_kinds enable row level security;
 drop policy if exists "owner_all" on public.test_kinds;
 create policy "owner_all" on public.test_kinds for all to authenticated

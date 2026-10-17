@@ -1222,15 +1222,17 @@ async function loadKinds() {
 }
 /* 기본 + 내가 만든 종류 */
 function kindList() {
+  const mk = (name, builtin, k) => ({ name, builtin, id: k && k.id, max: k ? Number(k.default_max) || 100 : 100, unit: (k && k.unit) || "점", color: k && k.color, memo: k && k.memo, over: !!k });
   return [
-    ...TEST_KINDS.map((name) => ({ name, builtin: true, max: 100, color: null })),
-    ...state.kinds.rows.map((k) => ({ name: k.name, builtin: false, max: Number(k.default_max) || 100, color: k.color, id: k.id, memo: k.memo })),
+    ...TEST_KINDS.map((name) => mk(name, true, state.kinds.rows.find((k) => k.name === name))),
+    ...state.kinds.rows.filter((k) => !TEST_KINDS.includes(k.name)).map((k) => mk(k.name, false, k)),
   ];
 }
 const kindIndex = (name) => kindList().findIndex((k) => k.name === name);
+const kindUnit = (name) => (kindList().find((k) => k.name === name) || {}).unit || "점";
 function kStyle(name) {
   const k = kindList().find((x) => x.name === name);
-  return k && !k.builtin && k.color ? ` style="--c:${esc(k.color)}"` : "";
+  return k && k.color ? ` style="--c:${esc(k.color)}"` : "";
 }
 /* 기록이 있는 종류만, 정해진 순서(기본→내 종류→목록에 없는 이름) */
 function kindsIn(rows) {
@@ -1243,36 +1245,36 @@ function kindCard(kind, list, ci) {
   const vals = pts.map((t) => pct(t.score, t.max_score));
   const last = Math.round(vals[vals.length - 1]);
   if (pts.length < 2) {
-    return `<div class="card gc gone k${ci}"${kStyle(kind)}><div class="gk">${esc(kind)}</div><div class="gbig">${last}점 <small>· 1회</small></div><div class="muted">다음 시험부터 추이가 표시돼요</div></div>`;
+    return `<div class="card gc gone k${ci}"${kStyle(kind)}><div class="gk">${esc(kind)}</div><div class="gbig">${last}% <small>· 1회</small></div><div class="muted">다음 시험부터 추이가 표시돼요</div></div>`;
   }
-  const W = 300, H = 136, L = 30, R = 12, T = 22, B = 24;
+  const W = 300, H = 136, L = 38, R = 12, T = 22, B = 24;
   const x = (i) => L + 14 + (i * (W - L - R - 24)) / (pts.length - 1);
   const y = (v) => T + ((100 - Math.max(0, Math.min(100, v))) * (H - T - B)) / 100;
   const line = vals.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
   const area = `${line} L${x(pts.length - 1).toFixed(1)},${y(0)} L${x(0).toFixed(1)},${y(0)} Z`;
-  const grid = [0, 50, 100].map((g) => `<line class="gaxis" x1="${L}" x2="${W - R}" y1="${y(g)}" y2="${y(g)}"/><text class="gtick" x="${L - 6}" y="${y(g) + 3.5}" text-anchor="end">${g}</text>`).join("");
+  const grid = [0, 50, 100].map((g) => `<line class="gaxis" x1="${L}" x2="${W - R}" y1="${y(g)}" y2="${y(g)}"/><text class="gtick" x="${L - 6}" y="${y(g) + 3.5}" text-anchor="end">${g}%</text>`).join("");
   const showAll = pts.length <= 8;
   const dots = vals.map((v, i) => {
     const isLast = i === vals.length - 1;
-    return `<circle class="gdot${isLast ? " last" : ""}" cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="${isLast ? 5 : 3.2}"><title>${fmtDate(pts[i].test_date)} ${v.toFixed(0)}점</title></circle>${showAll || isLast ? `<text class="gval${isLast ? " last" : ""}" x="${x(i).toFixed(1)}" y="${(y(v) - 9).toFixed(1)}" text-anchor="middle">${Math.round(v)}</text>` : ""}`;
+    return `<circle class="gdot${isLast ? " last" : ""}" cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="${isLast ? 5 : 3.2}"><title>${fmtDate(pts[i].test_date)} ${pts[i].score}/${pts[i].max_score}${esc(kindUnit(kind))} = ${v.toFixed(0)}%</title></circle>${showAll || isLast ? `<text class="gval${isLast ? " last" : ""}" x="${x(i).toFixed(1)}" y="${(y(v) - 9).toFixed(1)}" text-anchor="middle">${Math.round(v)}</text>` : ""}`;
   }).join("");
   const dl = (i) => { const d = parseD(pts[i].test_date); return `${d.getMonth() + 1}.${d.getDate()}`; };
   const labIdx = pts.length <= 7 ? pts.map((_, i) => i) : [0, pts.length - 1];
   const labels = labIdx.map((i) => `<text class="gtick" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="${pts.length > 7 ? (i ? "end" : "start") : "middle"}">${dl(i)}</text>`).join("");
   const diff = Math.round(vals[vals.length - 1]) - Math.round(vals[vals.length - 2]);
   const chg = `<span class="gchg ${diff > 0 ? "up" : diff < 0 ? "dn" : ""}">${diff > 0 ? "▲" : diff < 0 ? "▼" : "–"} ${Math.abs(diff)}</span>`;
-  return `<div class="card gc k${ci}"${kStyle(kind)}><div class="gh"><div><div class="gk">${esc(kind)}</div><div class="gs"><b>${last}</b>점 ${chg}</div></div><span class="gm">${list.length}회</span></div>
-    <svg class="gsvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(kind)} 점수 추이(100점 만점 환산)">${grid}<path class="garea" d="${area}"/><path class="gline" d="${line}"/>${dots}${labels}</svg>
-    <div class="gf"><span>평균 <b>${avg(vals).toFixed(0)}</b></span><span>최고 <b>${Math.max(...vals).toFixed(0)}</b></span><span>최저 <b>${Math.min(...vals).toFixed(0)}</b></span></div></div>`;
+  return `<div class="card gc k${ci}"${kStyle(kind)}><div class="gh"><div><div class="gk">${esc(kind)}</div><div class="gs"><b>${last}</b>% ${chg}</div></div><span class="gm">${list.length}회</span></div>
+    <svg class="gsvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(kind)} 점수 추이(백분율)">${grid}<path class="garea" d="${area}"/><path class="gline" d="${line}"/>${dots}${labels}</svg>
+    <div class="gf"><span>평균 <b>${avg(vals).toFixed(0)}%</b></span><span>최고 <b>${Math.max(...vals).toFixed(0)}%</b></span><span>최저 <b>${Math.min(...vals).toFixed(0)}%</b></span></div></div>`;
 }
 // 그래프는 기간 필터와 무관하게 최근 4주(오늘 포함 28일) 기준
 function trendCards(all) {
   const from = addDays(todayStr(), -27);
   const rows = all.filter((t) => t.test_date >= from && t.test_date <= todayStr());
   const kinds = kindsIn(rows);
-  if (!kinds.length) return `<h3 class="gtitle">종류별 점수 추이 <small class="muted">· 최근 4주 · 100점 환산</small></h3><div class="card empty">최근 4주 안에 시험 기록이 없습니다.</div>`;
+  if (!kinds.length) return `<h3 class="gtitle">종류별 점수 추이 <small class="muted">· 최근 4주 · 백분율(%)</small></h3><div class="card empty">최근 4주 안에 시험 기록이 없습니다.</div>`;
   const cards = kinds.map((k) => kindCard(k, rows.filter((t) => t.kind === k), kindIndex(k)));
-  return `<h3 class="gtitle">종류별 점수 추이 <small class="muted">· 최근 4주 · 100점 환산</small></h3><div class="gg ${kinds.length === 1 ? "one" : ""}">${cards.join("")}</div>`;
+  return `<h3 class="gtitle">종류별 점수 추이 <small class="muted">· 최근 4주 · 백분율(%)</small></h3><div class="gg ${kinds.length === 1 ? "one" : ""}">${cards.join("")}</div>`;
 }
 
 function renderTestsTab(s) {
@@ -1288,18 +1290,18 @@ function renderTestsTab(s) {
     ${
       rows.length
         ? `<div class="summary">
-            <div class="card"><strong>${avg(pcts).toFixed(0)}점</strong><span>${scoped ? "기간 평균" : "전체 평균"}</span></div>
-            <div class="card"><strong>${avg(recent).toFixed(0)}점</strong><span>최근 ${recent.length}회 평균</span></div>
-            <div class="card"><strong>${Math.max(...pcts).toFixed(0)}점</strong><span>최고점</span></div>
+            <div class="card"><strong>${avg(pcts).toFixed(0)}%</strong><span>${scoped ? "기간 평균" : "전체 평균"}</span></div>
+            <div class="card"><strong>${avg(recent).toFixed(0)}%</strong><span>최근 ${recent.length}회 평균</span></div>
+            <div class="card"><strong>${Math.max(...pcts).toFixed(0)}%</strong><span>최고</span></div>
             <div class="card"><strong>${rows.length}회</strong><span>${scoped ? "기간 내 시험" : "누적 시험"}</span></div>
           </div>
           <div class="card table-wrap"><table>
-            <thead><tr><th>날짜</th><th>종류</th><th>이름</th><th class="num">점수</th><th class="num">환산</th></tr></thead>
+            <thead><tr><th>날짜</th><th>종류</th><th>이름</th><th class="num">점수</th><th class="num">백분율</th></tr></thead>
             <tbody>${rows
               .map(
                 (t) => `<tr class="clickable" data-tid="${esc(t.id)}">
                   <td style="white-space:nowrap">${fmtDate(t.test_date)}</td><td>${esc(t.kind)}</td><td>${esc(t.title || "")}</td>
-                  <td class="num">${t.score}/${t.max_score}</td><td class="num">${pct(t.score, t.max_score).toFixed(0)}점</td></tr>`
+                  <td class="num">${t.score}/${t.max_score}${esc(kindUnit(t.kind))}</td><td class="num">${pct(t.score, t.max_score).toFixed(0)}%</td></tr>`
               )
               .join("")}</tbody></table></div>`
         : `<div class="card empty">${all.length ? "이 기간에는 시험 기록이 없습니다. 위에서 기간을 바꿔 보세요." : "시험 기록이 없습니다."}</div>`
@@ -1426,7 +1428,7 @@ function buildMessage(s, label, start, end, r, comment) {
     r.hwNotes.forEach((h) => out.push(`- ${shortDate(h.date)} ${h.note}${h.status ? ` (${h.status})` : ""}`));
     if (r.tests.length) {
       out.push("■ 시험");
-      r.tests.forEach((t) => out.push(`- ${shortDate(t.test_date)} ${t.kind}${t.title ? ` ${t.title}` : ""} ${t.score}/${t.max_score}`));
+      r.tests.forEach((t) => out.push(`- ${shortDate(t.test_date)} ${t.kind}${t.title ? ` ${t.title}` : ""} ${t.score}/${t.max_score}${kindUnit(t.kind)}`));
       let line = `평균 ${r.testAvg.toFixed(0)}점`;
       if (r.prevAvg != null) {
         const diff = Math.round(r.testAvg - r.prevAvg);
@@ -1736,19 +1738,19 @@ function evalGraphHtml(s, d) {
       .map((t) => ({ v: Math.round(pct(t.score, t.max_score)), cur: t.test_date >= d.range.start, d: parseD(t.test_date) }));
     const cur = pts.filter((p) => p.cur);
     const avgCur = Math.round(avg(cur.map((p) => p.v)));
-    const head = `<div class="rg-h"><b>${esc(kind)}</b><span>이번 달 평균 <b>${avgCur}</b>점</span></div>`;
-    if (pts.length < 2) return `<div class="rg-card">${head}<div class="rg-one">${pts[0].v}점 <small>· 1회</small></div></div>`;
-    const W = 300, H = 118, L = 26, R = 10, T = 12, B = 22;
+    const head = `<div class="rg-h"><b>${esc(kind)}</b><span>이번 달 평균 <b>${avgCur}</b>%</span></div>`;
+    if (pts.length < 2) return `<div class="rg-card">${head}<div class="rg-one">${pts[0].v}% <small>· 1회</small></div></div>`;
+    const W = 300, H = 118, L = 34, R = 10, T = 12, B = 22;
     const x = (i) => L + 10 + (i * (W - L - R - 20)) / (pts.length - 1);
     const y = (v) => T + ((100 - Math.max(0, Math.min(100, v))) * (H - T - B)) / 100;
     const ci0 = pts.findIndex((p) => p.cur);
     const shade = ci0 >= 0 ? `<rect x="${(x(ci0) - 9).toFixed(1)}" y="${T - 6}" width="${(x(pts.length - 1) - x(ci0) + 18).toFixed(1)}" height="${H - T - B + 6}" rx="3" class="rg-shade"/><text class="rg-cm" x="${((x(ci0) + x(pts.length - 1)) / 2).toFixed(1)}" y="${T - 1}" text-anchor="middle">이번 달</text>` : "";
-    const grid = [0, 50, 100].map((g) => `<line class="rg-ax" x1="${L}" x2="${W - R}" y1="${y(g)}" y2="${y(g)}"/><text class="rg-tk" x="${L - 5}" y="${y(g) + 3}" text-anchor="end">${g}</text>`).join("");
+    const grid = [0, 50, 100].map((g) => `<line class="rg-ax" x1="${L}" x2="${W - R}" y1="${y(g)}" y2="${y(g)}"/><text class="rg-tk" x="${L - 5}" y="${y(g) + 3}" text-anchor="end">${g}%</text>`).join("");
     const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
     const dots = pts.map((p, i) => `<circle class="rg-dot${p.cur ? " cur" : ""}" cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3.4"/><text class="rg-vl${p.cur ? " cur" : ""}" x="${x(i).toFixed(1)}" y="${(y(p.v) - 7).toFixed(1)}" text-anchor="middle">${p.v}</text><text class="rg-tk" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${p.d.getMonth() + 1}.${p.d.getDate()}</text>`).join("");
-    return `<div class="rg-card k${ci}"${kStyle(kind)}>${head}<div class="rg-plot"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(kind)} 최근 3개월 점수 추이">${shade}${grid}<path class="rg-ln" d="${line}"/>${dots}</svg></div></div>`;
+    return `<div class="rg-card k${ci}"${kStyle(kind)}>${head}<div class="rg-plot"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(kind)} 최근 3개월 점수 추이(백분율)">${shade}${grid}<path class="rg-ln" d="${line}"/>${dots}</svg></div></div>`;
   };
-  return `<div class="rg-sec"><h3>시험 점수 추이 <small>최근 3개월 · 100점 환산</small></h3><div class="rg-two">${kinds.map((k) => card(k, kindIndex(k))).join("")}</div></div>`;
+  return `<div class="rg-sec"><h3>시험 점수 추이 <small>최근 3개월 · 백분율(%)</small></h3><div class="rg-two">${kinds.map((k) => card(k, kindIndex(k))).join("")}</div></div>`;
 }
 
 function evalPrintHtml(s, d, sm, vals) {
@@ -3003,23 +3005,38 @@ async function loadKindCounts() {
 function renderKinds() {
   const main = $("#main");
   const list = kindList();
-  const dot = (k) => `<span class="kd-dot${k.builtin ? ` k${kindIndex(k.name)}` : ""}"${k.builtin ? "" : ` style="background:${esc(k.color || KIND_COLORS[0])}"`}></span>`;
+  const dot = (k) => `<span class="kd-dot${k.builtin && !k.color ? ` k${kindIndex(k.name)}` : ""}"${k.color ? ` style="background:${esc(k.color)}"` : ""}></span>`;
   const rows = list.map((k) => {
     const n = state.kinds.counts[k.name] || 0;
+    const key = k.builtin ? `data-kbuiltin="${esc(k.name)}"` : `data-kedit="${esc(k.id)}"`;
     return `<div class="card kd-row${k.builtin ? "" : " mine"}">${dot(k)}<strong class="kd-name">${esc(k.name)}</strong>
-      <span class="muted">기본 만점 ${k.max}점 · 기록 ${n}건${k.memo ? ` · ${esc(k.memo)}` : ""}</span><span class="spacer"></span>
-      ${k.builtin ? `<span class="muted kd-tag">기본 종류</span>` : `<span class="badge kd-tag">내가 만든 종류</span>
-      <button class="btn small" type="button" data-kedit="${esc(k.id)}">수정</button>
-      <button class="btn small danger" type="button" data-kdel="${esc(k.id)}" ${n ? `disabled title="기록이 있어 삭제할 수 없어요"` : ""}>삭제</button>`}</div>`;
+      <span class="muted">기본 만점 ${k.max}${esc(k.unit)} · 기록 ${n}건${k.memo ? ` · ${esc(k.memo)}` : ""}</span><span class="spacer"></span>
+      ${k.builtin ? `<span class="muted kd-tag">기본 종류</span>` : `<span class="badge kd-tag">내가 만든 종류</span>`}
+      <button class="btn small" type="button" ${key} ${state.kinds.missing ? "disabled" : ""}>수정</button>
+      ${k.builtin ? (k.over ? `<button class="btn small" type="button" data-kreset="${esc(k.id)}">처음 설정으로</button>` : "")
+        : `<button class="btn small danger" type="button" data-kdel="${esc(k.id)}" ${n ? `disabled title="기록이 있어 삭제할 수 없어요"` : ""}>삭제</button>`}</div>`;
   }).join("");
   main.innerHTML = `
     <div class="page-head"><h2>시험 종류</h2><span class="muted">[+ 시험 점수]의 '종류'에 나오는 목록입니다. 모든 학생이 함께 씁니다.</span><span class="spacer"></span>
       <button class="btn primary" type="button" id="kd-add" ${state.kinds.missing ? "disabled" : ""}>+ 종류 추가</button></div>
     ${state.kinds.missing ? `<div class="card empty">시험 종류 저장소(test_kinds 테이블)가 아직 없어요. schema.sql의 '시험 종류' 부분을 Supabase에서 한 번 실행해 주세요.</div>` : ""}
     <div class="kd-list">${rows}</div>
-    <p class="muted" style="font-size:.85rem">기본 종류는 수정·삭제할 수 없고, 기록이 있는 종류는 삭제할 수 없어요. 이름을 바꾸면 기존 기록의 종류도 함께 바뀝니다.</p>`;
+    <p class="muted" style="font-size:.85rem">단위(점·개 등)는 종류마다 정하고, 그래프는 항상 백분율(%)로 보여줍니다. 기본 종류는 이름을 바꾸거나 삭제할 수 없고, 기록이 있는 종류도 삭제할 수 없어요. 이름을 바꾸면 기존 기록의 종류도 함께 바뀝니다.</p>`;
   $("#kd-add").onclick = () => kindForm(null);
   main.querySelectorAll("[data-kedit]").forEach((b) => (b.onclick = () => kindForm(state.kinds.rows.find((k) => k.id === b.dataset.kedit))));
+  main.querySelectorAll("[data-kbuiltin]").forEach((b) => (b.onclick = () => {
+    const name = b.dataset.kbuiltin;
+    kindForm(state.kinds.rows.find((k) => k.name === name) || null, name);
+  }));
+  main.querySelectorAll("[data-kreset]").forEach((b) => (b.onclick = async () => {
+    if (!confirm("이 기본 종류의 단위·만점을 처음 설정(점, 100)으로 되돌릴까요?")) return;
+    try {
+      await run(db.from("test_kinds").delete().eq("id", b.dataset.kreset));
+      await loadKinds();
+      renderKinds();
+      toast("처음 설정으로 되돌렸습니다");
+    } catch (e) { fail(e); }
+  }));
   main.querySelectorAll("[data-kdel]").forEach((b) => (b.onclick = async () => {
     const k = state.kinds.rows.find((x) => x.id === b.dataset.kdel);
     if (!k || !confirm(`'${k.name}' 종류를 삭제할까요?`)) return;
@@ -3033,36 +3050,52 @@ function renderKinds() {
     } catch (e) { fail(e); }
   }));
 }
-function kindForm(k) {
+/* k: 저장된 행(없으면 null), bn: 기본 종류 이름(기본 종류를 처음 수정할 때) */
+function kindForm(k, bn) {
+  const builtin = !!bn;
   const cur = (k && k.color) || KIND_COLORS[0];
+  const UNITS = ["점", "개", "문항", "%"];
   openForm({
-    title: k ? "시험 종류 수정" : "시험 종류 추가",
+    title: builtin ? `기본 종류 수정 · ${bn}` : k ? "시험 종류 수정" : "시험 종류 추가",
     fields: [
       { name: "name", label: "종류 이름", required: true, maxlength: 30 },
-      { name: "default_max", label: "기본 만점", type: "number", min: 1, step: "any", required: true },
-      { name: "kcolor", type: "slot" },
+      { name: "default_max", label: "기본 만점", type: "number", min: 1, step: "any", required: true, half: true },
+      { name: "unit", label: "단위 (점·개 등 자유롭게)", required: true, maxlength: 8, half: true },
+      { name: "kunits", type: "slot" },
+      ...(builtin ? [] : [{ name: "kcolor", type: "slot" }]),
       { name: "memo", label: "메모 (선택)", maxlength: 100 },
     ],
-    values: k ? { name: k.name, default_max: k.default_max, memo: k.memo } : { default_max: 100 },
+    values: { name: bn || (k && k.name) || "", default_max: k ? k.default_max : 100, unit: (k && k.unit) || "점", memo: k && k.memo },
     onSubmit: async (d) => {
-      const name = (d.name || "").trim();
-      if (kindList().some((x) => x.name === name && (!k || x.id !== k.id))) throw new Error("같은 이름의 종류가 이미 있어요.");
-      const color = ($("#dlg-form").querySelector('input[name="kc"]:checked') || {}).value || KIND_COLORS[0];
-      const row = { name, default_max: d.default_max, color, memo: d.memo };
-      if (k) {
-        const oldName = k.name;
-        await run(db.from("test_kinds").update(row).eq("id", k.id));
-        if (oldName !== name) await run(db.from("tests").update({ kind: name }).eq("kind", oldName));
-      } else {
-        await run(db.from("test_kinds").insert(row));
+      const name = builtin ? bn : (d.name || "").trim();
+      if (!builtin && kindList().some((x) => x.name === name && (!k || x.id !== k.id))) throw new Error("같은 이름의 종류가 이미 있어요.");
+      const unit = (d.unit || "").trim() || "점";
+      const color = builtin ? (k && k.color) || null : ($("#dlg-form").querySelector('input[name="kc"]:checked') || {}).value || KIND_COLORS[0];
+      const row = { name, default_max: d.default_max, unit, color, memo: d.memo };
+      const oldName = k && k.name;
+      const save = async (r) => (k ? run(db.from("test_kinds").update(r).eq("id", k.id)) : run(db.from("test_kinds").insert(r)));
+      try {
+        await save(row);
+      } catch (e) {
+        if (!/unit/i.test(e.message || "")) throw e;
+        const { unit: _u, ...rest } = row; // unit 컬럼이 아직 없는 DB
+        await save(rest);
+        toast("DB에 unit 컬럼이 없어 단위는 저장되지 않았어요 (schema.sql 실행 필요)");
       }
+      if (k && !builtin && oldName !== name) await run(db.from("tests").update({ kind: name }).eq("kind", oldName));
       await loadKinds();
       await loadKindCounts();
       if (state.view === "kinds") renderKinds();
       toast("저장했습니다");
     },
   });
-  $("#kcolor").innerHTML = `<div class="kd-colors" role="radiogroup" aria-label="그래프 색"><span class="muted">그래프 색</span>${KIND_COLORS.map((c, i) => `<label class="kd-sw"><input type="radio" name="kc" value="${c}" ${c === cur || (!k && i === 0) ? "checked" : ""} aria-label="색 ${i + 1}"><span style="background:${c}"></span></label>`).join("")}</div>`;
+  const nm = $("#dlg-form").elements.name;
+  if (nm && builtin) nm.readOnly = true;
+  const un = $("#dlg-form").elements.unit;
+  $("#kunits").innerHTML = `<div class="kd-units"><span class="muted">자주 쓰는 단위</span>${UNITS.map((u) => `<button type="button" class="btn small" data-u="${u}">${u}</button>`).join("")}</div>`;
+  $("#kunits").onclick = (e) => { const b = e.target.closest("[data-u]"); if (b) { un.value = b.dataset.u; un.focus(); } };
+  const kc = $("#kcolor");
+  if (kc) kc.innerHTML = `<div class="kd-colors" role="radiogroup" aria-label="그래프 색"><span class="muted">그래프 색</span>${KIND_COLORS.map((c, i) => `<label class="kd-sw"><input type="radio" name="kc" value="${c}" ${c === cur || (!k && i === 0) ? "checked" : ""} aria-label="색 ${i + 1}"><span style="background:${c}"></span></label>`).join("")}</div>`;
 }
 
 function testForm(s, test) {
@@ -3078,7 +3111,7 @@ function testForm(s, test) {
       { name: "score", label: "점수", type: "number", min: 0, step: "any", required: true, half: true },
       { name: "max_score", label: "만점", type: "number", min: 1, step: "any", required: true, half: true },
     ],
-    values: test || { test_date: todayStr(), kind: "단어시험", max_score: 100 },
+    values: test || { test_date: todayStr(), kind: kl[0].name, max_score: kl[0].max },
     onSubmit: async (d) => {
       if (d.score > d.max_score) throw new Error("점수가 만점보다 클 수 없습니다.");
       if (test) await run(db.from("tests").update(d).eq("id", test.id));
@@ -3093,8 +3126,18 @@ function testForm(s, test) {
         }
       : null,
   });
-  const ksel = $("#dlg-form").elements.kind, msel = $("#dlg-form").elements.max_score;
-  if (ksel && msel && !test) ksel.onchange = () => { const k = kl.find((x) => x.name === ksel.value); if (k) msel.value = k.max; };
+  const F = $("#dlg-form").elements, ksel = F.kind, msel = F.max_score, ssel = F.score;
+  const setLbl = (el, text) => { const l = el && el.closest("label"); if (l && l.firstChild) l.firstChild.textContent = text; };
+  const unitLabels = () => {
+    const k = kl.find((x) => x.name === ksel.value);
+    const u = (k && k.unit) || kindUnit(ksel.value);
+    setLbl(ssel, `점수 (${u})`);
+    setLbl(msel, `만점 (${u}) · 기본 ${k ? k.max : 100}`);
+  };
+  if (ksel && msel) {
+    ksel.onchange = () => { if (!test) { const k = kl.find((x) => x.name === ksel.value); if (k) msel.value = k.max; } unitLabels(); };
+    unitLabels();
+  }
 }
 
 /* ---------- 백업 ---------- */
