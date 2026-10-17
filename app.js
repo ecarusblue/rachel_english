@@ -3189,6 +3189,7 @@ function bindEvents() {
   const appEl = $("#app-view");
   const setMenu = (open) => {
     appEl.classList.toggle("menu-open", open);
+    document.body.classList.toggle("menu-lock", open);
     $("#btn-menu").setAttribute("aria-expanded", open ? "true" : "false");
   };
   $("#btn-menu").onclick = () => setMenu(!appEl.classList.contains("menu-open"));
