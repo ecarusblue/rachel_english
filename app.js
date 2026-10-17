@@ -507,7 +507,7 @@ function schedulePrintHtml(orient = "p", zoom = 1) {
       return `<td>${tm ? `<div class="tl-tm">${tm}</div>` : ""}<div class="tl-n">${chips(namesOf(sl))}</div></td>`;
     }).join("")}</tr>`).join("");
     return `<div class="rp-page tp-page tp-land">
-      <div class="tl-hd"><div><div class="pl-br">${esc(ACADEMY_NAME).toUpperCase()}</div><h1>수업 시간표</h1></div><span>매주 반복</span></div>
+      <div class="tl-hd"><div><div class="pl-br pv-row">${LOGO_SVG}<span>${esc(ACADEMY_NAME).toUpperCase()}</span></div><h1>수업 시간표</h1></div><span>매주 반복</span></div>
       <div class="tl-bd"${zs}><table class="tl-table"><thead><tr><th></th>${days.map((d) => `<th class="tl-d">${DAY_NAME[d.wd]}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>
       ${foot}</div>`;
   }
@@ -517,7 +517,7 @@ function schedulePrintHtml(orient = "p", zoom = 1) {
       <div class="tp-n">${chips(namesOf(sl))}</div></div>`;
   }).join("")}</div></div>`;
   return `<div class="rp-page tp-page">
-    <div class="pl-hd"><div class="pl-br">${esc(ACADEMY_NAME).toUpperCase()}</div><h1>수업 시간표</h1><div class="pl-who"><span>매주 반복</span></div></div>
+    <div class="pl-hd"><div class="pl-br pv-row">${LOGO_SVG}<span>${esc(ACADEMY_NAME).toUpperCase()}</span></div><h1>수업 시간표</h1><div class="pl-who"><span>매주 반복</span></div></div>
     <div class="tp-bd"${zs}>${days.map(block).join("")}</div>
     ${foot}
   </div>`;
@@ -1218,7 +1218,7 @@ async function uploadLessonSheet(s, file) {
 }
 
 const TEST_KINDS = ["단어시험", "단원평가", "모의고사", "기타"]; // 기본 종류 (삭제·수정 불가)
-const KIND_COLORS = ["#1f9d7a", "#2c5fd1", "#b45309", "#7c3aed", "#c2410c", "#be185d"];
+const KIND_COLORS = ["#1b7f86", "#2c5fd1", "#b45309", "#7c3aed", "#c2410c", "#be185d"];
 async function loadKinds() {
   try {
     state.kinds.rows = await run(db.from("test_kinds").select("*").order("created_at"));
@@ -1399,6 +1399,7 @@ function buildReport(studentId, start, end, src = state.detail) {
 }
 
 const ACADEMY_NAME = "Rachel English";
+const LOGO_SVG = `<svg class="pv-logo" viewBox="0 0 64 64" role="img" aria-label="로고"><circle cx="32" cy="32" r="32" fill="#f4a27a"/><path d="M32 40V27" stroke="#0f3d44" stroke-width="3" stroke-linecap="round" fill="none"/><path d="M32 31c-8 0-11-5-11-10 7 0 11 4 11 10z" fill="#ffe3d2"/><path d="M32 27c0-7 4-11 11-11 0 7-4 11-11 11z" fill="#0f3d44"/><path d="M13 41c6-3 12-3 19 1 7-4 13-4 19-1v10c-6-3-12-3-19 1-7-4-13-4-19-1z" fill="#fff"/><path d="M32 42v10" stroke="#f4a27a" stroke-width="2"/></svg>`;
 
 function buildMessage(s, label, start, end, r, comment) {
   const out = [];
@@ -1775,7 +1776,7 @@ function evalPrintHtml(s, d, sm, vals) {
     : "";
   const texts = EVAL_TEXTS.filter(([k]) => vals[k]).map(([k, t]) => `<div class="rp-tx"><h4>${t}</h4><p>${esc(vals[k])}</p></div>`).join("");
   return `<div class="rp-page">
-    <div class="rp-top"><div class="rp-brand">${esc(ACADEMY_NAME)}<small>월말평가서</small></div><div class="rp-when">${yy}년<b>${mm}월</b></div></div>
+    <div class="rp-top"><div class="rp-brand pv-row">${LOGO_SVG}<div>${esc(ACADEMY_NAME)}<small>월말평가서</small></div></div><div class="rp-when">${yy}년<b>${mm}월</b></div></div>
     <div class="rp-body">
       <div class="rp-who"><b>${esc(s.name)}</b><span>${s.grade ? esc(s.grade) + " 학생" : "학생"}</span></div>
       <div class="rp-stats">
@@ -2213,7 +2214,7 @@ function planPrintHtml(s, recs) {
       <div class="pl-books">${items.map(book).join("")}</div></div>`;
   };
   return `<div class="rp-page pl-page">
-    <div class="pl-hd"><div class="pl-br">${esc(ACADEMY_NAME).toUpperCase()}</div><h1>${esc(title)}</h1>
+    <div class="pl-hd"><div class="pl-br pv-row">${LOGO_SVG}<span>${esc(ACADEMY_NAME).toUpperCase()}</span></div><h1>${esc(title)}</h1>
       <div class="pl-who"><span><b>${esc(s.name)}</b>${s.grade ? ` (${esc(s.grade)})` : ""}</span>${rg ? `<span>${shortDate(rg.start)} – ${shortDate(rg.end)}</span>` : ""}</div></div>
     <div class="pl-bd">
       <p class="pl-hello">${esc(title)}입니다. 수업 전에 한 번 훑어보고 오면 더 쉬워져요!</p>
