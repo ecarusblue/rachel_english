@@ -1218,7 +1218,7 @@ async function uploadLessonSheet(s, file) {
 }
 
 const TEST_KINDS = ["단어시험", "단원평가", "모의고사", "기타"]; // 기본 종류 (삭제·수정 불가)
-const KIND_COLORS = ["#2c5fd1", "#0f8a6a", "#b45309", "#7c3aed", "#c2410c", "#be185d"];
+const KIND_COLORS = ["#1f9d7a", "#2c5fd1", "#b45309", "#7c3aed", "#c2410c", "#be185d"];
 async function loadKinds() {
   try {
     state.kinds.rows = await run(db.from("test_kinds").select("*").order("created_at"));
