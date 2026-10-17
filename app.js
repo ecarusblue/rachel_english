@@ -788,6 +788,12 @@ function renderStudent() {
   else renderTestsTab(s);
 }
 
+function nextLine(p, book) {
+  const nb = p.next_textbook_id ? state.textbooks.find((b) => b.id === p.next_textbook_id) : null;
+  if (!nb) return "";
+  const done = book.total_units > 0 && p.current_unit >= book.total_units;
+  return `<div class="next-book${done ? " done" : ""}">${done ? "교재를 끝냈어요 · 다음 교재" : "다음 교재"} <b>${esc(nb.title)}</b></div>`;
+}
 function renderProgressTab(s) {
   const items = bookProgressFor(s.id);
   const assignedIds = new Set(items.map((x) => x.book.id));
@@ -820,6 +826,7 @@ function renderProgressTab(s) {
       return `<div class="card book-card" data-pid="${esc(p.id)}">
         <h3>${esc(book.title)}</h3>
         <div class="dchips">${dayChips(p)}</div>
+        ${nextLine(p, book)}
         <div class="stat"><strong>${bookLeaves(book) ? (p.current_unit > 0 ? esc(unitName(book, p.current_unit)) : "시작 전") : esc(book.unit_label) + " " + p.current_unit} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong></div>
         ${recent ? `<div style="font-size:.85rem;margin-top:.5rem">최근 수업 <span class="muted">${fmtDate(recent.lesson_date)}</span> ·${esc(rangeText(book, recentEnt) || " 범위 미입력")}</div>` : ""}
         <div class="muted" style="font-size:.8rem;margin-top:.4rem">진도 갱신 ${fmtDate((p.updated_at || "").slice(0, 10))}</div>
@@ -828,6 +835,7 @@ function renderProgressTab(s) {
           <button class="btn small primary" data-act="inc">+1</button>
           <button class="btn small" data-act="set">직접 입력</button>
           <button class="btn small" data-act="days">요일 변경</button>
+          <button class="btn small" data-act="next">다음 교재</button>
           <button class="btn small danger" data-act="unassign">배정 해제</button>
         </div>
       </div>`;
@@ -2711,6 +2719,7 @@ async function setProgress(pid, unit) {
   renderStudent();
 }
 
+const nextOptions = () => [["", "(정하지 않음)"], ...state.textbooks.map((b) => [b.id, b.title])];
 function assignBook(s) {
   const assigned = new Set(bookProgressFor(s.id).map((x) => x.book.id));
   const options = state.textbooks.filter((b) => !assigned.has(b.id)).map((b) => [b.id, `${b.title} (${bookLeaves(b) ? b.total_units + "단원" : b.total_units + " " + b.unit_label})`]);
@@ -2721,18 +2730,47 @@ function assignBook(s) {
     fields: [
       { name: "textbook_id", label: "교재", type: "select", options, required: true },
       { name: "current_unit", label: "현재 진도 (이미 나간 단원 수)", type: "number", min: 0, default: 0 },
+      { name: "next_textbook_id", label: "다음 교재 (선택 · 이 교재를 끝낸 뒤 이어서 할 교재)", type: "select", options: nextOptions() },
       { name: "as-days", type: "slot" },
     ],
     onSubmit: async (d) => {
       const row = { student_id: s.id, textbook_id: d.textbook_id, current_unit: d.current_unit || 0 };
       if (sel.size) row.weekdays = SCH_ORDER.filter((x) => sel.has(x));
-      try { await run(db.from("progress").insert(row)); } catch (e) { throw weekdaysErr(e); }
+      if (d.next_textbook_id) {
+        if (d.next_textbook_id === d.textbook_id) throw new Error("다음 교재는 지금 배정하는 교재와 달라야 해요.");
+        row.next_textbook_id = d.next_textbook_id;
+      }
+      let noNext = false;
+      try {
+        try { await run(db.from("progress").insert(row)); }
+        catch (e) {
+          if (!row.next_textbook_id || !/next_textbook_id/i.test(e.message || "")) throw e;
+          noNext = true; // 아직 DB에 컬럼이 없음
+          const { next_textbook_id: _n, ...rest } = row;
+          await run(db.from("progress").insert(rest));
+        }
+      } catch (e) { throw weekdaysErr(e); }
       await refresh();
-      toast("교재를 배정했습니다");
+      toast(noNext ? "배정했어요. 다음 교재는 DB에 컬럼이 없어 저장되지 않았어요 (schema.sql 실행 필요)" : "교재를 배정했습니다");
     },
   });
   bindUnitCtls($("#dlg-form"), ["current_unit"], { zero: true });
   mountDayPicker("as-days", sel, classDays);
+}
+
+function changeNext(s, p, book) {
+  const opts = [["", "(정하지 않음)"], ...state.textbooks.filter((b) => b.id !== book.id).map((b) => [b.id, b.title])];
+  openForm({
+    title: `다음 교재 · ${book.title}`,
+    fields: [{ name: "next_textbook_id", label: "이 교재를 끝낸 뒤 이어서 할 교재", type: "select", options: opts }],
+    values: { next_textbook_id: p.next_textbook_id || "" },
+    onSubmit: async (d) => {
+      try { await run(db.from("progress").update({ next_textbook_id: d.next_textbook_id || null }).eq("id", p.id)); }
+      catch (e) { throw new Error(/next_textbook_id/i.test(e.message || "") ? "DB에 next_textbook_id 컬럼이 없어요. schema.sql을 한 번 실행해 주세요." : e.message); }
+      await refresh();
+      toast("다음 교재를 저장했습니다");
+    },
+  });
 }
 
 function changeDays(s, p, book) {
@@ -3293,6 +3331,7 @@ function bindEvents() {
         if (act.dataset.act === "inc") await setProgress(pid, p.current_unit + 1);
         else if (act.dataset.act === "dec") await setProgress(pid, p.current_unit - 1);
         else if (act.dataset.act === "days") { changeDays(s, p, book); return; }
+        else if (act.dataset.act === "next") { changeNext(s, p, book); return; }
         else if (act.dataset.act === "set") {
           if (bookLeaves(book)) {
             openForm({

@@ -767,3 +767,5 @@ td[class^="att-"] { white-space: nowrap; }
 .kd-sw input:checked + span { outline: 3px solid var(--text); outline-offset: 2px; }
 .kd-sw input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
 .kd-units { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.next-book { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.next-book.done { color: var(--accent); font-weight: 600; }

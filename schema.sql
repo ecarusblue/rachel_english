@@ -43,6 +43,8 @@ create table if not exists public.progress (
 );
 -- 교재를 쓰는 수업 요일 (0=일 … 6=토). 빈 배열이면 모든 수업에서 쓰는 교재
 alter table public.progress add column if not exists weekdays smallint[] not null default '{}';
+-- 이 교재를 끝낸 뒤 이어서 할 교재 (표시·추천 참고용)
+alter table public.progress add column if not exists next_textbook_id uuid references public.textbooks(id) on delete set null;
 
 -- 수업 기록: 출결 + 숙제 + 메모
 create table if not exists public.lessons (
@@ -307,6 +309,8 @@ begin
             'weekdays', p.weekdays,
             'current_unit', p.current_unit,
             'remaining_units', greatest(t.total_units - p.current_unit, 0),
+            'next_textbook', (select jsonb_build_object('textbook_id', nt.id, 'title', nt.title)
+                                from public.textbooks nt where nt.id = p.next_textbook_id),
             'avg_units_per_lesson', (
               select round(avg(x.n)::numeric, 1) from (
                 select (l.to_unit - l.from_unit + 1) as n from public.lesson_book_rows l

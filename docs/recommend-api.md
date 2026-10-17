@@ -42,12 +42,14 @@ curl -H "Authorization: Bearer $TOKEN" https://.../api/progress
     "alias": "S01", "grade": "초5", "lessons_per_week": 1.5,
     "class_weekdays": [1, 3],
     "books": [{"textbook_id": "…", "title": "Grammar Zone 1", "unit_label": "Unit", "structure": null,
-               "weekdays": [1], "total_units": 20, "current_unit": 7, "remaining_units": 13, "avg_units_per_lesson": 2.0}],
+               "weekdays": [1], "total_units": 20, "current_unit": 7, "remaining_units": 13, "avg_units_per_lesson": 2.0,
+               "next_textbook": {"textbook_id": "…", "title": "Grammar Zone 2"}}],
     "recent_lessons": [{"date": "…", "attendance": "출석", "homework": "완료", "homework_note": "…",
                         "textbook_id": "…", "from_unit": 6, "to_unit": 7, "topic": "…", "extra_books": null, "next_plan": "…"}],
     "recent_tests": [{"date": "…", "kind": "단어시험", "percent": 90}]
   }]}}
 ```
+`next_textbook` 은 선생님이 정해 둔 "이 교재를 끝낸 뒤 이어서 할 교재"이며, 정하지 않았으면 `null` 입니다. 교재를 거의 끝냈다면 추천 근거에 참고하세요.
 재원 중인 학생만 나옵니다. 가명은 등록 순서로 정해지며 학생이 삭제되지 않는 한 유지됩니다.
 
 ### POST /api/recommendations
