@@ -1675,20 +1675,33 @@ async function uploadLessonSheet(s, file) {
   if (sel) sel.onchange = () => { dupMode = sel.value; paint(); };
 }
 
-const TEST_KINDS = ["단어시험", "단원평가", "모의고사", "기타"]; // 기본 종류 (삭제·수정 불가)
+const TEST_KINDS = ["단어시험", "단원평가", "모의고사", "기타"]; // 처음 한 번 test_kinds 에 채워 넣는 시작 종류 (이후에는 모두 수정·삭제 가능)
+const KIND_SEED = "__seeded__"; // 시작 종류를 이미 채웠다는 표시 행(목록에는 안 보임)
 const KIND_COLORS = ["#1b7f86", "#2c5fd1", "#b45309", "#7c3aed", "#c2410c", "#be185d"];
 async function loadKinds() {
   try {
-    state.kinds.rows = await run(db.from("test_kinds").select("*").order("created_at"));
+    let rows = await run(db.from("test_kinds").select("*").order("created_at"));
     state.kinds.missing = false;
+    if (!rows.some((k) => k.name === KIND_SEED)) {
+      // 처음 한 번: 시작 종류를 일반 행으로 만들어 이름·색·단위·삭제를 모두 고칠 수 있게 함 (이미 고친 값은 유지)
+      try {
+        for (const name of TEST_KINDS) if (!rows.some((k) => k.name === name)) await run(db.from("test_kinds").insert({ name, default_max: 100, unit: "점" }));
+        await run(db.from("test_kinds").insert({ name: KIND_SEED, default_max: 1, unit: "점" }));
+        rows = await run(db.from("test_kinds").select("*").order("created_at"));
+      } catch { /* 실패해도 아래에서 기본 종류로 대체 */ }
+    }
+    state.kinds.rows = rows.filter((k) => k.name !== KIND_SEED);
+    state.kinds.seeded = rows.some((k) => k.name === KIND_SEED);
   } catch {
     state.kinds.rows = [];
+    state.kinds.seeded = false;
     state.kinds.missing = true; // 테이블이 아직 없음 → 기본 종류만 사용
   }
 }
 /* 기본 + 내가 만든 종류 */
 function kindList() {
   const mk = (name, builtin, k) => ({ name, builtin, id: k && k.id, max: k ? Number(k.default_max) || 100 : 100, unit: (k && k.unit) || "점", color: k && k.color, memo: k && k.memo, over: !!k });
+  if (state.kinds.seeded) return state.kinds.rows.map((k) => mk(k.name, false, k));
   return [
     ...TEST_KINDS.map((name) => mk(name, true, state.kinds.rows.find((k) => k.name === name))),
     ...state.kinds.rows.filter((k) => !TEST_KINDS.includes(k.name)).map((k) => mk(k.name, false, k)),
@@ -3753,23 +3766,23 @@ async function loadKindCounts() {
 function renderKinds() {
   const main = $("#main");
   const list = kindList();
-  const dot = (k) => `<span class="kd-dot${k.builtin && !k.color ? ` k${kindIndex(k.name)}` : ""}"${k.color ? ` style="background:${esc(k.color)}"` : ""}></span>`;
+  const dot = (k) => `<span class="kd-dot${!k.color ? ` k${kindIndex(k.name)}` : ""}"${k.color ? ` style="background:${esc(k.color)}"` : ""}></span>`;
   const rows = list.map((k) => {
     const n = state.kinds.counts[k.name] || 0;
     const key = k.builtin ? `data-kbuiltin="${esc(k.name)}"` : `data-kedit="${esc(k.id)}"`;
     return `<div class="card kd-row${k.builtin ? "" : " mine"}">${dot(k)}<strong class="kd-name">${esc(k.name)}</strong>
       <span class="muted">기본 만점 ${k.max}${esc(k.unit)} · 기록 ${n}건${k.memo ? ` · ${esc(k.memo)}` : ""}</span><span class="spacer"></span>
-      ${k.builtin ? `<span class="muted kd-tag">기본 종류</span>` : `<span class="badge kd-tag">내가 만든 종류</span>`}
+      ${k.builtin ? `<span class="muted kd-tag">기본 종류</span>` : ""}
       <button class="btn small" type="button" ${key} ${state.kinds.missing ? "disabled" : ""}>수정</button>
       ${k.builtin ? (k.over ? `<button class="btn small" type="button" data-kreset="${esc(k.id)}">처음 설정으로</button>` : "")
-        : `<button class="btn small danger" type="button" data-kdel="${esc(k.id)}" ${n ? `disabled title="기록이 있어 삭제할 수 없어요"` : ""}>삭제</button>`}</div>`;
+        : `<button class="btn small danger" type="button" data-kdel="${esc(k.id)}" ${n ? `disabled title="기록이 있어 삭제할 수 없어요"` : list.length < 2 ? `disabled title="종류가 하나는 있어야 해요"` : ""}>삭제</button>`}</div>`;
   }).join("");
   main.innerHTML = `
     <div class="page-head"><h2>시험 종류</h2><span class="muted">[+ 시험 점수]의 '종류'에 나오는 목록입니다. 모든 학생이 함께 씁니다.</span><span class="spacer"></span>
       <button class="btn primary" type="button" id="kd-add" ${state.kinds.missing ? "disabled" : ""}>+ 종류 추가</button></div>
     ${state.kinds.missing ? `<div class="card empty">시험 종류 저장소(test_kinds 테이블)가 아직 없어요. schema.sql의 '시험 종류' 부분을 Supabase에서 한 번 실행해 주세요.</div>` : ""}
     <div class="kd-list">${rows}</div>
-    <p class="muted" style="font-size:.85rem">단위(점·개 등)는 종류마다 정하고, 그래프는 항상 백분율(%)로 보여줍니다. 기본 종류는 이름을 바꾸거나 삭제할 수 없고, 기록이 있는 종류도 삭제할 수 없어요. 이름을 바꾸면 기존 기록의 종류도 함께 바뀝니다.</p>`;
+    <p class="muted" style="font-size:.85rem">단위(점·개 등)는 종류마다 정하고, 그래프는 항상 백분율(%)로 보여줍니다. 이름·색·단위·만점은 모두 고칠 수 있고, 기록이 없는 종류는 삭제할 수 있어요. 이름을 바꾸면 기존 기록의 종류도 함께 바뀝니다.</p>`;
   $("#kd-add").onclick = () => kindForm(null);
   main.querySelectorAll("[data-kedit]").forEach((b) => (b.onclick = () => kindForm(state.kinds.rows.find((k) => k.id === b.dataset.kedit))));
   main.querySelectorAll("[data-kbuiltin]").forEach((b) => (b.onclick = () => {
