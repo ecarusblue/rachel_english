@@ -196,9 +196,10 @@ async function loadCore() {
   await loadKinds();
   await loadMakeups();
   try {
-    const pend = await run(db.from("recommendations").select("id, target_date, created_at").eq("status", "제안").limit(500));
+    const pend = await run(db.from("recommendations").select("id, student_id, target_date, created_at").eq("status", "제안").limit(500));
     const wk = periodRange("thisWeek");
-    state.pendingRecs = pend.filter((r) => recDate(r) >= wk.start && recDate(r) <= wk.end).length;
+    const act = new Set(students.filter((s) => s.active).map((s) => s.id));
+    state.pendingRecs = pend.filter((r) => act.has(r.student_id) && recDate(r) >= wk.start && recDate(r) <= wk.end).length;
   } catch {
     state.pendingRecs = 0;
   }
@@ -2730,7 +2731,8 @@ async function loadAllRecs() {
 
 function renderAllRecs() {
   const wk = periodRange("thisWeek");
-  const recs = state.allRecs.filter((r) => recDate(r) >= wk.start && recDate(r) <= wk.end);
+  const activeIds = new Set(state.students.filter((s) => s.active).map((s) => s.id)); // 퇴원/휴원 학생은 제외
+  const recs = state.allRecs.filter((r) => activeIds.has(r.student_id) && recDate(r) >= wk.start && recDate(r) <= wk.end);
   const name = (id) => (state.students.find((s) => s.id === id) || {}).name || "(삭제된 학생)";
   const pending = recs.filter((r) => r.status === "제안");
   const done = recs.filter((r) => r.status !== "제안").slice(0, 30);
