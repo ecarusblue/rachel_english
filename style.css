@@ -1037,3 +1037,29 @@ body.rc-lock { overflow: hidden; }
   .rc-lw2 { display: block; font-size: .8rem; }
   .rc-none { padding: 1rem .4rem; }
 }
+
+/* ---------- 전체 현황 시간표: 학생별 보기 ---------- */
+.sch-head { flex-wrap: wrap; }
+.sch-fchips { display: flex; flex-wrap: wrap; gap: .45rem; margin: .2rem 0 .7rem; }
+.sch-fc { border: 1px solid var(--border); background: var(--surface); color: #33484b; border-radius: 999px; padding: .3rem .85rem; font: inherit; font-size: .88rem; cursor: pointer; min-height: 34px; }
+.sch-fc.on { border-color: var(--accent); background: var(--accent-soft); color: #0f3d44; font-weight: 700; }
+.sch-fc:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sch-fsel { display: none; width: 100%; min-height: 44px; margin: .2rem 0 .7rem; }
+.sch-sum { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: .65rem 1rem; margin-bottom: .7rem; }
+.sch-sum-t { line-height: 1.4; }
+.sch-sum-s { font-size: .88rem; }
+.sch-sum-mk { margin-left: auto; background: #fde7da; color: #8a3b14; border-radius: 999px; padding: .15rem .8rem; font-size: .82rem; font-weight: 700; }
+.sch-chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.sch-chip.dim { background: color-mix(in srgb, var(--bg) 70%, var(--surface)); color: #9fb0b2; border-color: var(--border); font-weight: 400; }
+.sch-chip.mk { background: #fde7da; color: #8a3b14; border: 1.5px dashed #e8a47d; cursor: default; }
+.sch-grid td.mine, .sch-names.mine { background: color-mix(in srgb, var(--accent-soft) 75%, transparent); }
+@media (prefers-color-scheme: dark) {
+  .sch-chip.dim { color: #6f8588; }
+  .sch-chip.mk, .sch-sum-mk { background: #4a2a1a; color: #fbd5bf; border-color: #7a4528; }
+  .sch-fc.on { color: #cfeeee; }
+}
+@media (max-width: 700px) {
+  .sch-fchips { display: none; }
+  .sch-fsel { display: block; }
+  .sch-sum-mk { margin-left: 0; }
+}

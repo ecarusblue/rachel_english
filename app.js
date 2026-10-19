@@ -24,7 +24,7 @@ const state = {
   report: { range: "thisWeek", start: "", end: "", comment: "" },
   detail: { lessons: [], tests: [], logs: [], logsMissing: false, recs: [] },
   showInactive: false,
-  schedule: { slots: [], missing: false, draft: null },
+  schedule: { slots: [], missing: false, draft: null, fsel: null },
   kinds: { rows: [], missing: false, counts: {} },   // 선생님이 만든 시험 종류
   makeup: { rows: [], quotas: [], absences: [], missing: false, tab: "need", calMonth: null, calSel: null },   // 결석·보강
   makeupNeed: 0,
@@ -857,19 +857,32 @@ function groupDays(slots) {
 }
 function scheduleHtml() {
   const sc = state.schedule;
-  const head = `<div class="sch-head"><h3>수업 시간표</h3><span class="muted">매주 반복 · 이름을 누르면 학생 화면으로 이동</span><span class="spacer"></span>${sc.missing ? "" : `${sc.slots.length ? `<button class="btn small" id="sch-print" type="button">시간표 미리보기</button>` : ""}`}</div>`;
+  const activeAll = state.students.filter((x) => x.active);
+  const sel = sc.fsel && activeAll.some((x) => x.id === sc.fsel) ? sc.fsel : null;
+  const selSt = sel ? activeAll.find((x) => x.id === sel) : null;
+  const head = `<div class="sch-head"><h3>수업 시간표</h3><span class="muted">매주 반복 · 이름을 누르면 학생 화면으로 이동</span><span class="spacer"></span>${sc.missing || !sc.slots.length ? "" : `<div class="rc-seg" role="group" aria-label="시간표 보기 방식"><button type="button" data-schmode="all" class="${sel ? "" : "on"}" aria-pressed="${!sel}">전체 보기</button><button type="button" data-schmode="student" class="${sel ? "on" : ""}" aria-pressed="${!!sel}">학생별 보기</button></div><button class="btn small" id="sch-print" type="button">${selSt ? esc(selSt.name) + " 시간표 미리보기" : "시간표 미리보기"}</button>`}</div>`;
   if (sc.missing) return `<section class="sch">${head}<div class="card empty">시간표를 쓰려면 최신 <code>schema.sql</code> 을 Supabase SQL Editor에서 한 번 실행하세요.</div></section>`;
   const days = groupDays(sc.slots);
   if (!days.length) return `<section class="sch">${head}<div class="sch-empty"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><div><strong>아직 시간표가 없어요</strong><div class="muted">요일과 시간을 만들면 학생 이름이 여기에 시간순으로 나와요.</div></div><button class="btn primary" id="sch-new" type="button">시간표 만들기</button></div></section>`;
-  const active = state.students.filter((s) => s.active);
+  const active = activeAll;
   const today = new Date().getDay();
+  // 학생별 보기: 선택한 학생은 강조, 다른 학생은 흐리게(눌러서 그 학생으로 전환)
+  const chipOf = (st) => !sel ? `<button type="button" class="sch-chip" data-sch-sid="${esc(st.id)}">${esc(st.name)}</button>`
+    : st.id === sel ? `<button type="button" class="sch-chip on" data-sch-sid="${esc(st.id)}">${esc(st.name)}</button>`
+    : `<button type="button" class="sch-chip dim" data-sch-pick="${esc(st.id)}" title="${esc(st.name)} 시간표 보기">${esc(st.name)}</button>`;
+  // 이번 주 보강(날짜가 정해진 것) → 시간이 맞는 칸에 표시
+  const wkr = periodRange("thisWeek");
+  const mkWeek = sel && !state.makeup.missing ? state.makeup.rows.filter((r) => r.student_id === sel && r.status === "예정" && r.planned_date && r.planned_date >= wkr.start && r.planned_date <= wkr.end).sort((a, b) => a.planned_date.localeCompare(b.planned_date) || (a.planned_start || "").localeCompare(b.planned_start || "")) : [];
+  const mkIn = (sl) => mkWeek.filter((r) => parseD(r.planned_date).getDay() === sl.weekday && r.planned_start && hhmm(r.planned_start) >= hhmm(sl.start_time) && hhmm(r.planned_start) < hhmm(sl.end_time));
+  const mkChips = (sl) => mkIn(sl).map((r) => `<span class="sch-chip mk" title="이번 주 보강">보강 ${shortDate(r.planned_date).replace(/\(.\)/, "")}</span>`).join("");
+  const mine = (names) => !!sel && names.some((x) => x.id === sel);
   const rows = days.map((d) => d.slots.map((sl, i) => {
     const names = active.filter((s) => (sl.student_ids || []).includes(s.id));
     const tm = timeText(sl.start_time, sl.end_time);
     return `<tr class="${i === 0 ? "sch-first" : ""} ${d.wd === today ? "sch-today" : ""}">
       ${i === 0 ? `<th class="sch-day ${d.wd === today ? "today" : ""}" rowspan="${d.slots.length}" scope="rowgroup"><b>${DAY_NAME[d.wd]}</b>${d.wd === today ? "<em>오늘</em>" : ""}</th>` : ""}
       <td class="sch-slot"><b>${esc(sl.label || "타임 " + (i + 1))}</b>${tm ? `<span>${tm}</span>` : ""}</td>
-      <td class="sch-names"><div class="w">${names.length ? names.map((s) => `<button type="button" class="sch-chip" data-sch-sid="${esc(s.id)}">${esc(s.name)}</button>`).join("") : `<span class="muted">-</span>`}</div></td>
+      <td class="sch-names ${mine(names) || mkIn(sl).length ? "mine" : ""}"><div class="w">${names.length || mkIn(sl).length ? names.map(chipOf).join("") + mkChips(sl) : `<span class="muted">-</span>`}</div></td>
       <td class="sch-cnt">${names.length}명</td></tr>`;
   }).join("")).join("");
   // 넓은 화면: 요일을 열로 펼친 격자 / 좁은 화면: 위의 요일별 목록
@@ -884,19 +897,33 @@ function scheduleHtml() {
       if (!sl) return `<td class="off ${cls}"></td>`;
       const names = active.filter((s) => (sl.student_ids || []).includes(s.id));
       const tm = rtime ? "" : timeText(sl.start_time, sl.end_time);
-      return `<td class="${cls}"><div class="sg-top"><span>${esc(tm)}</span><span>${names.length}명</span></div><div class="sg-chips">${names.length ? names.map((s) => `<button type="button" class="sch-chip" data-sch-sid="${esc(s.id)}">${esc(s.name)}</button>`).join("") : `<span class="muted">-</span>`}</div></td>`;
+      return `<td class="${cls} ${mine(names) || mkIn(sl).length ? "mine" : ""}"><div class="sg-top"><span>${esc(tm)}</span><span>${names.length}명</span></div><div class="sg-chips">${names.length || mkIn(sl).length ? names.map(chipOf).join("") + mkChips(sl) : `<span class="muted">-</span>`}</div></td>`;
     }).join("");
     return `<tr><th class="sg-rt" scope="row"><b>${esc(first.label || "타임 " + (i + 1))}</b>${rtime ? `<span>${rtime}</span>` : ""}</th>${cells}</tr>`;
   }).join("");
   const gridHead = days.map((d) => `<th scope="col" class="${d.wd === today ? "today" : ""}">${DAY_NAME[d.wd]}${d.wd === today ? "<em>오늘</em>" : ""}</th>`).join("");
-  return `<section class="sch">${head}
+  let fbar = "";
+  if (sel) {
+    const mySlots = days.flatMap((d) => d.slots.filter((sl) => (sl.student_ids || []).includes(sel)).map((sl) => ({ d, sl })));
+    const lbl = mySlots.map(({ d, sl }) => `${DAY_NAME[d.wd]} ${timeText(sl.start_time, sl.end_time) || ""}`.trim()).join(" · ");
+    const opts = activeAll.slice().sort((a, b) => a.name.localeCompare(b.name, "ko")).map((x) => `<option value="${esc(x.id)}" ${x.id === sel ? "selected" : ""}>${esc(x.name)}${x.grade ? " (" + esc(x.grade) + ")" : ""}</option>`).join("");
+    const chips = activeAll.slice().sort((a, b) => a.name.localeCompare(b.name, "ko")).map((x) => `<button type="button" class="sch-fc ${x.id === sel ? "on" : ""}" data-sch-pick="${esc(x.id)}" aria-pressed="${x.id === sel}">${esc(x.name)}</button>`).join("");
+    fbar = `<div class="sch-fchips">${chips}</div><select class="sch-fsel" id="sch-fsel" aria-label="학생 선택">${opts}</select>
+      <div class="sch-sum"><span class="rc-av" aria-hidden="true">${esc(selSt.name.trim().slice(0, 1))}</span><div class="sch-sum-t"><b>${esc(selSt.name)}</b> <span class="muted">${esc(selSt.grade || "")}${mySlots.length ? ` · 매주 ${mySlots.length}회` : ""}</span><div class="sch-sum-s">${mySlots.length ? esc(lbl) : '<span class="muted">배정된 정규 수업이 없어요</span>'}</div></div>
+      ${mkWeek.length ? `<span class="sch-sum-mk">이번 주 보강 ${mkWeek.length}건 · ${mkWeek.map((r) => `${shortDate(r.planned_date)}${r.planned_start ? " " + hhmm(r.planned_start) : ""}`).join(", ")}</span>` : ""}</div>`;
+  }
+  return `<section class="sch">${head}${fbar}
     <div class="card sch-card sch-wide"><table class="sch-grid"><thead><tr><th></th>${gridHead}</tr></thead><tbody>${grid}</tbody></table></div>
     <div class="card sch-card sch-narrow"><table class="sch-table"><tbody>${rows}</tbody></table></div></section>`;
 }
-function schedulePrintHtml(orient = "p", zoom = 1) {
+function schedulePrintHtml(orient = "p", zoom = 1, sid = null) {
   const zs = zoom < 1 ? ` style="zoom:${zoom}"` : "";
-  const days = groupDays(state.schedule.slots);
-  const active = state.students.filter((s) => s.active);
+  let days = groupDays(state.schedule.slots);
+  const active = state.students.filter((s) => s.active && (!sid || s.id === sid));
+  const who = sid ? (state.students.find((s) => s.id === sid) || {}).name || "" : "";
+  const title = who ? `${esc(who)} 수업 시간표` : "수업 시간표";
+  // 학생 한 명만 출력할 때: 가로는 격자를 유지하고 이름만 걸러 내고, 세로는 그 학생의 수업이 있는 칸만 남깁니다.
+  if (sid && orient !== "l") days = days.map((d) => ({ wd: d.wd, slots: d.slots.filter((sl) => (sl.student_ids || []).includes(sid)) })).filter((d) => d.slots.length);
   const namesOf = (sl) => active.filter((s) => (sl.student_ids || []).includes(s.id));
   const chips = (names) => names.length ? names.map((s) => `<span class="tp-name">${esc(s.name)}</span>`).join("") : `<span class="tp-empty">-</span>`;
   const foot = `<div class="rp-foot"><span>${esc(ACADEMY_NAME)}</span><span>${shortDate(todayStr())} 출력</span></div>`;
@@ -914,7 +941,7 @@ function schedulePrintHtml(orient = "p", zoom = 1) {
       return `<td>${tm ? `<div class="tl-tm">${tm}</div>` : ""}<div class="tl-n">${chips(namesOf(sl))}</div></td>`;
     }).join("")}</tr>`).join("");
     return `<div class="rp-page tp-page tp-land">
-      <div class="tl-hd"><div><div class="pl-br pv-row">${LOGO_SVG}<span>${esc(ACADEMY_NAME).toUpperCase()}</span></div><h1>수업 시간표</h1></div><span>매주 반복</span></div>
+      <div class="tl-hd"><div><div class="pl-br pv-row">${LOGO_SVG}<span>${esc(ACADEMY_NAME).toUpperCase()}</span></div><h1>${title}</h1></div><span>매주 반복</span></div>
       <div class="tl-bd"${zs}><table class="tl-table"><thead><tr><th></th>${days.map((d) => `<th class="tl-d">${DAY_NAME[d.wd]}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>
       ${foot}</div>`;
   }
@@ -924,7 +951,7 @@ function schedulePrintHtml(orient = "p", zoom = 1) {
       <div class="tp-n">${chips(namesOf(sl))}</div></div>`;
   }).join("")}</div></div>`;
   return `<div class="rp-page tp-page">
-    <div class="pl-hd"><div class="pl-br pv-row">${LOGO_SVG}<span>${esc(ACADEMY_NAME).toUpperCase()}</span></div><h1>수업 시간표</h1><div class="pl-who"><span>매주 반복</span></div></div>
+    <div class="pl-hd"><div class="pl-br pv-row">${LOGO_SVG}<span>${esc(ACADEMY_NAME).toUpperCase()}</span></div><h1>${title}</h1><div class="pl-who"><span>매주 반복</span></div></div>
     <div class="tp-bd"${zs}>${days.map(block).join("")}</div>
     ${foot}
   </div>`;
@@ -933,18 +960,18 @@ const SCH_ORIENT_KEY = "rachel_sched_orient";
 function schedOrient() {
   try { return localStorage.getItem(SCH_ORIENT_KEY) === "l" ? "l" : "p"; } catch { return "p"; }
 }
-function openSchedPreview(returnTo, orient = schedOrient()) {
+function openSchedPreview(returnTo, orient = schedOrient(), sid = null) {
   try { localStorage.setItem(SCH_ORIENT_KEY, orient); } catch { /* 저장 실패는 무시 */ }
-  openEvalPreview(schedulePrintHtml(orient), () => {
+  openEvalPreview(schedulePrintHtml(orient, 1, sid), () => {
     const area = $("#sched-print-area");
-    area.innerHTML = schedulePrintHtml(orient);
+    area.innerHTML = schedulePrintHtml(orient, 1, sid);
     area.classList.toggle("land", orient === "l");
     document.body.classList.add("print-sched");
     try { window.print(); } finally { document.body.classList.remove("print-sched"); area.classList.remove("land"); }
   }, returnTo, "시간표 미리보기", {
     land: orient === "l",
     onRender: orient === "l" ? paginateSchedLand : paginateSchedPortrait,
-    orient: { value: orient, options: [["p", "세로"], ["l", "가로"]], onChange: (v) => openSchedPreview(returnTo, v) },
+    orient: { value: orient, options: [["p", "세로"], ["l", "가로"]], onChange: (v) => openSchedPreview(returnTo, v, sid) },
   });
 }
 function bindSchedule() {
@@ -952,8 +979,22 @@ function bindSchedule() {
   if (nb) nb.onclick = () => startScheduleEdit();
   const pb = $("#sch-print");
   if (pb) {
-    pb.onclick = () => openSchedPreview(pb);
+    pb.onclick = () => openSchedPreview(pb, schedOrient(), state.schedule.fsel);
   }
+  const first = () => state.students.filter((x) => x.active).slice().sort((a, b) => a.name.localeCompare(b.name, "ko"))[0];
+  $("#main").querySelectorAll("[data-schmode]").forEach((b) => {
+    b.onclick = () => {
+      const sc = state.schedule;
+      if (b.dataset.schmode === "all") sc.fsel = null;
+      else if (!sc.fsel) { const f = first(); sc.fsel = f ? f.id : null; }
+      render();
+    };
+  });
+  $("#main").querySelectorAll("[data-sch-pick]").forEach((b) => {
+    b.onclick = () => { state.schedule.fsel = b.dataset.schPick; render(); };
+  });
+  const fs = $("#sch-fsel");
+  if (fs) fs.onchange = () => { state.schedule.fsel = fs.value; render(); };
   $("#main").querySelectorAll("[data-sch-sid]").forEach((b) => {
     b.onclick = (e) => { e.stopPropagation(); selectStudent(b.dataset.schSid); };
   });
