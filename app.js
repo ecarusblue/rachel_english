@@ -2746,6 +2746,97 @@ function editRecsForm(s, ids) {
       <label>추천 이유<textarea rows="2" maxlength="600" data-re-why="${esc(r.id)}">${esc(r.rationale || "")}</textarea></label></fieldset>`).join("");
 }
 
+/* 수업 추천 직접 입력: '제안' 상태로 저장(직접 수정 표시 포함 → 예약 작업이 덮어쓰지 않음) */
+function manualRecForm(s) {
+  const prog = state.progress.filter((p) => p.student_id === s.id);
+  let books = prog.map((p) => state.textbooks.find((b) => b.id === p.textbook_id)).filter(Boolean);
+  if (!books.length) books = state.textbooks.slice();
+  if (!books.length) { toast("먼저 교재를 등록하세요"); return; }
+  const prOf = (bid) => prog.find((p) => p.textbook_id === bid);
+  const days = new Set(); prog.forEach((p) => dayList(p).forEach((d) => days.add(d)));
+  const upcoming = [];
+  for (let i = 0; i < 28 && upcoming.length < 4; i++) { const d = addDays(todayStr(), i); if (days.has(parseD(d).getDay()) && !recLessonOn(s.id, { target_date: d })) upcoming.push(d); }
+  const dateOf = (d) => `${Number(d.slice(5, 7))}.${Number(d.slice(8, 10))}(${DAY_NAME[parseD(d).getDay()]})`;
+  const unitOpts = (b, sel) => { const o = []; for (let n = 1; n <= b.total_units; n++) o.push(`<option value="${n}" ${n === sel ? "selected" : ""}>${esc(unitName(b, n))}</option>`); return o.join(""); };
+  const defBlock = (date, usedIds) => {
+    const wd = date ? parseD(date).getDay() : null;
+    const free = books.filter((b) => !usedIds.includes(b.id));
+    const pool = free.length ? free : books;
+    const b = pool.find((x) => { const dl = dayList(prOf(x.id)); return wd != null && dl.length && dl.includes(wd); }) || pool[0];
+    const cur = (prOf(b.id) && prOf(b.id).current_unit) || 0;
+    const f = Math.min(b.total_units, cur + 1);
+    return { bid: b.id, from: f, to: f };
+  };
+  let blocks = [];
+  let date = upcoming[0] || todayStr();
+  blocks.push(defBlock(date, []));
+  let why = "";
+  openForm({
+    title: `수업 추천 직접 입력 · ${s.name}`,
+    wide: true,
+    fields: [{ name: "mr-slot", type: "slot" }],
+    values: {},
+    submitLabel: "추천 저장",
+    onSubmit: async () => {
+      read();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("수업 예정일을 입력하세요.");
+      if (recLessonOn(s.id, { target_date: date })) throw new Error("이 날은 이미 수업 기록이 있어 추천을 추가할 수 없어요.");
+      const seen = new Set();
+      for (const b of blocks) {
+        const bk = state.textbooks.find((x) => x.id === b.bid);
+        if (seen.has(b.bid)) throw new Error(`${bk.title}: 같은 교재가 두 번 들어 있어요.`);
+        seen.add(b.bid);
+        if (b.from > b.to) throw new Error(`${bk.title}: 시작 단원이 끝 단원보다 뒤예요.`);
+        const dup = (state.detail.recs || []).find((r) => r.status === "제안" && r.textbook_id === b.bid && r.target_date === date);
+        if (dup) throw new Error(`${bk.title}: ${dateOf(date)}에 이미 제안이 있어요. 목록에서 "추천 수정"을 쓰세요.`);
+      }
+      const when = new Date().toISOString();
+      const rows = blocks.map((b) => ({ student_id: s.id, textbook_id: b.bid, target_date: date, from_unit: b.from, to_unit: b.to, rationale: why.trim().slice(0, 600) || null, model: "직접 입력", status: "제안", edited_at: when }));
+      try { await run(db.from("recommendations").insert(rows)); }
+      catch (e) {
+        if (!/edited_at/i.test((e && e.message) || "")) throw e;
+        await run(db.from("recommendations").insert(rows.map(({ edited_at, ...r }) => r)));
+        toast("저장했어요. 예약 작업 보호는 최신 schema.sql 실행 후 적용됩니다.");
+      }
+      await refresh();
+      toast(`${dateOf(date)} 추천 ${rows.length}개를 저장했습니다`);
+    },
+  });
+  function read() {
+    const di = document.querySelector("#mr-date"); if (di) date = di.value;
+    const w = document.querySelector("#mr-why"); if (w) why = w.value;
+    blocks = blocks.map((b, i) => {
+      const bs = document.querySelector(`[data-mr-book="${i}"]`);
+      if (!bs) return b;
+      return { bid: bs.value, from: Number(document.querySelector(`[data-mr-from="${i}"]`).value), to: Number(document.querySelector(`[data-mr-to="${i}"]`).value) };
+    });
+  }
+  function draw() {
+    const warn = date && recLessonOn(s.id, { target_date: date }) ? `<p class="warn-note">이 날은 이미 수업 기록이 있어요. 다른 날짜를 고르세요.</p>` : "";
+    $("#mr-slot").innerHTML = `<div class="re-row"><label>수업 예정일<input type="date" id="mr-date" value="${esc(date)}"></label></div>
+      ${upcoming.length ? `<div class="chip-row" style="margin:.1rem 0 .6rem">${upcoming.map((d) => `<button type="button" class="chip ${d === date ? "on" : ""}" data-mr-day="${d}">${dateOf(d)}</button>`).join("")}</div>` : ""}
+      ${warn}
+      ${blocks.map((b, i) => {
+        const bk = state.textbooks.find((x) => x.id === b.bid); const pr = prOf(b.bid);
+        return `<fieldset class="re-box"><legend>교재 ${i + 1}</legend>
+        <label>교재<select data-mr-book="${i}">${books.map((x) => `<option value="${esc(x.id)}" ${x.id === b.bid ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select></label>
+        <div class="re-row"><label>시작 단원<select data-mr-from="${i}">${unitOpts(bk, b.from)}</select></label>
+        <label>끝 단원<select data-mr-to="${i}">${unitOpts(bk, b.to)}</select></label></div>
+        <div class="muted" style="font-size:.8rem">${pr ? `현재 진도 ${esc(curLabel(bk, pr.current_unit))}` : "진도 기록 없음"}${blocks.length > 1 ? ` · <a href="#" data-mr-del="${i}">삭제</a>` : ""}</div></fieldset>`;
+      }).join("")}
+      ${blocks.length < books.length ? `<button type="button" class="btn small" id="mr-add">＋ 교재 추가</button>` : ""}
+      <label style="display:block;margin-top:.6rem">메모 / 근거 (선택)<textarea rows="2" maxlength="600" id="mr-why" placeholder="예: 학교 시험 2주 전이라 문법 위주로">${esc(why)}</textarea></label>
+      <p class="muted" style="font-size:.8rem;margin:.4rem 0 0">"제안" 상태로 저장되며 AI 추천처럼 수정·거절·수업 기록 반영을 쓸 수 있어요.</p>`;
+    const sl = $("#mr-slot");
+    sl.querySelectorAll("[data-mr-day]").forEach((b) => { b.onclick = () => { read(); date = b.dataset.mrDay; draw(); }; });
+    $("#mr-date").onchange = () => { read(); draw(); };
+    sl.querySelectorAll("[data-mr-book]").forEach((el) => { el.onchange = () => { read(); const i = Number(el.dataset.mrBook); const bk = state.textbooks.find((x) => x.id === blocks[i].bid); const cur = (prOf(bk.id) && prOf(bk.id).current_unit) || 0; const f = Math.min(bk.total_units, cur + 1); blocks[i].from = f; blocks[i].to = f; draw(); }; });
+    sl.querySelectorAll("[data-mr-del]").forEach((a) => { a.onclick = (e) => { e.preventDefault(); read(); blocks.splice(Number(a.dataset.mrDel), 1); draw(); }; });
+    const add = $("#mr-add"); if (add) add.onclick = () => { read(); blocks.push(defBlock(date, blocks.map((b) => b.bid))); draw(); };
+  }
+  draw();
+}
+
 function renderRecsTab(s) {
   const allForStudent = state.detail.recs || [];
   const recs = filterRecs(allForStudent);
@@ -2758,7 +2849,7 @@ function renderRecsTab(s) {
     const has = r.status === "거절" ? null : recLessonOn(s.id, r);
     return `<div class="card ${has ? "rec-has" : ""}" style="margin-bottom:.7rem">
       <div class="toolbar" style="margin:0">
-        <span class="badge ${cls}">${esc(r.status)}</span>${r.edited_at ? '<span class="badge done">직접 수정</span>' : ""}
+        <span class="badge ${cls}">${esc(r.status)}</span>${r.model === "직접 입력" ? '<span class="badge done">직접 입력</span>' : r.edited_at ? '<span class="badge done">직접 수정</span>' : ""}
         <strong>${esc(b ? b.title + rangeText(b, r) : r.from_unit + "–" + r.to_unit + "단원")}</strong>
       </div>
       ${r.rationale ? `<div class="memo-cell" style="margin-top:.4rem">${esc(r.rationale)}</div>` : ""}
@@ -2787,12 +2878,13 @@ function renderRecsTab(s) {
       ${items.map(card).join("")}
     </section>`;
   };
-  $("#tab-body").innerHTML = `<div class="eval-edit">` + filterHtml(state.recFilter, "rf", "수업 안내 미리보기") + (recs.length
+  $("#tab-body").innerHTML = `<div class="eval-edit"><div class="toolbar" style="margin:0 0 .7rem"><span class="spacer"></span><button class="btn primary small" type="button" id="rec-manual">＋ 추천 직접 입력</button></div>` + filterHtml(state.recFilter, "rf", "수업 안내 미리보기") + (recs.length
     ? `${pending.length ? groups(pending, false).map((g) => group(g, false)).join("") : `<div class="card empty">확인할 새 추천이 없습니다.</div>`}
        ${done.length ? `<h3 style="margin-top:1.2rem">지난 추천</h3>${groups(done, true).map((g) => group(g, true)).join("")}` : ""}
        <p class="muted" style="font-size:.85rem">날짜별 "수업 기록 반영"을 누르면 수업 기록 창이 그날 추천 교재·단원으로 한 번에 채워집니다. "거절"은 그날 추천 전체에 적용됩니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록됩니다. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`
     : `<div class="card empty">${allForStudent.length ? "이 기간에는 추천이 없습니다. 위에서 기간을 바꿔 보세요." : "아직 추천이 없습니다. Claude 예약 작업이 실행되면 여기에 표시됩니다."}</div>`) + `</div><div class="eval-print" id="plan-print-area"></div>`;
   bindRecFilter(() => renderRecsTab(s));
+  $("#rec-manual").onclick = () => manualRecForm(s);
   const doPrint = () => {
     $("#plan-print-area").innerHTML = planPrintHtml(s, recs);
     document.body.classList.add("print-plan"); // 학생 머리글·메모는 인쇄에서 제외

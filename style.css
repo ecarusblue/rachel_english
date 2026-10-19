@@ -1063,3 +1063,10 @@ body.rc-lock { overflow: hidden; }
   .sch-fsel { display: block; }
   .sch-sum-mk { margin-left: 0; }
 }
+
+/* 수업 추천 직접 입력 */
+.chip-row { display: flex; flex-wrap: wrap; gap: .4rem; }
+.chip-row .chip { font: inherit; font-size: .85rem; padding: .3em .85em; border-radius: 999px; border: 1px solid var(--border, #d3dfe0); background: transparent; color: inherit; cursor: pointer; }
+.chip-row .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.warn-note { background: #fff4e0; color: #6f3b06; border-radius: 8px; padding: .4rem .7rem; font-size: .85rem; margin: 0 0 .6rem; }
+@media (prefers-color-scheme: dark) { .warn-note { background: #3a2c14; color: #f3d9a8; } }
