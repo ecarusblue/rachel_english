@@ -26,7 +26,7 @@ const state = {
   showInactive: false,
   schedule: { slots: [], missing: false, draft: null },
   kinds: { rows: [], missing: false, counts: {} },   // 선생님이 만든 시험 종류
-  makeup: { rows: [], quotas: [], absences: [], missing: false, tab: "need" },   // 결석·보강
+  makeup: { rows: [], quotas: [], absences: [], missing: false, tab: "need", calMonth: null, calSel: null },   // 결석·보강
   makeupNeed: 0,
   recsUi: { mode: "student", sid: null },   // 수업 추천 화면: 학생별/날짜별
 };
@@ -385,13 +385,75 @@ function renderMakeup() {
   }
 
   main.innerHTML = head + cards + tabs + `<div class="card mk-list">${list}</div>
+    ${makeupCalHtml()}
     <div class="mk-note"><b>기본 횟수를 넘겨도 막지 않아요.</b> 월 기본 횟수를 다 쓴 뒤의 보강은 "추가 보강"으로 표시만 해서 언제든 잡을 수 있어요. 기본 횟수는 학생마다 따로 정하고, 특정 달만 바꿀 수도 있어요.
       <br>결석은 수업 기록에서 출결을 "결석"으로 저장하면 이 목록에 올라오고, 보강 수업을 기록하면 자동으로 완료돼요. 결석한 지 ${MK_WINDOW_DAYS}일이 지난 건은 목록에 올리지 않아요.</div>`;
 
   $("#mk-add").onclick = () => makeupForm({ student: null, absence: null, row: null });
+  main.querySelectorAll("[data-mcnav]").forEach((b) => (b.onclick = () => {
+    const n = Number(b.dataset.mcnav);
+    const [y, m] = (mk.calMonth || todayStr().slice(0, 7)).split("-").map(Number);
+    const d = n === 0 ? new Date() : new Date(y, m - 1 + n, 1);
+    mk.calMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    mk.calSel = null;
+    renderMakeup();
+  }));
+  main.querySelectorAll("[data-mcday]").forEach((b) => (b.onclick = () => { mk.calSel = mk.calSel === b.dataset.mcday ? null : b.dataset.mcday; renderMakeup(); const p = $(".mc-panel"); if (p) p.scrollIntoView({ block: "nearest" }); }));
+  main.querySelectorAll("[data-mcadd]").forEach((b) => (b.onclick = () => makeupForm({ student: null, absence: null, row: null, date: b.dataset.mcadd })));
   $("#mk-set").onclick = makeupSettings;
   main.querySelectorAll("[data-mktab]").forEach((b) => (b.onclick = () => { mk.tab = b.dataset.mktab; renderMakeup(); }));
   main.querySelectorAll("[data-mk]").forEach((b) => (b.onclick = () => makeupAction(b.dataset.mk, b.dataset.id)));
+}
+
+
+/* 보강 달력: 등록된 보강(예정·완료)만 보여줍니다 */
+function makeupCalDate(r) { return r.status === "완료" ? r.done_date || r.planned_date : r.planned_date; }
+function makeupCalHtml() {
+  const mk = state.makeup;
+  const today = todayStr();
+  if (!mk.calMonth) mk.calMonth = today.slice(0, 7);
+  const [Y, M] = mk.calMonth.split("-").map(Number);
+  const items = mk.rows.filter((r) => r.status !== "제외" && makeupCalDate(r) && makeupCalDate(r).slice(0, 7) === mk.calMonth)
+    .sort((a, b) => (a.planned_start || "99").localeCompare(b.planned_start || "99"));
+  const by = new Map();
+  items.forEach((r) => { const d = makeupCalDate(r); if (!by.has(d)) by.set(d, []); by.get(d).push(r); });
+  const first = new Date(Y, M - 1, 1), days = new Date(Y, M, 0).getDate();
+  const off = (first.getDay() + 6) % 7; // 월요일 시작
+  const total = Math.ceil((off + days) / 7) * 7;
+  const kindCls = (r) => (r.status === "완료" ? "done" : r.kind === "추가" ? "extra" : "plan");
+  let cells = "";
+  for (let i = 0; i < total; i++) {
+    const d = i - off + 1;
+    const wk = i % 7;
+    if (d < 1 || d > days) { cells += `<div class="mc-cell empty" aria-hidden="true"></div>`; continue; }
+    const ds = `${mk.calMonth}-${String(d).padStart(2, "0")}`;
+    const list = by.get(ds) || [];
+    const pills = list.map((r) => `<span class="mc-ev ${kindCls(r)}"><span class="mc-t">${r.status === "완료" ? "✓ " : ""}${r.planned_start ? hhmm(r.planned_start) + " " : ""}</span><b>${esc(studentName(r.student_id))}</b></span>`).join("");
+    const dots = list.map((r) => `<i class="mc-dot ${kindCls(r)}"></i>`).join("");
+    cells += `<button type="button" class="mc-cell ${wk >= 5 ? "we" : ""} ${ds === today ? "today" : ""} ${mk.calSel === ds ? "sel" : ""}" data-mcday="${ds}" aria-label="${M}월 ${d}일${list.length ? ` 보강 ${list.length}건` : ""}" aria-pressed="${mk.calSel === ds}">
+      <span class="mc-d">${d}</span><span class="mc-evs">${pills}</span><span class="mc-dots">${dots}</span></button>`;
+  }
+  const planned = items.filter((r) => r.status === "예정");
+  const doneN = items.length - planned.length;
+  const extraN = items.filter((r) => r.kind === "추가").length;
+  const sel = mk.calSel && mk.calSel.slice(0, 7) === mk.calMonth ? mk.calSel : null;
+  let panel = "";
+  if (sel) {
+    const L = by.get(sel) || [];
+    panel = `<div class="mc-panel"><div class="mc-ph"><b>${shortDate(sel)} 보강 ${L.length}건</b><span class="spacer"></span><button class="btn small primary" type="button" data-mcadd="${sel}">+ 이 날 보강 추가</button></div>
+      ${L.length ? L.map((r) => {
+        const a = mk.absences.find((x) => x.id === r.absent_lesson_id);
+        const t = r.planned_start ? `${hhmm(r.planned_start)}${r.planned_end ? "–" + hhmm(r.planned_end) : ""}` : "시간 미정";
+        return `<div class="mc-pr"><b class="mc-pt">${t}</b><span class="mc-pn"><b>${esc(studentName(r.student_id))}</b><span class="muted">${a ? ` · 결석 ${shortDate(a.lesson_date)} 분` : " · 직접 추가"}${r.memo ? " · " + esc(r.memo) : ""}</span></span>
+          <span class="mk-chip ${r.kind === "추가" ? "extra" : ""}">${r.kind}</span>${r.status === "완료" ? `<span class="badge done">완료</span>` : `<button class="btn small" type="button" data-mk="edit" data-id="${esc(r.id)}">일정 변경</button><button class="btn small primary" type="button" data-mk="rec" data-id="${esc(r.id)}">수업 기록</button>`}</div>`;
+      }).join("") : `<div class="muted" style="padding:.5rem 0">이 날은 등록된 보강이 없어요.</div>`}</div>`;
+  }
+  return `<section class="mc" aria-label="보강 달력"><div class="mc-head"><h3>보강 달력</h3>
+      <button class="btn small" type="button" data-mcnav="-1" aria-label="이전 달">◀</button><b class="mc-title">${Y}년 ${M}월</b><button class="btn small" type="button" data-mcnav="1" aria-label="다음 달">▶</button>
+      <button class="btn small" type="button" data-mcnav="0">오늘</button><span class="spacer"></span>
+      <span class="mc-leg"><i class="mc-dot plan"></i>예정(기본)<i class="mc-dot extra"></i>예정(추가)<i class="mc-dot done"></i>완료</span></div>
+    <div class="mc-grid" role="group">${"월화수목금토일".split("").map((n, i) => `<div class="mc-dow ${i >= 5 ? "we" : ""}">${n}</div>`).join("")}${cells}</div>
+    <div class="muted mc-sum">${M}월 보강 ${items.length}건 · 예정 ${planned.length} · 완료 ${doneN}${extraN ? ` · 추가 ${extraN}` : ""} — 날짜를 누르면 그날 보강이 열려요.</div>${panel}</section>`;
 }
 
 async function makeupAction(act, id) {
@@ -443,7 +505,7 @@ async function completeMakeupFor(studentId, lessonId, date, makeupId) {
   } catch { /* 기록은 이미 저장됨 */ }
 }
 
-function makeupForm({ student, absence, row }) {
+function makeupForm({ student, absence, row, date = null }) {
   const mk = state.makeup;
   const active = state.students.filter((s) => s.active);
   const tomorrow = addDays(todayStr(), 1);
@@ -461,7 +523,7 @@ function makeupForm({ student, absence, row }) {
   );
   const values = row
     ? { planned_date: row.planned_date, planned_start: hhmm(row.planned_start), planned_end: hhmm(row.planned_end), memo: row.memo }
-    : { planned_date: tomorrow, planned_start: "", planned_end: "", memo: "" };
+    : { planned_date: date || tomorrow, planned_start: "", planned_end: "", memo: "" };
   let touched = !!row; // 구분을 직접 바꿨다면 날짜가 바뀌어도 유지
   openForm({
     title: row ? "보강 일정 변경" : absence ? "보강 잡기" : "보강 직접 추가",
