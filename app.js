@@ -28,6 +28,7 @@ const state = {
   kinds: { rows: [], missing: false, counts: {} },   // 선생님이 만든 시험 종류
   makeup: { rows: [], quotas: [], absences: [], missing: false, tab: "need" },   // 결석·보강
   makeupNeed: 0,
+  recsUi: { mode: "student", sid: null },   // 수업 추천 화면: 학생별/날짜별
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -228,6 +229,7 @@ async function loadDetail(studentId) {
 
 async function refresh() {
   await loadCore();
+  if (state.view === "recs") { try { await loadAllRecs(); } catch { /* 이전 목록 유지 */ } }
   if (state.view === "student" && state.studentId) {
     if (!state.students.some((s) => s.id === state.studentId)) {
       state.view = "overview";
@@ -2729,6 +2731,74 @@ async function loadAllRecs() {
   state.allRecs = await run(db.from("recommendations").select("*").order("created_at", { ascending: false }).limit(500));
 }
 
+const RECS_MODE_KEY = "rachel_recs_mode";
+function recsByStudentHtml(recs) {
+  const act = state.students.filter((x) => x.active);
+  const rows = act.map((st) => {
+    const mine = recs.filter((r) => r.student_id === st.id);
+    const open = mine.filter((r) => r.status === "제안");
+    const pend = open.filter((r) => !recLessonOn(st.id, r));
+    const first = [...open].sort((a, b) => (a.target_date || "9999").localeCompare(b.target_date || "9999"))[0];
+    return { st, mine, open, pend, first };
+  }).filter((x) => x.mine.length);
+  if (!rows.length) return `<div class="card empty">이번 주에 확인할 새 추천이 없습니다. 다른 주의 추천은 학생 화면의 수업 추천 탭에서 기간을 바꿔 볼 수 있습니다.</div>`;
+  rows.sort((a, b) => (a.open.length ? 0 : 1) - (b.open.length ? 0 : 1) || ((a.first && a.first.target_date) || "").localeCompare((b.first && b.first.target_date) || "") || a.st.name.localeCompare(b.st.name, "ko"));
+  const ui = state.recsUi;
+  if (!rows.some((x) => x.st.id === ui.sid)) ui.sid = (rows.find((x) => x.pend.length) || rows[0]).st.id;
+  const cur = rows.find((x) => x.st.id === ui.sid);
+  const when = (r) => (r && r.target_date ? `${shortDate(r.target_date)}` : "수업일 미정");
+  const list = rows.map((x) => `<button type="button" class="rc-li ${x.st.id === ui.sid ? "on" : ""}" data-rcsid="${esc(x.st.id)}" aria-pressed="${x.st.id === ui.sid}">
+      <span class="rc-av" aria-hidden="true">${esc(x.st.name.trim().slice(0, 1))}</span>
+      <span class="rc-lt"><b>${esc(x.st.name)}</b> <span class="muted">${esc(x.st.grade || "")}</span><span class="muted rc-lw">${x.first ? when(x.first) : "처리 완료"}</span></span>
+      ${x.pend.length ? `<span class="nav-badge">${x.pend.length}</span>` : `<span class="rc-ok">완료</span>`}</button>`).join("");
+
+  const st = cur.st;
+  const recCard = (r) => {
+    const b = state.textbooks.find((x) => x.id === r.textbook_id);
+    const pr = b ? state.progress.find((x) => x.student_id === st.id && x.textbook_id === b.id) : null;
+    const pct = b && pr && b.total_units ? Math.max(0, Math.min(100, Math.round((pr.current_unit / b.total_units) * 100))) : null;
+    const has = r.status === "제안" ? recLessonOn(st.id, r) : null;
+    const cls = r.status === "거절" ? "bad" : r.status === "제안" ? "warn" : "";
+    return `<div class="rc-rec" data-rid="${esc(r.id)}">
+      <div class="rc-rh"><b>${esc(b ? b.title : "(교재 없음)")}</b><span class="rc-range">${esc(b ? rangeText(b, r).trim() : `${r.from_unit}–${r.to_unit}단원`)}</span>
+        ${r.status === "제안" ? "" : `<span class="badge ${cls}">${esc(r.status)}</span>`}<span class="spacer"></span>
+        ${pr && b ? `<span class="muted rc-cur">현재 ${esc(curLabel(b, pr.current_unit))}${pct != null ? `<span class="rc-bar" aria-hidden="true"><i style="width:${pct}%"></i></span>` : ""}</span>` : ""}</div>
+      ${r.rationale ? `<div class="rc-why">${esc(r.rationale)}</div>` : ""}
+      ${has ? `<div style="margin-top:.5rem">${lessonChip(has)}</div>` : ""}
+      ${r.status === "제안" && !has ? `<div class="rc-ra"><button class="btn small" type="button" data-rec-edit="${esc(r.id)}" data-rec-sid="${esc(st.id)}">범위 수정</button><button class="btn small danger" type="button" data-rec-no="${esc(r.id)}">${cur.open.length > 1 ? "이 교재만 거절" : "거절"}</button></div>` : ""}</div>`;
+  };
+  const byDate = new Map();
+  cur.mine.filter((r) => r.status === "제안").forEach((r) => { const k = r.target_date || ""; if (!byDate.has(k)) byDate.set(k, []); byDate.get(k).push(r); });
+  const dates = [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const grp = ([date, items]) => {
+    const has = date ? recLessonOn(st.id, { target_date: date }) : null;
+    const ids = items.map((r) => esc(r.id)).join(",");
+    return `<section class="rc-grp"><div class="rc-gh"><strong>${date ? shortDate(date) : "수업일 미정"}</strong><span class="muted">${has ? "수업 기록 있음" : `추천 ${items.length}개`}</span><span class="spacer"></span>
+      ${has ? `<button class="btn small" type="button" disabled>기록 있음</button>` : `<button class="btn small danger" type="button" data-rec-no="${ids}">${items.length > 1 ? "모두 거절" : "거절"}</button><button class="btn small primary" type="button" data-rec-use="${esc(items[0].id)}">${items.length > 1 ? `${items.length}개 모두 반영` : "수업 기록 반영"}</button>`}</div>
+      <div class="rc-recs">${items.map(recCard).join("")}</div></section>`;
+  };
+  const decided = cur.mine.filter((r) => r.status !== "제안");
+  const lessons = state.recentLessons.filter((l) => l.student_id === st.id).sort((a, b) => b.lesson_date.localeCompare(a.lesson_date)).slice(0, 3);
+  const tests = state.recentTests.filter((t) => t.student_id === st.id);
+  const hist = lessons.map((l) => {
+    const t = tests.find((x) => x.test_date === l.lesson_date);
+    const pct = t && t.max_score ? Math.round((t.score / t.max_score) * 100) : null;
+    const bits = [l.attendance === "결석" ? "결석" : l.homework ? `숙제 ${l.homework}` : ""].filter(Boolean);
+    return `<div class="rc-hr"><span class="muted">${shortDate(l.lesson_date)}</span><span>${esc(coverText(l) || topicText(l) || (l.attendance === "결석" ? "결석" : "-"))}${bits.length ? ` · ${esc(bits.join(" · "))}` : ""}</span><span class="muted">${t ? esc(`${t.kind || "시험"} ${pct != null ? pct + "%" : t.score}`) : ""}</span></div>`;
+  }).join("");
+  const nextBadge = cur.first ? `<span class="rc-when">다음 수업 ${when(cur.first)}</span>` : "";
+  return `<div class="rc-wrap">
+    <nav class="rc-list" aria-label="학생 선택">${list}<p class="muted rc-hint">숫자는 확인할 추천 수예요. 휴원·퇴원 학생은 보이지 않아요.</p></nav>
+    <section class="rc-detail" aria-live="polite">
+      <div class="rc-dh"><b class="rc-name">${esc(st.name)}</b><span class="muted">${esc(st.grade || "")}</span>${nextBadge}</div>
+      ${dates.length ? dates.map(grp).join("") : `<div class="empty" style="padding:1rem 0">확인할 추천을 모두 처리했어요.</div>`}
+      ${decided.length ? `<div class="rc-sub">처리한 추천</div><div class="rc-recs">${decided.map(recCard).join("")}</div>` : ""}
+      <div class="rc-sub">최근 수업</div>${hist || `<div class="muted" style="font-size:.88rem">최근 30일 수업 기록이 없어요.</div>`}
+      <div class="rc-foot"><button class="btn small" type="button" id="rc-open-stu">${esc(st.name)} 학생 화면 열기</button></div>
+    </section></div>
+    <p class="muted" style="font-size:.85rem;margin-top:.8rem">"반영"을 누르면 수업 기록 창이 추천 교재·단원으로 채워져요. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록돼요. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`;
+}
+
 function renderAllRecs() {
   const wk = periodRange("thisWeek");
   const activeIds = new Set(state.students.filter((s) => s.active).map((s) => s.id)); // 퇴원/휴원 학생은 제외
@@ -2752,41 +2822,66 @@ function renderAllRecs() {
   const table = (rows) => `<div class="card table-wrap"><table>
     <thead><tr><th>학생</th><th>추천 교재 · 범위</th><th>수업 예정일</th><th>근거</th><th>상태</th></tr></thead>
     <tbody>${rows.map(row).join("")}</tbody></table></div>`;
-  $("#main").innerHTML = `
-    <div class="page-head"><h2>수업 추천</h2><span class="muted">이번 주 ${shortDate(wk.start)} ~ ${shortDate(wk.end)} · 학생별 다음 수업 진도 추천</span></div>
+  const ui = state.recsUi;
+  try { const m = localStorage.getItem(RECS_MODE_KEY); if (m === "date" || m === "student") ui.mode = m; } catch { /* 저장 실패는 무시 */ }
+  const seg = `<div class="rc-seg" role="group" aria-label="보기 방식"><button type="button" data-rcmode="student" class="${ui.mode === "student" ? "on" : ""}" aria-pressed="${ui.mode === "student"}">학생별</button><button type="button" data-rcmode="date" class="${ui.mode === "date" ? "on" : ""}" aria-pressed="${ui.mode === "date"}">날짜별</button></div>`;
+  const head = `<div class="page-head"><h2>수업 추천</h2><span class="muted">이번 주 ${shortDate(wk.start)} ~ ${shortDate(wk.end)} · 학생별 다음 수업 진도 추천</span><span class="spacer"></span>${seg}</div>`;
+  if (ui.mode === "student") {
+    $("#main").innerHTML = head + recsByStudentHtml(recs);
+  } else {
+    $("#main").innerHTML = `
+    ${head}
     ${pending.length ? `${table(pending)}` : `<div class="card empty">이번 주에 확인할 새 추천이 없습니다. 다른 주의 추천은 학생 화면의 수업 추천 탭에서 기간을 바꿔 볼 수 있습니다.</div>`}
     ${done.length ? `<h3 style="margin-top:1.2rem">최근 처리한 추천</h3>${table(done)}` : ""}
-    <p class="muted" style="font-size:.85rem;margin-top:.8rem">"반영"을 누르면 그 학생의 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록되고, 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`;
+    <p class="muted" style="font-size:.85rem;margin-top:.8rem">"반영"을 누르면 그 학생의 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록돼요. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`;
+  }
+  $("#main").querySelectorAll("[data-rcmode]").forEach((b) => {
+    b.onclick = () => {
+      ui.mode = b.dataset.rcmode;
+      try { localStorage.setItem(RECS_MODE_KEY, ui.mode); } catch { /* 저장 실패는 무시 */ }
+      renderAllRecs();
+    };
+  });
+  const ob = $("#rc-open-stu");
+  if (ob) ob.onclick = () => selectStudent(state.recsUi.sid);
+  $("#main").querySelectorAll("[data-rcsid]").forEach((b) => {
+    b.onclick = () => { ui.sid = b.dataset.rcsid; renderAllRecs(); };
+  });
+  $("#main").querySelectorAll("[data-rec-edit]").forEach((b) => {
+    b.onclick = async () => {
+      const st = state.students.find((x) => x.id === b.dataset.recSid);
+      if (!st) return;
+      try { await loadDetail(st.id); } catch (e) { return fail(e); }
+      editRecsForm(st, b.dataset.recEdit.split(",").filter(Boolean));
+    };
+  });
 
   $("#main").querySelectorAll("[data-rec-use]").forEach((b) => {
     b.onclick = async () => {
       const rec = recs.find((r) => r.id === b.dataset.recUse);
       const s = state.students.find((x) => x.id === rec.student_id);
       if (!s) return toast("학생 정보를 찾을 수 없습니다");
-      await selectStudent(s.id);
-      state.tab = "recs";
-      render();
+      try { await loadDetail(s.id); } catch (e) { return fail(e); }
       if (await recDateHasLesson(s, rec)) return;
       lessonForm(s, null, state.detail.recs.find((r) => r.id === rec.id) || rec);
     };
   });
   $("#main").querySelectorAll("[data-lesson-chip]").forEach((b) => {
     b.onclick = async () => {
-      const rec = recs.find((r) => r.id === b.closest("tr").dataset.rid);
+      const rec = recs.find((r) => r.id === b.closest("[data-rid]").dataset.rid);
       const st = rec && state.students.find((x) => x.id === rec.student_id);
       if (!st) return;
-      await selectStudent(st.id);
-      state.tab = "recs";
-      render();
+      try { await loadDetail(st.id); } catch (e) { return fail(e); }
       const l = state.detail.lessons.find((x) => x.lesson_date === b.dataset.lessonChip);
       if (l) lessonForm(st, l);
     };
   });
   $("#main").querySelectorAll("[data-rec-no]").forEach((b) => {
     b.onclick = async () => {
-      if (!confirm("이 추천을 거절로 기록할까요?")) return;
+      const ids = b.dataset.recNo.split(",").filter(Boolean);
+      if (!confirm(ids.length > 1 ? `추천 ${ids.length}개를 모두 거절로 기록할까요?` : "이 추천을 거절로 기록할까요?")) return;
       try {
-        await run(db.from("recommendations").update({ status: "거절", decided_at: new Date().toISOString() }).eq("id", b.dataset.recNo));
+        await run(db.from("recommendations").update({ status: "거절", decided_at: new Date().toISOString() }).in("id", ids));
         await loadAllRecs();
         await loadCore();
         render();

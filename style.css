@@ -899,3 +899,54 @@ tbody tr.clickable:hover td.go { color: var(--accent); }
   .mk-c3 .mk-sub { display: inline-block; margin-left: .3rem; }
   .mk-c3 .mk-usage { display: inline-flex; }
 }
+
+/* ---------- 수업 추천: 학생별 보기 ---------- */
+.rc-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.rc-seg button { border: 0; background: transparent; font: inherit; color: var(--text); padding: .45rem 1rem; cursor: pointer; min-height: 36px; }
+.rc-seg button.on { background: #0f3d44; color: #fff; font-weight: 700; }
+.rc-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rc-wrap { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 1rem; align-items: start; }
+.rc-list { display: flex; flex-direction: column; gap: .25rem; }
+.rc-li { display: flex; align-items: center; gap: .65rem; padding: .6rem .8rem; border-radius: 10px; border: 1px solid transparent; background: transparent; font: inherit; color: var(--text); text-align: left; cursor: pointer; min-height: 48px; }
+.rc-li:hover { background: var(--accent-soft); }
+.rc-li.on { background: var(--surface); border-color: var(--accent); }
+.rc-li:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rc-av { width: 30px; height: 30px; flex: none; border-radius: 50%; background: var(--accent-soft); color: #0f3d44; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.rc-lt { flex: 1; min-width: 0; line-height: 1.35; }
+.rc-lw { display: block; font-size: .8rem; }
+.rc-ok { color: var(--good); font-size: .8rem; font-weight: 700; }
+.rc-hint { font-size: .8rem; padding: 0 .4rem; margin: .4rem 0 0; }
+.rc-detail { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem 1.25rem; display: flex; flex-direction: column; gap: .9rem; min-width: 0; }
+.rc-dh { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.rc-name { font-size: 1.2rem; }
+.rc-when { background: var(--accent-soft); color: #0f3d44; border-radius: 999px; padding: .1rem .75rem; font-size: .82rem; font-weight: 700; }
+.rc-grp { display: flex; flex-direction: column; gap: .5rem; }
+.rc-gh { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.rc-recs { display: flex; flex-direction: column; gap: .6rem; }
+.rc-rec { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: .75rem .9rem; }
+.rc-rh { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.rc-range { background: var(--accent-soft); color: #0f3d44; border-radius: 999px; padding: .05rem .7rem; font-size: .82rem; font-weight: 700; }
+.rc-cur { font-size: .8rem; display: inline-flex; align-items: center; gap: .4rem; }
+.rc-bar { display: inline-block; width: 80px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.rc-bar i { display: block; height: 100%; background: var(--accent); }
+.rc-why { margin-top: .4rem; font-size: .88rem; line-height: 1.6; }
+.rc-ra { margin-top: .5rem; display: flex; gap: .5rem; flex-wrap: wrap; }
+.rc-sub { font-size: .82rem; color: var(--muted); margin-bottom: -.4rem; }
+.rc-hr { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; gap: .6rem; padding: .45rem 0; border-top: 1px solid var(--border); font-size: .88rem; }
+.rc-foot { border-top: 1px dashed var(--border); padding-top: .7rem; }
+@media (prefers-color-scheme: dark) {
+  .rc-seg button.on { background: var(--accent); }
+  .rc-av, .rc-when, .rc-range { color: #cfeeee; }
+}
+@media (max-width: 700px) {
+  .rc-wrap { grid-template-columns: 1fr; }
+  .rc-list { flex-direction: row; overflow-x: auto; gap: .4rem; padding-bottom: .3rem; }
+  .rc-li { flex: none; background: var(--surface); border-color: var(--border); }
+  .rc-li.on { border-color: var(--accent); background: var(--accent-soft); }
+  .rc-lw, .rc-hint { display: none; }
+  .rc-detail { padding: .9rem; }
+  .rc-gh .btn { flex: 1; min-height: 44px; }
+  .rc-ra .btn { flex: 1; min-height: 44px; }
+  .rc-hr { grid-template-columns: 62px minmax(0, 1fr); }
+  .rc-hr span:last-child { grid-column: 2; }
+}
