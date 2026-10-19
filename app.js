@@ -3871,7 +3871,11 @@ function bindEvents() {
     if (save) { try { localStorage.setItem(SIDE_KEY, off ? "1" : "0"); } catch { /* 저장 실패는 무시 */ } }
   };
   $("#btn-side").onclick = () => setSide(!appEl.classList.contains("side-off"));
-  try { setSide(localStorage.getItem(SIDE_KEY) === "1", false); } catch { setSide(false, false); }
+  // 저장된 선택이 없으면, 태블릿 세로처럼 좁은 화면(900px 이하)에서는 메뉴를 접은 채 시작합니다.
+  try {
+    const sv = localStorage.getItem(SIDE_KEY);
+    setSide(sv === null ? window.innerWidth <= 900 : sv === "1", false);
+  } catch { setSide(window.innerWidth <= 900, false); }
   $("#btn-sched-edit").onclick = () => {
     state.view = "overview";
     state.studentId = null;

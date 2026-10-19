@@ -810,6 +810,11 @@ tbody tr.clickable:hover td.go { color: var(--accent); }
 .ev-none { display: inline-block; border: 1px solid var(--border); color: var(--muted); border-radius: 8px; padding: .2em .8em; font-size: .85rem; }
 @media (max-width: 700px) {
   .sch-empty { flex-wrap: wrap; } .sch-empty .btn { width: 100%; min-height: 44px; }
+  .mini-books { min-width: 0; }
+  .ev-act .btn { min-height: 36px; }
+}
+/* 전체 현황 표는 태블릿 세로(800px 이하)에서도 학생 카드로 보여줍니다 */
+@media (max-width: 800px) {
   .ov-table, .table-wrap table.ov-table { min-width: 0; display: block; }
   .ov-table thead { display: none; }
   .ov-table tbody { display: grid; gap: .8rem; }
@@ -827,8 +832,6 @@ tbody tr.clickable:hover td.go { color: var(--accent); }
   .ov-table td.c-avg .muted { display: none; }
   .ov-table td.c-avg .delta { display: inline; margin-left: .3rem; }
   .ov-table td.go { display: none; }
-  .mini-books { min-width: 0; }
-  .ev-act .btn { min-height: 36px; }
 }
 @media (prefers-color-scheme: dark) { .sch-empty { color: var(--accent); } }
 
