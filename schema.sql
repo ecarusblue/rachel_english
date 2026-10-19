@@ -732,3 +732,48 @@ revoke all on function public.api_read_evaluation_source(text, integer, integer)
 revoke all on function public.api_submit_evaluations(text, jsonb, text) from public;
 grant execute on function public.api_read_evaluation_source(text, integer, integer) to anon, authenticated;
 grant execute on function public.api_submit_evaluations(text, jsonb, text) to anon, authenticated;
+
+-- ============================================================
+-- 결석·보강 (이미 실행했다면 다시 실행해도 안전합니다)
+-- ============================================================
+-- 보강 한 건. absent_lesson_id 가 비어 있으면 결석과 상관없이 직접 추가한 보강(추가 보강 등)
+create table if not exists public.makeups (
+  id               uuid primary key default gen_random_uuid(),
+  owner            uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  student_id       uuid not null references public.students(id) on delete cascade,
+  absent_lesson_id uuid references public.lessons(id) on delete cascade,
+  status           text not null default '예정' check (status in ('예정','완료','제외')),
+  kind             text not null default '기본' check (kind in ('기본','추가')),
+  planned_date     date,
+  planned_start    time,
+  planned_end      time,
+  done_date        date,
+  lesson_id        uuid references public.lessons(id) on delete set null,
+  memo             text check (memo is null or char_length(memo) <= 300),
+  created_at       timestamptz not null default now()
+);
+create unique index if not exists makeups_absent_uq on public.makeups (absent_lesson_id) where absent_lesson_id is not null;
+create index if not exists makeups_student_idx on public.makeups (owner, student_id, planned_date);
+alter table public.makeups enable row level security;
+drop policy if exists "owner_all" on public.makeups;
+create policy "owner_all" on public.makeups for all to authenticated
+  using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
+revoke all on public.makeups from anon;
+
+-- 월 기본 보강 횟수: student_id 와 month 가 모두 비면 전체 기본, student_id 만 있으면 그 학생의 기본,
+-- month('YYYY-MM')까지 있으면 그 달만 적용. 우선순위: 학생+달 > 학생 기본 > 전체 기본 > 앱 기본(1회)
+create table if not exists public.makeup_quota (
+  id         uuid primary key default gen_random_uuid(),
+  owner      uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  student_id uuid references public.students(id) on delete cascade,
+  month      text check (month is null or month ~ '^[0-9]{4}-[0-9]{2}$'),
+  count      integer not null check (count between 0 and 20),
+  created_at timestamptz not null default now()
+);
+create unique index if not exists makeup_quota_uq on public.makeup_quota
+  (owner, coalesce(student_id, '00000000-0000-0000-0000-000000000000'::uuid), coalesce(month, ''));
+alter table public.makeup_quota enable row level security;
+drop policy if exists "owner_all" on public.makeup_quota;
+create policy "owner_all" on public.makeup_quota for all to authenticated
+  using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
+revoke all on public.makeup_quota from anon;

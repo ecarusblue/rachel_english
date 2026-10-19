@@ -11,7 +11,7 @@ const state = {
   progress: [],          // 전체 학생의 교재 진도
   recentLessons: [],     // 최근 30일 (전체 현황용)
   recentTests: [],       // 최근 90일 (전체 현황용)
-  view: "overview",      // overview | evals | recs | kinds | student
+  view: "overview",      // overview | makeup | evals | recs | kinds | student
   pendingRecs: 0,
   recFilter: { range: "thisWeek", start: "", end: "" },
   lessonFilter: { range: "thisWeek", start: "", end: "" },
@@ -26,6 +26,8 @@ const state = {
   showInactive: false,
   schedule: { slots: [], missing: false, draft: null },
   kinds: { rows: [], missing: false, counts: {} },   // 선생님이 만든 시험 종류
+  makeup: { rows: [], quotas: [], absences: [], missing: false, tab: "need" },   // 결석·보강
+  makeupNeed: 0,
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -192,6 +194,7 @@ async function loadCore() {
   state.recentTests = tests;
   await loadSchedule();
   await loadKinds();
+  await loadMakeups();
   try {
     const pend = await run(db.from("recommendations").select("id, target_date, created_at").eq("status", "제안").limit(500));
     const wk = periodRange("thisWeek");
@@ -235,6 +238,342 @@ async function refresh() {
   render();
 }
 
+/* ---------- 결석·보강 ---------- */
+const MK_WINDOW_DAYS = 45; // 이 기간 안의 결석만 '보강 필요'로 올립니다
+const MK_DEFAULT_QUOTA = 1; // 월 기본 보강 횟수의 앱 기본값
+
+async function loadMakeups() {
+  const mk = state.makeup;
+  try {
+    const [rows, quotas, absences] = await Promise.all([
+      run(db.from("makeups").select("*").order("created_at", { ascending: false }).limit(2000)),
+      run(db.from("makeup_quota").select("*").limit(1000)),
+      run(db.from("lessons").select("*").eq("attendance", "결석").gte("lesson_date", daysAgoStr(MK_WINDOW_DAYS)).order("lesson_date").limit(1000)),
+    ]);
+    Object.assign(mk, { rows, quotas, absences, missing: false });
+  } catch {
+    Object.assign(mk, { rows: [], quotas: [], absences: [], missing: true }); // schema.sql 업그레이드 전
+  }
+  state.makeupNeed = mk.missing ? 0 : pendingAbsences().length;
+}
+
+const monthOfDate = (ds) => (ds || "").slice(0, 7);
+function makeupMonth(r) { return monthOfDate((r.status === "완료" ? r.done_date : null) || r.planned_date || r.done_date); }
+
+// 월 기본 횟수: 학생+달 > 학생 기본 > 전체 기본 > 1회
+function makeupQuota(sid, month) {
+  const q = state.makeup.quotas;
+  const find = (st, mo) => q.find((x) => (x.student_id || null) === st && (x.month || null) === mo);
+  const r = (sid && month && find(sid, month)) || (sid && find(sid, null)) || find(null, null);
+  return r ? r.count : MK_DEFAULT_QUOTA;
+}
+function makeupUsed(sid, month, exceptId) {
+  return state.makeup.rows.filter((r) => r.student_id === sid && r.status !== "제외" && r.kind === "기본" && r.id !== exceptId && makeupMonth(r) === month).length;
+}
+function pendingAbsences() {
+  const mk = state.makeup;
+  const has = new Set(mk.rows.filter((r) => r.absent_lesson_id).map((r) => r.absent_lesson_id));
+  const active = new Set(state.students.filter((s) => s.active).map((s) => s.id));
+  const since = daysAgoStr(MK_WINDOW_DAYS);
+  return mk.absences.filter((a) => a.lesson_date >= since && !has.has(a.id) && active.has(a.student_id));
+}
+
+const mkMin = (t) => { const m = /^(\d{1,2}):(\d{2})/.exec(t || ""); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+const mkHHMM = (n) => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
+const studentName = (id) => (state.students.find((s) => s.id === id) || {}).name || "(삭제된 학생)";
+
+function mkUsageHtml(sid, month) {
+  const q = makeupQuota(sid, month);
+  const u = makeupUsed(sid, month);
+  const dots = Array.from({ length: Math.min(q, 5) }, (_, i) => `<i class="mk-dot ${i < u ? "on" : ""}"></i>`).join("");
+  const left = u < q;
+  return `<div class="mk-usage">${dots ? `<span class="mk-dots" aria-hidden="true">${dots}</span>` : ""}<span>기본 ${u}/${q}${q === 0 ? "회" : ""}</span></div>
+    <div class="mk-sub">${left ? `<span class="muted">기본 보강이 남아 있어요</span>` : `<span class="mk-chip extra">추가 보강으로 기록돼요</span>`}</div>`;
+}
+
+function renderMakeup() {
+  const main = $("#main");
+  const mk = state.makeup;
+  const month = todayStr().slice(0, 7);
+  const gq = makeupQuota(null, null);
+  const head = `<div class="page-head"><h2>결석·보강</h2><span class="muted">결석한 수업을 잊지 않고 보강으로 채워요</span><span class="spacer"></span>
+    <button class="btn small" id="mk-add" type="button">+ 보강 직접 추가</button>
+    <button class="btn small" id="mk-set" type="button">월 기본 보강 <b>${gq}회</b> · 횟수 설정</button></div>`;
+  if (mk.missing) {
+    main.innerHTML = head.replace(/<button[\s\S]*<\/button>/, "") + `<div class="card"><strong>결석·보강 저장 테이블이 아직 없습니다.</strong>
+      <p class="muted">Supabase SQL Editor에서 최신 <code>schema.sql</code>의 "결석·보강" 부분을 실행한 뒤 이 화면을 새로고침하세요.</p></div>`;
+    return;
+  }
+  const need = pendingAbsences();
+  const needStudents = new Set(need.map((a) => a.student_id));
+  const old = need.filter((a) => daysBetween(a.lesson_date) >= 7).length;
+  const planned = mk.rows.filter((r) => r.status === "예정").sort((a, b) => (a.planned_date || "").localeCompare(b.planned_date || "") || (a.planned_start || "").localeCompare(b.planned_start || ""));
+  const wk = periodRange("thisWeek");
+  const weekPlan = planned.filter((r) => r.planned_date && r.planned_date >= wk.start && r.planned_date <= wk.end);
+  const nextP = weekPlan[0];
+  const monthRows = mk.rows.filter((r) => r.status !== "제외" && makeupMonth(r) === month);
+  const base = monthRows.filter((r) => r.kind === "기본").length;
+  const extra = monthRows.length - base;
+  const finished = mk.rows.filter((r) => r.status !== "planned" && (r.status === "완료" || r.status === "제외")).sort((a, b) => (b.done_date || b.created_at || "").localeCompare(a.done_date || a.created_at || "")).slice(0, 60);
+
+  const tab = mk.tab || "need";
+  const cards = `<div class="mk-sum">
+    <div class="mk-card warm"><span class="muted">보강 필요</span><div><b>${needStudents.size}명</b>${old ? `<small class="mk-warn">${old}건은 7일이 지났어요</small>` : ""}</div></div>
+    <div class="mk-card"><span class="muted">이번 주 보강 예정</span><div><b>${weekPlan.length}건</b>${nextP ? `<small class="muted">${shortDate(nextP.planned_date)}${nextP.planned_start ? " " + hhmm(nextP.planned_start) : ""}</small>` : ""}</div></div>
+    <div class="mk-card plain"><span class="muted">${Number(month.slice(5))}월 보강 (완료+예정)</span><div><b>${monthRows.length}건</b><small class="muted">기본 ${base} · 추가 ${extra}</small></div></div>
+  </div>`;
+  const tabs = `<div class="tabs mk-tabs" role="tablist">${[["need", "보강 필요", need.length], ["plan", "보강 예정", planned.length], ["done", "완료·제외", finished.length]]
+    .map(([k, t, n]) => `<button class="tab ${tab === k ? "active" : ""}" role="tab" data-mktab="${k}">${t} <span class="mk-n">${n}</span></button>`).join("")}</div>`;
+
+  const nameCell = (sid) => { const s = state.students.find((x) => x.id === sid); return `<strong>${esc(studentName(sid))}</strong> <span class="muted">${esc((s && s.grade) || "")}</span>`; };
+  const absInfo = (a) => {
+    if (!a) return `<span class="muted">직접 추가한 보강</span>`;
+    return `${shortDate(a.lesson_date)}`;
+  };
+  let list = "";
+  if (tab === "need") {
+    list = need.length
+      ? `<div class="mk-hd"><span>학생</span><span>결석한 수업</span><span>그날 진도 · 메모</span><span>${Number(month.slice(5))}월 보강 (기본 월 ${gq}회)</span><span class="r">처리</span></div>` +
+        need.map((a) => {
+          const age = daysBetween(a.lesson_date);
+          const cover = coverText(a) || topicText(a);
+          const used = makeupUsed(a.student_id, month), q = makeupQuota(a.student_id, month);
+          return `<div class="mk-row">
+            <div class="mk-c0">${nameCell(a.student_id)}</div>
+            <div class="mk-c1">${shortDate(a.lesson_date)}<div>${age >= 7 ? `<span class="mk-chip warn">${age}일째</span>` : `<span class="muted">${age}일째</span>`}</div></div>
+            <div class="mk-c2">${cover ? esc(cover) : `<span class="muted">진도 기록 없음</span>`}${a.memo ? `<div class="muted">${esc(a.memo)}</div>` : ""}</div>
+            <div class="mk-c3">${mkUsageHtml(a.student_id, month)}</div>
+            <div class="mk-c4"><button class="btn small mk-quiet" type="button" data-mk="skip" data-id="${esc(a.id)}">보강 안 함</button>
+              <button class="btn small ${used < q ? "primary" : "mk-outline"}" type="button" data-mk="plan" data-id="${esc(a.id)}">${used < q ? "보강 잡기" : "추가 보강 잡기"}</button></div>
+          </div>`;
+        }).join("")
+      : `<div class="empty">보강이 필요한 결석이 없어요.<div class="muted" style="margin-top:.3rem">수업 기록에서 출결을 "결석"으로 저장하면 여기에 올라와요.</div></div>`;
+  } else if (tab === "plan") {
+    list = planned.length
+      ? `<div class="mk-hd"><span>학생</span><span>보강 일정</span><span>결석한 수업</span><span>구분</span><span class="r">처리</span></div>` +
+        planned.map((r) => {
+          const a = mk.absences.find((x) => x.id === r.absent_lesson_id);
+          const t = r.planned_start ? `${hhmm(r.planned_start)}${r.planned_end ? "–" + hhmm(r.planned_end) : ""}` : "";
+          return `<div class="mk-row">
+            <div class="mk-c0">${nameCell(r.student_id)}</div>
+            <div class="mk-c1">${r.planned_date ? shortDate(r.planned_date) : "-"} <span class="muted">${t}</span></div>
+            <div class="mk-c2">${absInfo(a)}${a && (coverText(a) || topicText(a)) ? `<div class="muted">${esc(coverText(a) || topicText(a))}</div>` : ""}${r.memo ? `<div class="muted">${esc(r.memo)}</div>` : ""}</div>
+            <div class="mk-c3"><span class="mk-chip ${r.kind === "추가" ? "extra" : ""}">${r.kind} 보강</span></div>
+            <div class="mk-c4"><button class="btn small mk-quiet" type="button" data-mk="cancel" data-id="${esc(r.id)}">취소</button>
+              <button class="btn small" type="button" data-mk="edit" data-id="${esc(r.id)}">일정 변경</button>
+              <button class="btn small primary" type="button" data-mk="rec" data-id="${esc(r.id)}">보강 수업 기록</button></div>
+          </div>`;
+        }).join("")
+      : `<div class="empty">잡아 둔 보강이 없어요.</div>`;
+  } else {
+    list = finished.length
+      ? `<div class="mk-hd"><span>학생</span><span>날짜</span><span>결석한 수업</span><span>구분</span><span class="r">처리</span></div>` +
+        finished.map((r) => {
+          const a = mk.absences.find((x) => x.id === r.absent_lesson_id);
+          return `<div class="mk-row">
+            <div class="mk-c0">${nameCell(r.student_id)}</div>
+            <div class="mk-c1">${r.status === "완료" ? shortDate(r.done_date || r.planned_date) : `<span class="muted">${a ? shortDate(a.lesson_date) : ""}</span>`}</div>
+            <div class="mk-c2">${absInfo(a)}${r.memo ? `<div class="muted">${esc(r.memo)}</div>` : ""}</div>
+            <div class="mk-c3">${r.status === "완료" ? `<span class="badge done">보강 완료</span> <span class="mk-chip ${r.kind === "추가" ? "extra" : ""}">${r.kind}</span>` : `<span class="badge">보강 안 함</span>`}</div>
+            <div class="mk-c4">${r.status === "제외" ? `<button class="btn small" type="button" data-mk="undo" data-id="${esc(r.id)}">되돌리기</button>` : ""}</div>
+          </div>`;
+        }).join("")
+      : `<div class="empty">완료하거나 제외한 보강이 아직 없어요.</div>`;
+  }
+
+  main.innerHTML = head + cards + tabs + `<div class="card mk-list">${list}</div>
+    <div class="mk-note"><b>기본 횟수를 넘겨도 막지 않아요.</b> 월 기본 횟수를 다 쓴 뒤의 보강은 "추가 보강"으로 표시만 해서 언제든 잡을 수 있어요. 기본 횟수는 학생마다 따로 정하고, 특정 달만 바꿀 수도 있어요.
+      <br>결석은 수업 기록에서 출결을 "결석"으로 저장하면 이 목록에 올라오고, 보강 수업을 기록하면 자동으로 완료돼요. 결석한 지 ${MK_WINDOW_DAYS}일이 지난 건은 목록에 올리지 않아요.</div>`;
+
+  $("#mk-add").onclick = () => makeupForm({ student: null, absence: null, row: null });
+  $("#mk-set").onclick = makeupSettings;
+  main.querySelectorAll("[data-mktab]").forEach((b) => (b.onclick = () => { mk.tab = b.dataset.mktab; renderMakeup(); }));
+  main.querySelectorAll("[data-mk]").forEach((b) => (b.onclick = () => makeupAction(b.dataset.mk, b.dataset.id)));
+}
+
+async function makeupAction(act, id) {
+  const mk = state.makeup;
+  const reload = async (msg) => { await loadMakeups(); renderSidebar(); renderMakeup(); if (msg) toast(msg); };
+  try {
+    if (act === "plan") {
+      const a = mk.absences.find((x) => x.id === id);
+      if (a) makeupForm({ student: state.students.find((s) => s.id === a.student_id), absence: a, row: null });
+    } else if (act === "skip") {
+      const a = mk.absences.find((x) => x.id === id);
+      if (!a || !confirm("보강 없이 처리할까요? '완료·제외' 탭에서 되돌릴 수 있어요.")) return;
+      await run(db.from("makeups").insert({ student_id: a.student_id, absent_lesson_id: a.id, status: "제외", kind: "기본" }));
+      await reload("보강 안 함으로 처리했어요");
+    } else if (act === "edit") {
+      const r = mk.rows.find((x) => x.id === id);
+      if (r) makeupForm({ student: state.students.find((s) => s.id === r.student_id), absence: mk.absences.find((x) => x.id === r.absent_lesson_id) || null, row: r });
+    } else if (act === "cancel") {
+      const r = mk.rows.find((x) => x.id === id);
+      if (!r || !confirm(r.absent_lesson_id ? "보강 일정을 취소할까요? 결석은 '보강 필요'로 돌아가요." : "보강 일정을 삭제할까요?")) return;
+      await run(db.from("makeups").delete().eq("id", id));
+      await reload("취소했어요");
+    } else if (act === "undo") {
+      await run(db.from("makeups").delete().eq("id", id));
+      await reload("'보강 필요'로 되돌렸어요");
+    } else if (act === "rec") {
+      const r = mk.rows.find((x) => x.id === id);
+      const s = r && state.students.find((x) => x.id === r.student_id);
+      if (!s) return;
+      const a = mk.absences.find((x) => x.id === r.absent_lesson_id);
+      await loadDetail(s.id);
+      const blocks = a ? lessonBooks(a).map((b) => ({ textbook_id: b.textbook_id, from_unit: b.from_unit ?? null, to_unit: b.to_unit ?? null, topic: b.topic || "" })) : null;
+      lessonForm(s, null, null, { date: r.planned_date || todayStr(), attendance: "보강", blocks: blocks && blocks.length ? blocks : null, makeupId: r.id });
+    }
+  } catch (e) {
+    fail(e);
+  }
+}
+
+// 보강 수업을 기록하면 '보강 예정'을 완료로 바꿉니다 (preset.makeupId 가 있으면 그 건, 없으면 그 학생의 가장 이른 예정 건)
+async function completeMakeupFor(studentId, lessonId, date, makeupId) {
+  const mk = state.makeup;
+  if (mk.missing) return;
+  const r = (makeupId && mk.rows.find((x) => x.id === makeupId)) ||
+    mk.rows.filter((x) => x.student_id === studentId && x.status === "예정").sort((a, b) => (a.planned_date || "").localeCompare(b.planned_date || ""))[0];
+  if (!r) return;
+  try {
+    await run(db.from("makeups").update({ status: "완료", done_date: date, lesson_id: lessonId }).eq("id", r.id));
+  } catch { /* 기록은 이미 저장됨 */ }
+}
+
+function makeupForm({ student, absence, row }) {
+  const mk = state.makeup;
+  const active = state.students.filter((s) => s.active);
+  const tomorrow = addDays(todayStr(), 1);
+  const fields = [];
+  if (!student) fields.push({ name: "student_id", label: "학생", type: "select", required: true, options: active.map((s) => [s.id, `${s.name}${s.grade ? " (" + s.grade + ")" : ""}`]) });
+  fields.push(
+    { name: "mkinfo", type: "slot" },
+    { name: "mkkind", type: "slot" },
+    { name: "planned_date", label: "보강 날짜", type: "date", required: true },
+    { name: "planned_start", label: "시작", type: "time", half: true },
+    { name: "planned_end", label: "끝", type: "time", half: true },
+    { name: "mkwarn", type: "slot" },
+    { name: "mkfree", type: "slot" },
+    { name: "memo", label: "메모 (선택)", maxlength: 300 }
+  );
+  const values = row
+    ? { planned_date: row.planned_date, planned_start: hhmm(row.planned_start), planned_end: hhmm(row.planned_end), memo: row.memo }
+    : { planned_date: tomorrow, planned_start: "", planned_end: "", memo: "" };
+  let touched = !!row; // 구분을 직접 바꿨다면 날짜가 바뀌어도 유지
+  openForm({
+    title: row ? "보강 일정 변경" : absence ? "보강 잡기" : "보강 직접 추가",
+    fields,
+    values,
+    submitLabel: "보강 저장",
+    onSubmit: async (d) => {
+      const f = $("#dlg-form");
+      const sid = student ? student.id : d.student_id;
+      if (!sid) throw new Error("학생을 선택하세요.");
+      const s0 = mkMin(d.planned_start), e0 = mkMin(d.planned_end);
+      if (e0 != null && s0 == null) throw new Error("끝 시간만 있어요. 시작 시간도 넣어 주세요.");
+      if (s0 != null && e0 != null && e0 <= s0) throw new Error("끝 시간은 시작 시간보다 뒤여야 해요.");
+      const kind = (f.querySelector('input[name="mk_kind"]:checked') || {}).value || "기본";
+      const payload = {
+        planned_date: d.planned_date, planned_start: d.planned_start || null,
+        planned_end: s0 != null ? (d.planned_end || mkHHMM(s0 + 60)) : null, kind, memo: d.memo,
+      };
+      if (row) await run(db.from("makeups").update(payload).eq("id", row.id));
+      else await run(db.from("makeups").insert({ ...payload, student_id: sid, absent_lesson_id: absence ? absence.id : null, status: "예정" }));
+      await loadMakeups();
+      renderSidebar();
+      if (state.view === "makeup") renderMakeup();
+      toast(row ? "보강 일정을 바꿨어요" : "보강을 잡았어요");
+    },
+  });
+  const form = $("#dlg-form");
+  const sidNow = () => (student ? student.id : (form.elements.student_id || {}).value);
+  // 결석한 수업 요약
+  const infoEl = $("#mkinfo");
+  const updInfo = () => {
+    const s = state.students.find((x) => x.id === sidNow());
+    if (absence) {
+      const cv = coverText(absence) || topicText(absence);
+      infoEl.innerHTML = `<div class="mk-info"><b>${esc(studentName(absence.student_id))}</b> · ${shortDate(absence.lesson_date)} 수업 결석<br><span class="muted">그날 진도</span> ${cv ? `<b>${esc(cv)}</b> <span class="muted">— 보강 기록에 자동으로 들어가요</span>` : `<span class="muted">기록 없음</span>`}</div>`;
+    } else infoEl.innerHTML = `<div class="mk-info muted">${s ? esc(s.name) : "학생"}의 보강을 결석과 상관없이 직접 추가해요. 추가로 하는 보강도 여기서 잡아요.</div>`;
+  };
+  const dateEl = form.elements.planned_date, sEl = form.elements.planned_start, eEl = form.elements.planned_end;
+  const kindEl = $("#mkkind"), warnEl = $("#mkwarn"), freeEl = $("#mkfree");
+  const render = () => {
+    const sid = sidNow();
+    const month = monthOfDate(dateEl.value) || todayStr().slice(0, 7);
+    const q = makeupQuota(sid, month), u = makeupUsed(sid, month, row && row.id);
+    const cur = (form.querySelector('input[name="mk_kind"]:checked') || {}).value || (row ? row.kind : u < q ? "기본" : "추가");
+    const def = !touched ? (u < q ? "기본" : "추가") : cur;
+    kindEl.innerHTML = `<div class="mk-kind"><span class="muted">보강 구분</span><div class="mk-seg" role="radiogroup" aria-label="보강 구분">
+      ${["기본", "추가"].map((k) => `<label><input type="radio" name="mk_kind" value="${k}" ${def === k ? "checked" : ""}><span>${k} 보강</span></label>`).join("")}</div>
+      <div class="muted mk-kind-note">${Number(month.slice(5))}월 기본 보강 ${q}회 중 <b>${u}회</b> 사용 · ${u < q ? "기본으로 기록하는 게 기본이에요." : "기본을 다 썼다면 추가 보강으로 기록돼요."} 횟수를 넘겨도 저장할 수 있어요.</div></div>`;
+    kindEl.querySelectorAll("input").forEach((i) => (i.onchange = () => { touched = true; }));
+    // 시간 겹침과 비어 있는 시간
+    const ds = dateEl.value;
+    if (!ds) { warnEl.innerHTML = ""; freeEl.innerHTML = ""; return; }
+    const wd = parseD(ds).getDay();
+    const busy = [];
+    state.schedule.slots.filter((x) => x.weekday === wd).forEach((x) => {
+      const a = mkMin(hhmm(x.start_time)), b = mkMin(hhmm(x.end_time));
+      if (a == null || b == null) return;
+      const names = state.students.filter((st) => (x.student_ids || []).includes(st.id)).map((st) => st.name);
+      busy.push({ a, b, who: names.join("·") || x.label || "수업" });
+    });
+    mk.rows.filter((x) => x.status === "예정" && x.planned_date === ds && x.planned_start && (!row || x.id !== row.id)).forEach((x) => {
+      const a = mkMin(hhmm(x.planned_start)); const b = x.planned_end ? mkMin(hhmm(x.planned_end)) : a + 60;
+      busy.push({ a, b, who: `${studentName(x.student_id)} 보강` });
+    });
+    const s0 = mkMin(sEl.value); let e0 = mkMin(eEl.value);
+    const dur = s0 != null ? (e0 != null && e0 > s0 ? e0 - s0 : 60) : 60;
+    if (s0 != null && (e0 == null || e0 <= s0)) e0 = s0 + 60;
+    const hit = s0 == null ? [] : busy.filter((x) => s0 < x.b && x.a < e0);
+    warnEl.innerHTML = hit.length ? `<div class="mk-warnbox"><b>${shortDate(ds)} ${mkHHMM(s0)}에는 ${esc([...new Set(hit.map((x) => x.who))].join(", "))} 일정이 있어요.</b><br>아래 비어 있는 시간을 눌러 바꿀 수 있어요. 그대로 저장해도 돼요.</div>` : "";
+    const free = [];
+    for (let t = 13 * 60; t + dur <= 21 * 60 + 30 && free.length < 8; t += 30) if (!busy.some((x) => t < x.b && x.a < t + dur)) free.push(t);
+    freeEl.innerHTML = `<div class="mk-free"><span class="muted">${shortDate(ds)}에 비어 있는 시간 (${dur}분 기준)</span><div class="mk-free-chips">${free.length ? free.map((t) => `<button type="button" class="mk-fc ${s0 === t ? "on" : ""}" data-t="${t}">${mkHHMM(t)}</button>`).join("") : `<span class="muted">비어 있는 시간이 없어요</span>`}</div></div>`;
+    freeEl.querySelectorAll("[data-t]").forEach((b) => (b.onclick = () => {
+      const t = Number(b.dataset.t); sEl.value = mkHHMM(t); eEl.value = mkHHMM(t + dur); render();
+    }));
+  };
+  updInfo();
+  [dateEl, sEl, eEl].forEach((el) => el.addEventListener("change", render));
+  if (form.elements.student_id) form.elements.student_id.addEventListener("change", () => { updInfo(); render(); });
+  render();
+}
+
+function makeupSettings() {
+  const mk = state.makeup;
+  const month = todayStr().slice(0, 7);
+  const active = state.students.filter((s) => s.active);
+  const stuRow = (sid, mo) => mk.quotas.find((x) => x.student_id === sid && (x.month || null) === mo);
+  const gRow = mk.quotas.find((x) => !x.student_id && !x.month);
+  openForm({
+    title: "월 보강 횟수 설정",
+    fields: [
+      { name: "info", type: "slot" },
+      { name: "g", label: "전체 기본 (매달 몇 회)", type: "number", min: 0, max: 20, required: true },
+      ...active.map((s) => ({ name: `q_${s.id}`, label: `${s.name}${s.grade ? " (" + s.grade + ")" : ""} · 이 학생만 다르게 (비우면 전체 기본)`, type: "number", min: 0, max: 20 })),
+      { name: "thisMonth", label: `학생별 횟수는 ${Number(month.slice(5))}월에만 적용 (다음 달은 원래 횟수로 돌아와요)`, type: "checkbox" },
+    ],
+    values: Object.fromEntries([["g", gRow ? gRow.count : MK_DEFAULT_QUOTA], ...active.map((s) => [`q_${s.id}`, (stuRow(s.id, null) || {}).count ?? null])]),
+    onSubmit: async (d) => {
+      const save = async (sid, mo, count) => {
+        const ex = mk.quotas.find((x) => (x.student_id || null) === sid && (x.month || null) === mo);
+        if (count == null) { if (ex) await run(db.from("makeup_quota").delete().eq("id", ex.id)); return; }
+        if (ex) await run(db.from("makeup_quota").update({ count }).eq("id", ex.id));
+        else await run(db.from("makeup_quota").insert({ student_id: sid, month: mo, count }));
+      };
+      if (d.g == null || d.g < 0) throw new Error("전체 기본 횟수를 입력하세요.");
+      await save(null, null, d.g);
+      for (const s of active) await save(s.id, d.thisMonth ? month : null, d[`q_${s.id}`]);
+      await loadMakeups();
+      renderMakeup();
+      toast("저장했습니다");
+    },
+  });
+  $("#info").innerHTML = `<p class="muted" style="margin:0 0 .6rem;font-size:.88rem">횟수를 넘겨도 보강은 잡을 수 있어요. 넘긴 보강은 "추가 보강"으로 표시돼요.</p>`;
+}
+
 /* ---------- 렌더링 ---------- */
 function render() {
   if (state.view !== "overview") state.schedule.draft = null; // 편집 중 다른 화면으로 가면 편집 종료
@@ -243,11 +582,14 @@ function render() {
   else if (state.view === "evals") renderEvals();
   else if (state.view === "recs") renderAllRecs();
   else if (state.view === "kinds") renderKinds();
+  else if (state.view === "makeup") renderMakeup();
   else renderOverview();
 }
 
 function renderSidebar() {
   $("#nav-overview").classList.toggle("active", state.view === "overview");
+  $("#nav-makeup").classList.toggle("active", state.view === "makeup");
+  { const n = $("#nav-makeup-n"); n.textContent = state.makeupNeed; n.hidden = !state.makeupNeed; }
   $("#nav-evals").classList.toggle("active", state.view === "evals");
   $("#nav-recs").classList.toggle("active", state.view === "recs");
   $("#btn-kinds").classList.toggle("active", state.view === "kinds");
@@ -2830,7 +3172,7 @@ async function recDateHasLesson(s, rec) {
   return exists;
 }
 
-function lessonForm(s, lesson, rec = null) {
+function lessonForm(s, lesson, rec = null, preset = null) {
   const assigned = bookProgressFor(s.id).map((x) => x.book);
   const bookOf = (id) => state.textbooks.find((b) => b.id === id);
   const progOf = (id) => state.progress.find((x) => x.student_id === s.id && x.textbook_id === id);
@@ -2861,8 +3203,8 @@ function lessonForm(s, lesson, rec = null) {
     blocks = lessonBooks(lesson).map((b) => ({ textbook_id: b.textbook_id, from_unit: b.from_unit ?? null, to_unit: b.to_unit ?? null, topic: b.topic || "" }));
     if (!blocks.length) blocks = lesson.topic ? [{ textbook_id: "", from_unit: null, to_unit: null, topic: lesson.topic }] : [];
   } else {
-    values = { lesson_date: (rec && rec.target_date) || todayStr(), attendance: "출석" };
-    blocks = defaultBlocks(wdOf(values.lesson_date));
+    values = { lesson_date: (preset && preset.date) || (rec && rec.target_date) || todayStr(), attendance: (preset && preset.attendance) || "출석" };
+    blocks = (preset && preset.blocks) || defaultBlocks(wdOf(values.lesson_date));
     if (rec && rec.textbook_id) blocks = recGroup.map((r) => ({ textbook_id: r.textbook_id, from_unit: r.from_unit ?? null, to_unit: r.to_unit ?? null, topic: "" }));
   }
   let curWd = wdOf(values.lesson_date);
@@ -2922,6 +3264,7 @@ function lessonForm(s, lesson, rec = null) {
         if (/extra_books/i.test((e && e.message) || "")) throw new Error("교재를 여러 개 저장하려면 최신 schema.sql 을 Supabase 에서 먼저 실행하세요.");
         throw e;
       }
+      if (!lesson && newId && data.attendance === "보강") await completeMakeupFor(s.id, newId, data.lesson_date, preset && preset.makeupId);
       if (rec && newId) {
         for (const r of recGroup) {
           const b = withBook.find((x) => x.textbook_id === r.textbook_id);
@@ -3259,6 +3602,12 @@ function bindEvents() {
   $("#nav-overview").onclick = () => {
     state.view = "overview";
     state.studentId = null;
+    render();
+  };
+  $("#nav-makeup").onclick = () => {
+    state.view = "makeup";
+    state.studentId = null;
+    state.makeup.tab = "need";
     render();
   };
   $("#nav-evals").onclick = () => {
