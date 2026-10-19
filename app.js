@@ -592,7 +592,7 @@ function render() {
 function renderSidebar() {
   $("#nav-overview").classList.toggle("active", state.view === "overview");
   $("#nav-makeup").classList.toggle("active", state.view === "makeup");
-  { const n = $("#nav-makeup-n"); n.textContent = state.makeupNeed; n.hidden = !state.makeupNeed; }
+  $("#nav-makeup-n").hidden = !state.makeupNeed; // 숫자 대신 점으로만 표시
   $("#nav-evals").classList.toggle("active", state.view === "evals");
   $("#nav-recs").classList.toggle("active", state.view === "recs");
   $("#btn-kinds").classList.toggle("active", state.view === "kinds");

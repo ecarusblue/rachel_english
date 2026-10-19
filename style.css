@@ -950,3 +950,5 @@ tbody tr.clickable:hover td.go { color: var(--accent); }
   .rc-hr { grid-template-columns: 62px minmax(0, 1fr); }
   .rc-hr span:last-child { grid-column: 2; }
 }
+.nav-dot { width: .6rem; height: .6rem; border-radius: 50%; background: #f4a27a; flex: none; box-shadow: 0 0 0 3px rgba(244, 162, 122, .25); }
+.nav-dot[hidden] { display: none; }
