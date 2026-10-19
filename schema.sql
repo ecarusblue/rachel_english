@@ -102,7 +102,7 @@ create table if not exists public.monthly_evaluations (
   improvement  text check (char_length(improvement) <= 3000),
   next_plan    text check (char_length(next_plan) <= 3000),
   parent_note  text check (char_length(parent_note) <= 3000),
-  status       text not null default '작성중' check (status in ('작성중','AI 초안','완료')),
+  status       text not null default '임시저장' check (status in ('임시저장','작성중','AI 초안','완료')),
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
   unique (student_id, year, month)
@@ -113,8 +113,10 @@ alter table public.monthly_evaluations add column if not exists source   text no
 alter table public.monthly_evaluations add column if not exists ai_model text;
 -- 기존 DB 업그레이드: 상태에 'AI 초안' 추가(이미 있으면 같은 정의로 다시 만들 뿐), 예전 방식으로 저장된 AI 초안도 새 상태로 맞춤
 alter table public.monthly_evaluations drop constraint if exists monthly_evaluations_status_check;
-alter table public.monthly_evaluations add constraint monthly_evaluations_status_check check (status in ('작성중','AI 초안','완료'));
+alter table public.monthly_evaluations add constraint monthly_evaluations_status_check check (status in ('임시저장','작성중','AI 초안','완료'));
 update public.monthly_evaluations set status = 'AI 초안' where source = 'ai' and status = '작성중';
+-- 새 평가서의 기본 상태는 '임시저장' (예약 작업은 '임시저장'·'AI 초안'만 다시 씁니다)
+alter table public.monthly_evaluations alter column status set default '임시저장';
 
 -- 수업 시간표 (요일·타임·시간과 배정 학생을 매주 반복으로 저장)
 create table if not exists public.schedule_slots (
@@ -457,7 +459,7 @@ grant execute on function public.api_submit_recommendations(text, jsonb, text) t
 -- 4. 월말평가서용 API (Claude 예약 작업 전용)
 --    - 읽기: api_read_evaluation_source(토큰, 연, 월) -> 학생 이름 없이 가명으로 그 달의 수업·시험 자료를 돌려줌
 --    - 쓰기: api_submit_evaluations(토큰, 항목들)     -> monthly_evaluations 에 상태 'AI 초안'으로만 저장
---    규칙: 평가서가 없으면 추가, 상태가 'AI 초안'이면 수정, 그 외 상태(작성 중·완료)면 건너뜀. (사용법: docs/evaluation-api.md)
+--    규칙: 평가서가 없으면 추가, 상태가 'AI 초안'·'임시저장'이면 수정(수정되면 상태는 'AI 초안'), 그 외 상태(작성 중·완료)면 건너뜀. (사용법: docs/evaluation-api.md)
 -- ============================================================
 
 -- 학생 실명(전체 이름·이름 부분)을 가명으로 바꿉니다. 선생님 코멘트를 내보내기 전에 사용합니다.
@@ -710,14 +712,14 @@ begin
         insert into public.monthly_evaluations (owner, student_id, year, month, ratings, attitude, achievement, improvement, next_plan, parent_note, status, source, ai_model)
         values (v_owner, v_student, v_year, v_month, v_ratings, v_attitude, v_ach, v_imp, v_next, v_note, 'AI 초안', 'ai', left(coalesce(p_model, 'Claude'), 100));
         v_inserted := v_inserted + 1;
-      elsif v_ex.status = 'AI 초안' then
+      elsif v_ex.status in ('AI 초안', '임시저장') then
         update public.monthly_evaluations
            set ratings = v_ratings, attitude = v_attitude, achievement = v_ach, improvement = v_imp,
-               next_plan = v_next, parent_note = v_note, source = 'ai', ai_model = left(coalesce(p_model, 'Claude'), 100), updated_at = now()
-         where id = v_ex.id and status = 'AI 초안';
+               next_plan = v_next, parent_note = v_note, status = 'AI 초안', source = 'ai', ai_model = left(coalesce(p_model, 'Claude'), 100), updated_at = now()
+         where id = v_ex.id and status in ('AI 초안', '임시저장');
         v_updated := v_updated + 1;
       else
-        v_skipped := v_skipped + 1;   -- 상태가 'AI 초안'이 아닌(작성 중·완료) 평가서는 건드리지 않음
+        v_skipped := v_skipped + 1;   -- 상태가 'AI 초안'·'임시저장'이 아닌(작성 중·완료) 평가서는 건드리지 않음
       end if;
     exception when others then
       v_errors := v_errors || jsonb_build_array(jsonb_build_object('alias', v_item->>'alias', 'error', sqlerrm));

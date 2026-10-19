@@ -1985,7 +1985,7 @@ const EVAL_TEXTS = [
   ["next_plan", "다음 달 학습 계획", "예: Grammar Zone 1 Unit 9~12 진행, 주 1회 쓰기 활동 추가"],
   ["parent_note", "학부모께 드리는 말씀", "가정에서 도와주실 부분이나 전달 사항을 적어 주세요."],
 ];
-const EVAL_STATUS = ["작성중", "AI 초안", "완료"];
+const EVAL_STATUS = ["임시저장", "작성중", "AI 초안", "완료"];
 
 function monthRange(y, m) {
   const pad = (n) => String(n).padStart(2, "0");
@@ -2049,6 +2049,7 @@ function evalSummary(s, d) {
 function evalStatusBadge(row) {
   if (!row) return `<span class="badge warn">미작성</span>`;
   if (row.status === "AI 초안") return `<span class="badge ai" title="Claude가 쓴 초안입니다. 확인한 뒤 상태를 '작성 중'이나 '완료'로 바꿔 저장하세요(AI 초안 상태는 다음 예약 작업이 덮어씁니다)">AI 초안</span>`;
+  if (row.status === "임시저장") return `<span class="badge" title="임시 저장 상태는 다음 예약 작업이 내용을 다시 씁니다. 확정하려면 '작성 중'이나 '완료'로 바꿔 저장하세요">임시 저장</span>`;
   return row.status === "완료" ? `<span class="badge done">완료</span>` : `<span class="badge">작성 중</span>`;
 }
 
@@ -2417,7 +2418,7 @@ function renderEvalDetail(s, d, head, bindHead) {
         </div>
         ${EVAL_TEXTS.map(([k, t, ph]) => `<label class="card eval-text"><h3>${t}</h3><textarea name="${k}" rows="5" maxlength="3000" placeholder="${esc(ph)}">${esc(val(k))}</textarea></label>`).join("")}
         <div class="card eval-actions">
-          <label class="check"><span>상태</span><select name="status">${EVAL_STATUS.map((x) => `<option value="${x}" ${(row ? row.status : "작성중") === x ? "selected" : ""}>${x === "작성중" ? "작성 중" : x}</option>`).join("")}</select></label>
+          <label class="check"><span>상태</span><select name="status">${EVAL_STATUS.map((x) => `<option value="${x}" ${(row ? row.status : "임시저장") === x ? "selected" : ""}>${x === "작성중" ? "작성 중" : x === "임시저장" ? "임시 저장" : x}</option>`).join("")}</select></label>
           <span class="spacer"></span>
           <p id="ev-err" class="error" role="alert"></p>
           <button class="btn" type="button" id="ev-preview">평가서 미리보기</button>
