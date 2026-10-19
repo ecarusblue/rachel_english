@@ -1000,3 +1000,37 @@ tbody tr.clickable:hover td.go { color: var(--accent); }
   .mc-pt { width: 100%; }
   .mc-pr .btn { min-height: 40px; }
 }
+
+/* ---------- 수업 추천(학생별): 휴대폰 전용 학생 전환 + 고르기 시트 (PC는 왼쪽 목록 그대로) ---------- */
+.rc-sw, .rc-sheet, .rc-next { display: none; }
+body.rc-lock { overflow: hidden; }
+@media (max-width: 700px) {
+  .rc-list { display: none; }
+  .rc-sw { display: flex; flex-direction: column; gap: .5rem; }
+  .rc-sw-bar { display: flex; align-items: center; gap: .5rem; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: .45rem; }
+  .rc-step { width: 44px; height: 44px; flex: none; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font: inherit; font-size: 1.3rem; cursor: pointer; }
+  .rc-step:focus-visible { outline: 2px solid var(--accent); }
+  .rc-sw-mid { flex: 1; min-width: 0; text-align: center; line-height: 1.35; }
+  .rc-sw-mid b { font-size: 1.05rem; }
+  .rc-sw-sub { display: block; font-size: .78rem; }
+  .rc-all { width: 100%; min-height: 44px; border-color: var(--accent); color: var(--accent); font-weight: 700; background: var(--surface); }
+  .rc-next { display: inline-flex; flex: 1; min-height: 44px; justify-content: center; background: #0f3d44; color: #fff; border-color: #0f3d44; font-weight: 700; }
+  .rc-foot { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .rc-sheet { position: fixed; inset: 0; z-index: 60; }
+  .rc-sheet:not([hidden]) { display: block; }
+  .rc-back { position: absolute; inset: 0; background: rgba(15, 61, 68, .5); }
+  .rc-panel { position: absolute; left: 0; right: 0; bottom: 0; top: 12vh; background: var(--surface); border-radius: 18px 18px 0 0; box-shadow: 0 -10px 40px rgba(15, 61, 68, .35); padding: .6rem 1rem 0; display: flex; flex-direction: column; gap: .6rem; }
+  .rc-grab { align-self: center; width: 40px; height: 4px; border-radius: 2px; background: var(--border); }
+  .rc-sht { display: flex; align-items: center; justify-content: space-between; }
+  .rc-sht b { font-size: 1.05rem; }
+  .rc-q { width: 100%; min-height: 44px; box-sizing: border-box; }
+  .rc-fl { display: flex; gap: .4rem; }
+  .rc-fl button { border: 1px solid var(--border); background: var(--surface); color: var(--muted); border-radius: 999px; padding: .35rem .9rem; font: inherit; font-size: .85rem; min-height: 36px; cursor: pointer; }
+  .rc-fl button.on { border-color: var(--accent); background: var(--accent-soft); color: #0f3d44; font-weight: 700; }
+  .rc-srs { overflow-y: auto; flex: 1; padding-bottom: 1rem; overscroll-behavior: contain; }
+  .rc-sr { display: flex; align-items: center; gap: .65rem; width: 100%; border: 0; border-top: 1px solid var(--border); background: transparent; font: inherit; color: var(--text); text-align: left; padding: 0 .4rem; min-height: 54px; cursor: pointer; }
+  .rc-sr[hidden] { display: none; }
+  .rc-sr.on { background: var(--accent-soft); border-radius: 10px; }
+  .rc-lw2 { display: block; font-size: .8rem; }
+  .rc-none { padding: 1rem .4rem; }
+}

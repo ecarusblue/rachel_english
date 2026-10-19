@@ -2850,14 +2850,33 @@ function recsByStudentHtml(recs) {
     return `<div class="rc-hr"><span class="muted">${shortDate(l.lesson_date)}</span><span>${esc(coverText(l) || topicText(l) || (l.attendance === "결석" ? "결석" : "-"))}${bits.length ? ` · ${esc(bits.join(" · "))}` : ""}</span><span class="muted">${t ? esc(`${t.kind || "시험"} ${pct != null ? pct + "%" : t.score}`) : ""}</span></div>`;
   }).join("");
   const nextBadge = cur.first ? `<span class="rc-when">다음 수업 ${when(cur.first)}</span>` : "";
+  const idx = rows.findIndex((x) => x.st.id === ui.sid);
+  const sheetRows = rows.map((x) => `<button type="button" class="rc-sr ${x.st.id === ui.sid ? "on" : ""}" data-rcsid="${esc(x.st.id)}" data-pend="${x.pend.length ? 1 : 0}" data-name="${esc(x.st.name)}">
+      <span class="rc-av" aria-hidden="true">${esc(x.st.name.trim().slice(0, 1))}</span>
+      <span class="rc-lt"><b>${esc(x.st.name)}</b> <span class="muted">${esc(x.st.grade || "")}</span><span class="muted rc-lw2">${x.first ? when(x.first) : "처리 완료"}</span></span>
+      ${x.pend.length ? `<span class="nav-badge">${x.pend.length}</span>` : `<span class="rc-ok">완료</span>`}</button>`).join("");
+  const nPend = rows.filter((x) => x.pend.length).length;
+  const mobile = `<div class="rc-sw">
+      <div class="rc-sw-bar"><button type="button" class="rc-step" data-rcstep="-1" aria-label="이전 학생">‹</button>
+        <div class="rc-sw-mid"><b>${esc(cur.st.name)}</b> <span class="muted">${esc(cur.st.grade || "")}</span><span class="muted rc-sw-sub">${idx + 1} / ${rows.length}명${cur.first ? ` · 다음 수업 ${when(cur.first)}` : ""}</span></div>
+        <button type="button" class="rc-step" data-rcstep="1" aria-label="다음 학생">›</button></div>
+      <button type="button" class="btn rc-all" id="rc-all-open" aria-haspopup="dialog">전체 학생 ${rows.length}명 보기 ▾</button></div>
+    <div class="rc-sheet" id="rc-sheet" role="dialog" aria-modal="true" aria-label="학생 고르기" hidden>
+      <div class="rc-back" data-rcclose></div>
+      <div class="rc-panel"><span class="rc-grab" aria-hidden="true"></span>
+        <div class="rc-sht"><b>학생 고르기</b><button type="button" class="btn small" data-rcclose>닫기</button></div>
+        <input type="search" id="rc-q" class="rc-q" placeholder="이름으로 찾기" aria-label="이름으로 찾기" autocomplete="off">
+        <div class="rc-fl" role="group" aria-label="필터"><button type="button" class="on" data-rcf="all">전체 <b>${rows.length}</b></button><button type="button" data-rcf="pend">확인 필요 <b>${nPend}</b></button><button type="button" data-rcf="done">완료 <b>${rows.length - nPend}</b></button></div>
+        <div class="rc-srs">${sheetRows}<div class="muted rc-none" hidden>찾는 학생이 없어요.</div></div></div></div>`;
   return `<div class="rc-wrap">
+    ${mobile}
     <nav class="rc-list" aria-label="학생 선택">${list}<p class="muted rc-hint">숫자는 확인할 추천 수예요. 휴원·퇴원 학생은 보이지 않아요.</p></nav>
     <section class="rc-detail" aria-live="polite">
       <div class="rc-dh"><b class="rc-name">${esc(st.name)}</b><span class="muted">${esc(st.grade || "")}</span>${nextBadge}</div>
       ${dates.length ? dates.map(grp).join("") : `<div class="empty" style="padding:1rem 0">확인할 추천을 모두 처리했어요.</div>`}
       ${decided.length ? `<div class="rc-sub">처리한 추천</div><div class="rc-recs">${decided.map(recCard).join("")}</div>` : ""}
       <div class="rc-sub">최근 수업</div>${hist || `<div class="muted" style="font-size:.88rem">최근 30일 수업 기록이 없어요.</div>`}
-      <div class="rc-foot"><button class="btn small" type="button" id="rc-open-stu">${esc(st.name)} 학생 화면 열기</button></div>
+      <div class="rc-foot"><button class="btn small rc-next" type="button" data-rcstep="1">다음 학생 ›</button><button class="btn small" type="button" id="rc-open-stu">${esc(st.name)} 학생 화면 열기</button></div>
     </section></div>
     <p class="muted" style="font-size:.85rem;margin-top:.8rem">"반영"을 누르면 수업 기록 창이 추천 교재·단원으로 채워져요. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록돼요. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`;
 }
@@ -2905,6 +2924,42 @@ function renderAllRecs() {
       renderAllRecs();
     };
   });
+  const rcRows = [...$("#main").querySelectorAll(".rc-list .rc-li")].map((e) => e.dataset.rcsid);
+  $("#main").querySelectorAll("[data-rcstep]").forEach((b) => {
+    b.onclick = () => {
+      if (!rcRows.length) return;
+      const i = rcRows.indexOf(ui.sid);
+      ui.sid = rcRows[(i + Number(b.dataset.rcstep) + rcRows.length) % rcRows.length];
+      renderAllRecs();
+      window.scrollTo({ top: 0 });
+    };
+  });
+  const sheet = $("#rc-sheet");
+  if (sheet) {
+    const closeSheet = () => { sheet.hidden = true; document.body.classList.remove("rc-lock"); const o = $("#rc-all-open"); if (o) o.focus(); };
+    $("#rc-all-open").onclick = () => { sheet.hidden = false; document.body.classList.add("rc-lock"); $("#rc-q").value = ""; applyRcFilter(); $("#rc-q").focus(); };
+    sheet.querySelectorAll("[data-rcclose]").forEach((e) => (e.onclick = closeSheet));
+    sheet.onkeydown = (e) => { if (e.key === "Escape") closeSheet(); };
+    let rcf = "all";
+    const applyRcFilter = () => {
+      const q = $("#rc-q").value.trim().toLowerCase();
+      let n = 0;
+      sheet.querySelectorAll(".rc-sr").forEach((r) => {
+        const okF = rcf === "all" || (rcf === "pend" ? r.dataset.pend === "1" : r.dataset.pend === "0");
+        const okQ = !q || r.dataset.name.toLowerCase().includes(q);
+        r.hidden = !(okF && okQ);
+        if (!r.hidden) n++;
+      });
+      sheet.querySelector(".rc-none").hidden = n > 0;
+    };
+    $("#rc-q").oninput = applyRcFilter;
+    sheet.querySelectorAll("[data-rcf]").forEach((b) => (b.onclick = () => {
+      rcf = b.dataset.rcf;
+      sheet.querySelectorAll("[data-rcf]").forEach((x) => x.classList.toggle("on", x === b));
+      applyRcFilter();
+    }));
+  }
+  document.body.classList.remove("rc-lock");
   const ob = $("#rc-open-stu");
   if (ob) ob.onclick = () => selectStudent(state.recsUi.sid);
   $("#main").querySelectorAll("[data-rcsid]").forEach((b) => {
