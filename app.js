@@ -453,7 +453,7 @@ function scheduleHtml() {
   const head = `<div class="sch-head"><h3>수업 시간표</h3><span class="muted">매주 반복 · 이름을 누르면 학생 화면으로 이동</span><span class="spacer"></span>${sc.missing ? "" : `${sc.slots.length ? `<button class="btn small" id="sch-print" type="button">시간표 미리보기</button>` : ""}`}</div>`;
   if (sc.missing) return `<section class="sch">${head}<div class="card empty">시간표를 쓰려면 최신 <code>schema.sql</code> 을 Supabase SQL Editor에서 한 번 실행하세요.</div></section>`;
   const days = groupDays(sc.slots);
-  if (!days.length) return `<section class="sch">${head}<div class="card empty">아직 시간표가 없습니다. 왼쪽 아래 <strong>시간표 편집</strong>에서 요일과 타임을 만들어 보세요.</div></section>`;
+  if (!days.length) return `<section class="sch">${head}<div class="sch-empty"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><div><strong>아직 시간표가 없어요</strong><div class="muted">요일과 시간을 만들면 학생 이름이 여기에 시간순으로 나와요.</div></div><button class="btn primary" id="sch-new" type="button">시간표 만들기</button></div></section>`;
   const active = state.students.filter((s) => s.active);
   const today = new Date().getDay();
   const rows = days.map((d) => d.slots.map((sl, i) => {
@@ -541,6 +541,8 @@ function openSchedPreview(returnTo, orient = schedOrient()) {
   });
 }
 function bindSchedule() {
+  const nb = $("#sch-new");
+  if (nb) nb.onclick = () => startScheduleEdit();
   const pb = $("#sch-print");
   if (pb) {
     pb.onclick = () => openSchedPreview(pb);
@@ -717,8 +719,13 @@ function renderOverview() {
     const attended = lessons.filter((l) => l.attendance !== "결석").length;
     const tests = state.recentTests.filter((t) => t.student_id === s.id);
     const avgPct = avg(tests.map((t) => pct(t.score, t.max_score)));
+    // 변화: 최근 30일 평균 - 그 이전(31~90일) 평균. 둘 다 있을 때만 표시
+    const cut = daysAgoStr(30);
+    const curT = tests.filter((t) => t.test_date >= cut).map((t) => pct(t.score, t.max_score));
+    const oldT = tests.filter((t) => t.test_date < cut).map((t) => pct(t.score, t.max_score));
+    const delta = curT.length && oldT.length ? Math.round(avg(curT) - avg(oldT)) : null;
     const books = bookProgressFor(s.id);
-    return { s, last, lessonCount: lessons.length, attended, avgPct, testCount: tests.length, books, lastCovered, nextPlan };
+    return { s, last, lessonCount: lessons.length, attended, avgPct, delta, testCount: tests.length, books, lastCovered, nextPlan };
   });
 
   const stale = rows.filter((r) => !r.last).length;
@@ -731,17 +738,20 @@ function renderOverview() {
       const books = r.books.length
         ? `<div class="mini-books">${r.books
             .map(({ p, book }) => {
-              return `<div class="row"><span>${esc(book.title)}</span><span class="muted">${p.current_unit}/${book.total_units}</span></div>`;
+              const w = book.total_units ? Math.max(0, Math.min(100, Math.round((p.current_unit / book.total_units) * 100))) : 0;
+              return `<div class="row"><span>${esc(book.title)}</span><span class="muted">${p.current_unit}/${book.total_units}</span><div class="bar${w >= 100 ? " done" : ""}" role="img" aria-label="${w}% 진행"><span style="width:${w}%"></span></div></div>`;
             })
             .join("")}</div>`
         : `<span class="muted">배정된 교재 없음</span>`;
+      const dl = r.delta == null || r.delta === 0 ? "" : `<div class="delta ${r.delta > 0 ? "up" : "down"}"><span aria-hidden="true">${r.delta > 0 ? "▲" : "▼"}</span> ${Math.abs(r.delta)}<span class="sr-only">${r.delta > 0 ? " 올랐어요" : " 내렸어요"}</span></div>`;
       return `<tr class="clickable" data-id="${esc(r.s.id)}">
-        <td><strong>${esc(r.s.name)}</strong><div class="muted">${esc(r.s.grade || "")}</div></td>
-        <td>${books}</td>
-        <td>${lastCell}</td>
-        <td>${r.lastCovered && coverText(r.lastCovered) ? esc(coverText(r.lastCovered)) + `<div class="muted">${fmtDate(r.lastCovered.lesson_date)}</div>` : '<span class="muted">-</span>'}${r.nextPlan ? `<div class="next-plan">다음: ${esc(r.nextPlan)}</div>` : ""}</td>
-        <td class="num">${r.lessonCount ? `${r.attended}/${r.lessonCount}회` : "-"}</td>
-        <td class="num">${r.avgPct == null ? "-" : r.avgPct.toFixed(0) + "점"}<div class="muted">${r.testCount ? r.testCount + "회" : ""}</div></td>
+        <td class="c-name"><strong>${esc(r.s.name)}</strong><div class="muted">${esc(r.s.grade || "")}</div></td>
+        <td class="c-books">${books}</td>
+        <td class="c-last" data-l="최근 수업">${lastCell}</td>
+        <td class="c-next" data-l="다음 수업">${r.lastCovered && coverText(r.lastCovered) ? esc(coverText(r.lastCovered)) + `<div class="muted">${fmtDate(r.lastCovered.lesson_date)}</div>` : '<span class="muted">-</span>'}${r.nextPlan ? `<div class="next-plan">다음: ${esc(r.nextPlan)}</div>` : ""}</td>
+        <td class="num c-att" data-l="30일 출석">${r.lessonCount ? `${r.attended}/${r.lessonCount}회` : "-"}</td>
+        <td class="num c-avg" data-l="시험 평균">${r.avgPct == null ? "-" : `<b>${r.avgPct.toFixed(0)}점</b>`}${dl}<div class="muted">${r.testCount ? r.testCount + "회" : ""}</div></td>
+        <td class="go" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></td>
       </tr>`;
     })
     .join("");
@@ -752,12 +762,12 @@ function renderOverview() {
       ${stale ? `<span class="badge warn">30일간 수업 기록이 없는 학생 ${stale}명</span>` : ""}</div>
     ${scheduleHtml()}
     <div class="card table-wrap">
-      <table>
-        <thead><tr><th>학생</th><th>교재 진도</th><th>최근 수업</th><th>수업 진도 · 다음 예정</th><th class="num">30일 출석</th><th class="num">90일 시험 평균</th></tr></thead>
+      <table class="ov-table">
+        <thead><tr><th>학생</th><th>교재 진도</th><th>최근 수업</th><th>수업 진도 · 다음 예정</th><th class="num">30일 출석</th><th class="num">90일 시험 평균</th><th class="go"></th></tr></thead>
         <tbody>${body}</tbody>
       </table>
     </div>
-    <p class="muted" style="margin-top:.8rem;font-size:.85rem">행을 누르면 학생 상세로 이동합니다. 시험 평균은 점수를 100점 만점으로 환산한 값입니다.</p>
+    <p class="muted" style="margin-top:.8rem;font-size:.85rem">행을 누르면 학생 상세로 이동합니다. 시험 평균은 점수를 100점 만점으로 환산한 값이고, ▲▼는 최근 30일 평균이 그 이전(31~90일)보다 얼마나 올랐는지 내렸는지입니다.</p>
     <div class="eval-print" id="sched-print-area"></div>`;
   bindSchedule();
 }
@@ -1635,6 +1645,14 @@ function evalStatusBadge(row) {
   return row.status === "완료" ? `<span class="badge done">완료</span>` : `<span class="badge">작성 중</span>`;
 }
 
+function evalActionCell(row, sm) {
+  if (!row) return sm.r.lessons.length
+    ? `<span class="btn small primary ev-go">작성하기</span>`
+    : `<span class="ev-none">수업 기록 없음</span>`;
+  if (row.status === "완료") return `<span class="badge done ev-ok"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg> 작성 완료</span>`;
+  return evalStatusBadge(row);
+}
+
 function renderEvals() {
   const ev = state.evals;
   const yNow = new Date().getFullYear();
@@ -1681,12 +1699,12 @@ function renderEvals() {
       <td class="num">${sm.attRate == null ? "-" : sm.attRate + "%"}</td>
       <td class="num">${sm.hwRate == null ? "-" : sm.hwRate + "%"}</td>
       <td class="num">${sm.r.testAvg == null ? "-" : sm.r.testAvg.toFixed(0) + "점"}</td>
-      <td>${evalStatusBadge(row)}</td></tr>`;
+      <td class="ev-act">${evalActionCell(row, sm)}</td></tr>`;
   });
   main.innerHTML = head + (students.length
-    ? `<p class="muted" style="margin:.2rem 0 .8rem">${students.length}명 중 ${done}명 완료 · 학생을 누르면 평가서를 작성합니다.</p>
+    ? `<div class="ev-prog"><div class="ev-prog-t"><span>작성 현황</span><strong>${students.length}명 중 ${done}명 완료</strong></div><div class="bar" role="img" aria-label="${Math.round((done / students.length) * 100)}% 완료"><span style="width:${Math.round((done / students.length) * 100)}%"></span></div></div>
       <div class="card table-wrap"><table>
-        <thead><tr><th>학생</th><th class="num">수업</th><th class="num">출석률</th><th class="num">숙제 완료율</th><th class="num">시험 평균</th><th>평가서</th></tr></thead>
+        <thead><tr><th>학생</th><th class="num">수업</th><th class="num">출석률</th><th class="num">숙제 완료율</th><th class="num">시험 평균</th><th class="num">평가서</th></tr></thead>
         <tbody>${rows.join("")}</tbody></table></div>`
     : `<div class="card empty">재원 중인 학생이 없습니다.</div>`);
   bind();
