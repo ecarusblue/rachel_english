@@ -108,7 +108,7 @@ function fieldHtml(f, value) {
   return `<label>${label}${control}</label>`;
 }
 
-function openForm({ title, fields, values = {}, submitLabel = "저장", onSubmit, onDelete, wide = false }) {
+function openForm({ title, fields, values = {}, submitLabel = "저장", onSubmit, onDelete, wide = false, deleteLabel = "삭제", deleteConfirm = "정말 삭제할까요? 되돌릴 수 없습니다." }) {
   const dlg = $("#dlg");
   dlg.classList.toggle("wide", wide);
   const form = $("#dlg-form");
@@ -131,8 +131,9 @@ function openForm({ title, fields, values = {}, submitLabel = "저장", onSubmit
 
   const delBtn = $("#dlg-delete");
   delBtn.hidden = !onDelete;
+  delBtn.textContent = deleteLabel;
   delBtn.onclick = async () => {
-    if (!confirm("정말 삭제할까요? 되돌릴 수 없습니다.")) return;
+    if (!confirm(deleteConfirm)) return;
     try {
       await onDelete();
       dlg.close();
@@ -3524,6 +3525,9 @@ function changeDays(s, p, book) {
   openForm({
     title: `수업 요일 · ${book.title}`,
     fields: [{ name: "cd-days", type: "slot" }],
+    deleteLabel: "배정 해제",
+    deleteConfirm: `'${book.title}' 배정을 해제할까요? 진도 기록이 사라집니다.`,
+    onDelete: async () => { await run(db.from("progress").delete().eq("id", p.id)); await refresh(); toast("배정을 해제했습니다"); },
     onSubmit: async () => {
       try { await run(db.from("progress").update({ weekdays: SCH_ORDER.filter((x) => sel.has(x)) }).eq("id", p.id)); } catch (e) { throw weekdaysErr(e); }
       await refresh();
