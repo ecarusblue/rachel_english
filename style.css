@@ -1093,3 +1093,11 @@ body.rc-lock { overflow: hidden; }
 .bk-done { background: #dff3e6; color: #14532d; border-radius: 10px; padding: .6rem .9rem; line-height: 1.6; font-size: .9rem; }
 @media (prefers-color-scheme: dark) { .bk-done { background: #1d3b2d; color: #bfe9d0; } }
 @media (max-width: 640px) { .bk-grid { grid-template-columns: 1fr; } .bk-row .btn.primary { width: 100%; min-height: 44px; } }
+
+/* 교재 카드 버튼: 휴대폰에서는 3열로 가지런히 */
+@media (max-width: 640px) {
+  .book-actions { display: grid; grid-template-columns: repeat(6, 1fr); gap: .45rem; margin-top: .8rem; }
+  .book-actions .btn { grid-column: span 2; width: 100%; padding-left: .3em; padding-right: .3em; white-space: nowrap; font-size: .92rem; }
+  .book-actions .btn:nth-child(4), .book-actions .btn:nth-child(5) { grid-column: span 3; }
+  .book-actions .btn.danger { grid-column: 1 / -1; min-height: 38px; font-size: .85rem; border-style: dashed; }
+}
