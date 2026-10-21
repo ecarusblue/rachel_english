@@ -1080,3 +1080,5 @@ body.rc-lock { overflow: hidden; }
 .tb-empty { padding: 1.6rem 0; text-align: center; color: var(--muted); line-height: 1.8; }
 .linklike { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--accent); cursor: pointer; text-decoration: underline; }
 @media (prefers-color-scheme: dark) { #tb-list mark { background: #5a4a14; color: #fff3c4; } }
+.kd-list mark { background: #fde7a8; color: inherit; border-radius: 3px; padding: 0 1px; }
+@media (prefers-color-scheme: dark) { .kd-list mark { background: #5a4a14; color: #fff3c4; } }

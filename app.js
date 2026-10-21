@@ -3787,25 +3787,38 @@ async function loadKindCounts() {
 }
 function renderKinds() {
   const main = $("#main");
-  const list = kindList();
+  const all = kindList();
+  const kq = (state.kinds.q || "").trim().toLowerCase();
+  const list = kq ? all.filter((k) => k.name.toLowerCase().includes(kq) || (k.memo || "").toLowerCase().includes(kq)) : all;
+  const hlk = (t) => {
+    const i = kq ? t.toLowerCase().indexOf(kq) : -1;
+    return i < 0 ? esc(t) : `${esc(t.slice(0, i))}<mark>${esc(t.slice(i, i + kq.length))}</mark>${esc(t.slice(i + kq.length))}`;
+  };
   const dot = (k) => `<span class="kd-dot${!k.color ? ` k${kindIndex(k.name)}` : ""}"${k.color ? ` style="background:${esc(k.color)}"` : ""}></span>`;
   const rows = list.map((k) => {
     const n = state.kinds.counts[k.name] || 0;
     const key = k.builtin ? `data-kbuiltin="${esc(k.name)}"` : `data-kedit="${esc(k.id)}"`;
-    return `<div class="card kd-row${k.builtin ? "" : " mine"}">${dot(k)}<strong class="kd-name">${esc(k.name)}</strong>
-      <span class="muted">기본 만점 ${k.max}${esc(k.unit)} · 기록 ${n}건${k.memo ? ` · ${esc(k.memo)}` : ""}</span><span class="spacer"></span>
+    return `<div class="card kd-row${k.builtin ? "" : " mine"}">${dot(k)}<strong class="kd-name">${hlk(k.name)}</strong>
+      <span class="muted">기본 만점 ${k.max}${esc(k.unit)} · 기록 ${n}건${k.memo ? ` · ${hlk(k.memo)}` : ""}</span><span class="spacer"></span>
       ${k.builtin ? `<span class="muted kd-tag">기본 종류</span>` : ""}
       <button class="btn small" type="button" ${key} ${state.kinds.missing ? "disabled" : ""}>수정</button>
       ${k.builtin ? (k.over ? `<button class="btn small" type="button" data-kreset="${esc(k.id)}">처음 설정으로</button>` : "")
-        : `<button class="btn small danger" type="button" data-kdel="${esc(k.id)}" ${n ? `disabled title="기록이 있어 삭제할 수 없어요"` : list.length < 2 ? `disabled title="종류가 하나는 있어야 해요"` : ""}>삭제</button>`}</div>`;
+        : `<button class="btn small danger" type="button" data-kdel="${esc(k.id)}" ${n ? `disabled title="기록이 있어 삭제할 수 없어요"` : all.length < 2 ? `disabled title="종류가 하나는 있어야 해요"` : ""}>삭제</button>`}</div>`;
   }).join("");
   main.innerHTML = `
     <div class="page-head"><h2>시험 종류</h2><span class="muted">[+ 시험 점수]의 '종류'에 나오는 목록입니다. 모든 학생이 함께 씁니다.</span><span class="spacer"></span>
       <button class="btn primary" type="button" id="kd-add" ${state.kinds.missing ? "disabled" : ""}>+ 종류 추가</button></div>
     ${state.kinds.missing ? `<div class="card empty">시험 종류 저장소(test_kinds 테이블)가 아직 없어요. schema.sql의 '시험 종류' 부분을 Supabase에서 한 번 실행해 주세요.</div>` : ""}
-    <div class="kd-list">${rows}</div>
+    ${all.length ? `<div class="tb-search"><input type="search" id="kd-q" placeholder="종류 이름 검색" autocomplete="off" aria-label="시험 종류 검색" value="${esc(state.kinds.q || "")}"><span class="muted">${kq ? `${list.length}/${all.length}개` : `전체 ${all.length}개`}</span></div>` : ""}
+    <div class="kd-list">${rows || (kq ? `<div class="tb-empty">"${esc(state.kinds.q.trim())}"에 해당하는 종류가 없어요.<br><button type="button" class="linklike" id="kd-add-q">"${esc(state.kinds.q.trim())}" 종류 추가</button></div>` : "")}</div>
     <p class="muted" style="font-size:.85rem">단위(점·개 등)는 종류마다 정하고, 그래프는 항상 백분율(%)로 보여줍니다. 이름·색·단위·만점은 모두 고칠 수 있고, 기록이 없는 종류는 삭제할 수 있어요. 이름을 바꾸면 기존 기록의 종류도 함께 바뀝니다.</p>`;
   $("#kd-add").onclick = () => kindForm(null);
+  const kqi = $("#kd-q");
+  if (kqi) {
+    kqi.oninput = () => { state.kinds.q = kqi.value; const pos = kqi.selectionStart; renderKinds(); const n = $("#kd-q"); if (n) { n.focus(); n.setSelectionRange(pos, pos); } };
+  }
+  const kaq = $("#kd-add-q");
+  if (kaq) kaq.onclick = () => { const t = state.kinds.q.trim(); state.kinds.q = ""; kindForm(null, undefined, t); };
   main.querySelectorAll("[data-kedit]").forEach((b) => (b.onclick = () => kindForm(state.kinds.rows.find((k) => k.id === b.dataset.kedit))));
   main.querySelectorAll("[data-kbuiltin]").forEach((b) => (b.onclick = () => {
     const name = b.dataset.kbuiltin;
@@ -3834,7 +3847,7 @@ function renderKinds() {
   }));
 }
 /* k: 저장된 행(없으면 null), bn: 기본 종류 이름(기본 종류를 처음 수정할 때) */
-function kindForm(k, bn) {
+function kindForm(k, bn, presetName) {
   const builtin = !!bn;
   const cur = (k && k.color) || KIND_COLORS[0];
   const UNITS = ["점", "개", "문항", "%"];
@@ -3848,7 +3861,7 @@ function kindForm(k, bn) {
       ...(builtin ? [] : [{ name: "kcolor", type: "slot" }]),
       { name: "memo", label: "메모 (선택)", maxlength: 100 },
     ],
-    values: { name: bn || (k && k.name) || "", default_max: k ? k.default_max : 100, unit: (k && k.unit) || "점", memo: k && k.memo },
+    values: { name: bn || (k && k.name) || presetName || "", default_max: k ? k.default_max : 100, unit: (k && k.unit) || "점", memo: k && k.memo },
     onSubmit: async (d) => {
       const name = builtin ? bn : (d.name || "").trim();
       if (!builtin && kindList().some((x) => x.name === name && (!k || x.id !== k.id))) throw new Error("같은 이름의 종류가 이미 있어요.");
