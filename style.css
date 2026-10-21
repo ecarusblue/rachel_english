@@ -1070,3 +1070,4 @@ body.rc-lock { overflow: hidden; }
 .chip-row .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
 .warn-note { background: #fff4e0; color: #6f3b06; border-radius: 8px; padding: .4rem .7rem; font-size: .85rem; margin: 0 0 .6rem; }
 @media (prefers-color-scheme: dark) { .warn-note { background: #3a2c14; color: #f3d9a8; } }
+.side-count { font-weight: 400; opacity: .75; margin-left: .25em; }

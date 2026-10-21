@@ -659,6 +659,9 @@ function renderSidebar() {
   $("#nav-recs").classList.toggle("active", state.view === "recs");
   $("#btn-kinds").classList.toggle("active", state.view === "kinds");
   const list = state.students.filter((s) => s.active || state.showInactive);
+  const nAct = state.students.filter((s) => s.active).length;
+  const cnt = $("#student-count");
+  if (cnt) { cnt.textContent = `${list.length}명`; cnt.title = state.showInactive ? `재원 ${nAct}명 · 퇴원/휴원 ${state.students.length - nAct}명` : "재원생"; }
   $("#student-list").innerHTML = list.length
     ? list
         .map(
