@@ -647,6 +647,7 @@ function render() {
   else if (state.view === "evals") renderEvals();
   else if (state.view === "recs") renderAllRecs();
   else if (state.view === "kinds") renderKinds();
+  else if (state.view === "backup") renderBackup();
   else if (state.view === "makeup") renderMakeup();
   else renderOverview();
 }
@@ -658,6 +659,7 @@ function renderSidebar() {
   $("#nav-evals").classList.toggle("active", state.view === "evals");
   $("#nav-recs").classList.toggle("active", state.view === "recs");
   $("#btn-kinds").classList.toggle("active", state.view === "kinds");
+  $("#btn-backup").classList.toggle("active", state.view === "backup");
   const list = state.students.filter((s) => s.active || state.showInactive);
   const nAct = state.students.filter((s) => s.active).length;
   const cnt = $("#student-count");
@@ -3778,6 +3780,96 @@ function lessonForm(s, lesson, rec = null, preset = null) {
   paint();
 }
 
+/* ---------- 데이터 백업 (엑셀 한 파일, 파일 이름에 받은 시각) ---------- */
+const BACKUP_TABLES = [
+  ["students", "학생"], ["textbooks", "교재"], ["progress", "교재 진도"], ["lessons", "수업 기록"], ["tests", "시험 점수"],
+  ["recommendations", "수업 추천"], ["makeups", "결석·보강"], ["makeup_quota", "보강 기준"], ["monthly_evaluations", "월말 평가서"],
+  ["schedule_slots", "시간표"], ["test_kinds", "시험 종류"], ["report_logs", "안내문 발송 기록"],
+];
+async function fetchAllRows(table) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    const rows = await run(db.from(table).select("*").order("id").range(from, from + 999));
+    out.push(...rows);
+    if (rows.length < 1000) break;
+  }
+  return out;
+}
+function backupName() {
+  const d = new Date(), p = (n) => String(n).padStart(2, "0");
+  return `rachel-backup-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.xlsx`;
+}
+function renderBackup() {
+  const main = $("#main");
+  main.innerHTML = `
+    <div class="page-head"><h2>데이터 백업</h2><span class="muted">학생·수업·시험 기록 전체를 엑셀 파일 하나로 내려받아 보관해요</span></div>
+    <div class="card bk-card"><strong>들어가는 내용</strong> <span class="muted">지금 저장된 전체</span>
+      <div class="bk-grid" id="bk-grid">${BACKUP_TABLES.map(([t, n]) => `<div data-bk="${t}"><span>${esc(n)}</span><span class="muted">…</span></div>`).join("")}</div></div>
+    <div class="card bk-card" id="bk-act">
+      <div class="bk-row"><button class="btn primary" type="button" id="bk-go">지금 백업 받기</button><span class="muted">내 기기의 다운로드 폴더에 저장돼요</span></div></div>
+    <p class="muted" style="font-size:.85rem;line-height:1.6;margin:.2rem 0">파일 이름에 받은 날짜와 시각이 들어가서, 언제 받은 백업인지 이름만 보고 알 수 있어요. 학생 정보가 들어 있으니 USB나 구글 드라이브처럼 안전한 곳에 한 부 더 보관하고, 한 달에 한 번쯤 받아 두는 걸 권해요. 이 파일로 앱에 다시 불러오는 기능은 아직 없고, 기록을 확인하거나 문제가 생겼을 때 참고하는 용도예요.</p>`;
+  // 건수는 가볍게 따로 세서 보여줌 (실패해도 백업에는 영향 없음)
+  BACKUP_TABLES.forEach(async ([t]) => {
+    let txt = "—";
+    try { txt = `${(await run(db.from(t).select("id"))).length}건`; } catch { /* 표가 없는 DB */ }
+    if (state.view !== "backup") return;
+    const el = main.querySelector(`[data-bk="${t}"] .muted`);
+    if (el) el.textContent = txt;
+  });
+  $("#bk-go").onclick = runBackup;
+}
+async function runBackup() {
+  const act = $("#bk-act");
+  const prog = (n, label) => { act.innerHTML = `<div class="bk-prog"><div class="bk-row"><b>${esc(label)} 내려받는 중…</b><span class="spacer"></span><span class="muted">${n} / ${BACKUP_TABLES.length}</span></div><div class="bk-bar"><i style="width:${Math.round((n / BACKUP_TABLES.length) * 100)}%"></i></div><div class="muted" style="font-size:.85rem">창을 닫지 말고 잠시 기다려 주세요.</div></div>`; };
+  try {
+    prog(0, "준비");
+    const X = await loadXlsx();
+    const data = {}, skipped = [];
+    for (let i = 0; i < BACKUP_TABLES.length; i++) {
+      const [t, label] = BACKUP_TABLES[i];
+      prog(i, label);
+      try { data[t] = await fetchAllRows(t); } catch { data[t] = null; skipped.push(label); }
+    }
+    const sName = new Map((data.students || []).map((s) => [s.id, s.name]));
+    const bName = new Map((data.textbooks || []).map((b) => [b.id, b.title]));
+    const cell = (v) => (v == null ? "" : typeof v === "object" ? JSON.stringify(v) : v);
+    const wb = new X.Workbook();
+    const info = wb.addWorksheet("안내");
+    const now = new Date();
+    info.addRow(["Rachel English 데이터 백업"]).font = { bold: true, size: 14 };
+    info.addRow(["받은 시각", `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`]);
+    info.addRow(["안내", "표마다 시트가 나뉘어 있어요. 열 이름은 저장소의 이름 그대로이고, 학생·교재 열은 이름을 함께 적었어요."]);
+    info.addRow([]);
+    BACKUP_TABLES.forEach(([t, label]) => info.addRow([label, data[t] ? `${data[t].length}건` : "받지 못함"]));
+    info.getColumn(1).width = 22; info.getColumn(2).width = 90;
+    BACKUP_TABLES.forEach(([t, label]) => {
+      const rows = data[t];
+      if (!rows) return;
+      const keys = [...new Set(rows.flatMap((r) => Object.keys(r)))].filter((k) => k !== "owner");
+      const extra = [];
+      if (keys.includes("student_id")) extra.push("학생");
+      if (keys.includes("textbook_id")) extra.push("교재");
+      const ws = wb.addWorksheet(label.slice(0, 31));
+      ws.addRow([...extra, ...keys]).font = { bold: true };
+      rows.forEach((r) => ws.addRow([...extra.map((e) => (e === "학생" ? sName.get(r.student_id) || "" : bName.get(r.textbook_id) || "")), ...keys.map((k) => cell(r[k]))]));
+      ws.views = [{ state: "frozen", ySplit: 1 }];
+      [...extra, ...keys].forEach((_, i) => { ws.getColumn(i + 1).width = 16; });
+    });
+    prog(BACKUP_TABLES.length, "파일 만드는");
+    const buf = await wb.xlsx.writeBuffer();
+    const name = backupName();
+    saveBlob(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), name);
+    const n = (t) => (data[t] ? data[t].length : 0);
+    act.innerHTML = `<div class="bk-done"><b>${esc(name)}</b> 파일을 저장했어요. 학생 ${n("students")}명 · 수업 기록 ${n("lessons")}건 · 시험 점수 ${n("tests")}건이 들어 있어요. 이 파일은 USB나 구글 드라이브 같은 다른 곳에도 한 부 두세요.${skipped.length ? `<br>받지 못한 항목: ${esc(skipped.join(", "))}` : ""}</div>
+      <div class="bk-row" style="margin-top:.7rem"><button class="btn" type="button" id="bk-go">한 번 더 받기</button></div>`;
+    $("#bk-go").onclick = runBackup;
+  } catch (e) {
+    act.innerHTML = `<div class="bk-row"><button class="btn primary" type="button" id="bk-go">지금 백업 받기</button></div>`;
+    $("#bk-go").onclick = runBackup;
+    fail(e, "백업 실패");
+  }
+}
+
 /* ---------- 시험 종류 관리 (공통) ---------- */
 async function loadKindCounts() {
   const rows = await run(db.from("tests").select("kind").limit(20000));
@@ -3990,7 +4082,7 @@ function bindEvents() {
   };
   $("#btn-menu").onclick = () => setMenu(!appEl.classList.contains("menu-open"));
   $("#sidebar").addEventListener("click", (e) => {
-    if (e.target.closest(".nav-btn, button[data-id], #btn-textbooks, #btn-sched-edit, #btn-kinds")) setMenu(false);
+    if (e.target.closest(".nav-btn, button[data-id], #btn-textbooks, #btn-sched-edit, #btn-kinds, #btn-backup")) setMenu(false);
   });
   document.addEventListener("click", (e) => {
     if (appEl.classList.contains("menu-open") && !e.target.closest("#sidebar, #btn-menu")) setMenu(false);
@@ -4041,6 +4133,11 @@ function bindEvents() {
     state.view = "kinds";
     state.studentId = null;
     try { await loadKindCounts(); } catch (e) { return fail(e); }
+    render();
+  };
+  $("#btn-backup").onclick = () => {
+    state.view = "backup";
+    state.studentId = null;
     render();
   };
   const SIDE_KEY = "rachel_side_off";

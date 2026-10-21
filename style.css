@@ -1082,3 +1082,14 @@ body.rc-lock { overflow: hidden; }
 @media (prefers-color-scheme: dark) { #tb-list mark { background: #5a4a14; color: #fff3c4; } }
 .kd-list mark { background: #fde7a8; color: inherit; border-radius: 3px; padding: 0 1px; }
 @media (prefers-color-scheme: dark) { .kd-list mark { background: #5a4a14; color: #fff3c4; } }
+
+/* 데이터 백업 */
+.bk-card { margin-bottom: .8rem; max-width: 820px; }
+.bk-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 1.8rem; margin-top: .5rem; }
+.bk-grid > div { display: flex; justify-content: space-between; padding: .4rem 0; border-bottom: 1px solid var(--border); font-size: .9rem; }
+.bk-row { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
+.bk-bar { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; margin: .5rem 0; }
+.bk-bar i { display: block; height: 100%; background: var(--accent); transition: width .2s; }
+.bk-done { background: #dff3e6; color: #14532d; border-radius: 10px; padding: .6rem .9rem; line-height: 1.6; font-size: .9rem; }
+@media (prefers-color-scheme: dark) { .bk-done { background: #1d3b2d; color: #bfe9d0; } }
+@media (max-width: 640px) { .bk-grid { grid-template-columns: 1fr; } .bk-row .btn.primary { width: 100%; min-height: 44px; } }
