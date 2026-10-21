@@ -3213,20 +3213,34 @@ function manageTextbooks() {
   $("#dlg-cancel").textContent = "닫기";
   $("#dlg-cancel").onclick = () => dlg.close();
   $("#dlg-form").onsubmit = (e) => e.preventDefault();
+  let q = "";
+  const usage = (id) => new Set(state.progress.filter((p) => p.textbook_id === id && (state.students.find((x) => x.id === p.student_id) || {}).active).map((p) => p.student_id)).size;
+  const hl = (t) => {
+    const i = q ? t.toLowerCase().indexOf(q.toLowerCase()) : -1;
+    return i < 0 ? esc(t) : `${esc(t.slice(0, i))}<mark>${esc(t.slice(i, i + q.length))}</mark>${esc(t.slice(i + q.length))}`;
+  };
+  const listHtml = () => {
+    const all = state.textbooks;
+    const found = q ? all.filter((b) => b.title.toLowerCase().includes(q.toLowerCase())) : all;
+    const cnt = $("#tb-count");
+    if (cnt) cnt.textContent = q ? `${found.length}/${all.length}권` : `전체 ${all.length}권`;
+    if (!all.length) return `<p class="muted">등록된 교재가 없습니다.</p>`;
+    if (!found.length) return `<div class="tb-empty">"${esc(q)}"에 해당하는 교재가 없어요.<br><button type="button" class="linklike" id="tb-add-q">"${esc(q)}" 교재 추가</button></div>`;
+    return `<ul style="list-style:none;margin:0;padding:0">${found.map((b) => {
+      const u = usage(b.id);
+      return `<li style="display:flex;gap:.5rem;align-items:center;padding:.45rem 0;border-bottom:1px solid var(--border)">
+        <span style="flex:1"><strong>${hl(b.title)}</strong> <span class="muted">${bookLeaves(b) ? `${b.structure.items.length}개 항목 · ${b.total_units}단원` : `${b.total_units} ${esc(b.unit_label)}`}${u ? ` · ${u}명 사용` : ""}</span></span>
+        <button type="button" class="btn small" data-edit="${esc(b.id)}">수정</button></li>`;
+    }).join("")}</ul>`;
+  };
   const paint = () => {
     $("#dlg-body").innerHTML = `
       <div class="toolbar"><button type="button" class="btn primary small" id="tb-add">+ 교재 추가</button></div>
-      ${
-        state.textbooks.length
-          ? `<ul style="list-style:none;margin:0;padding:0">${state.textbooks
-              .map(
-                (b) => `<li style="display:flex;gap:.5rem;align-items:center;padding:.45rem 0;border-bottom:1px solid var(--border)">
-                  <span style="flex:1"><strong>${esc(b.title)}</strong> <span class="muted">${bookLeaves(b) ? `${b.structure.items.length}개 항목 · ${b.total_units}단원` : `${b.total_units} ${esc(b.unit_label)}`}</span></span>
-                  <button type="button" class="btn small" data-edit="${esc(b.id)}">수정</button></li>`
-              )
-              .join("")}</ul>`
-          : `<p class="muted">등록된 교재가 없습니다.</p>`
-      }`;
+      ${state.textbooks.length ? `<div class="tb-search"><input type="search" id="tb-q" placeholder="교재 이름 검색" autocomplete="off" aria-label="교재 검색" value="${esc(q)}"><span id="tb-count" class="muted"></span></div>` : ""}
+      <div id="tb-list">${listHtml()}</div>`;
+    $("#tb-list").innerHTML = listHtml(); // 개수 표시 갱신
+    const qi = $("#tb-q");
+    if (qi) qi.oninput = () => { q = qi.value.trim(); $("#tb-list").innerHTML = listHtml(); };
   };
   paint();
   const restore = () => {
@@ -3240,6 +3254,11 @@ function manageTextbooks() {
       dlg.close();
       editTextbook(null);
     }
+    if (e.target.id === "tb-add-q") {
+      const t = q;
+      dlg.close();
+      editTextbook(null, t);
+    }
     const id = e.target.dataset?.edit;
     if (id) {
       dlg.close();
@@ -3249,7 +3268,7 @@ function manageTextbooks() {
   dlg.showModal();
 }
 
-function editTextbook(book) {
+function editTextbook(book, presetTitle) {
   const wasTree = !!bookLeaves(book);
   // 항목 편집용 작업본 (표시 중인 입력값과 항상 같게 유지)
   let rows = wasTree ? book.structure.items.map((it) => ({ name: it.name, children: (it.children || []).map((c) => String(c)) })) : [{ name: "Unit 1", children: [] }];
@@ -3267,7 +3286,7 @@ function editTextbook(book) {
       { name: "unit_label", label: "단위 이름 (Unit, Lesson 등)", half: true, maxlength: 20 },
       { name: "outline", label: "텍스트로 편집 (한 줄에 항목 하나, 앞에 공백을 넣으면 위 항목의 하위)", type: "textarea", rows: 10, maxlength: 12000 },
     ],
-    values: book ? { ...book, mode: wasTree ? "tree" : "flat", outline: "" } : { total_units: 20, unit_label: "Unit", mode: "flat", outline: "" },
+    values: book ? { ...book, mode: wasTree ? "tree" : "flat", outline: "" } : { title: presetTitle || "", total_units: 20, unit_label: "Unit", mode: "flat", outline: "" },
     onSubmit: async (d) => {
       const out = { title: d.title };
       if (d.mode === "tree") {

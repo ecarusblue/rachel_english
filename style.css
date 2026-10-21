@@ -1071,3 +1071,12 @@ body.rc-lock { overflow: hidden; }
 .warn-note { background: #fff4e0; color: #6f3b06; border-radius: 8px; padding: .4rem .7rem; font-size: .85rem; margin: 0 0 .6rem; }
 @media (prefers-color-scheme: dark) { .warn-note { background: #3a2c14; color: #f3d9a8; } }
 .side-count { font-weight: 400; opacity: .75; margin-left: .25em; }
+
+/* 교재 관리 검색 */
+.tb-search { display: flex; align-items: center; gap: .6rem; margin: 0 0 .6rem; }
+.tb-search input { flex: 1; min-width: 0; }
+.tb-search span { white-space: nowrap; font-size: .85rem; }
+#tb-list mark { background: #fde7a8; color: inherit; border-radius: 3px; padding: 0 1px; }
+.tb-empty { padding: 1.6rem 0; text-align: center; color: var(--muted); line-height: 1.8; }
+.linklike { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--accent); cursor: pointer; text-decoration: underline; }
+@media (prefers-color-scheme: dark) { #tb-list mark { background: #5a4a14; color: #fff3c4; } }
