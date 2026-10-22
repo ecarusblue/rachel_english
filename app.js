@@ -16,7 +16,7 @@ const state = {
   recFilter: { range: "thisWeek", start: "", end: "" },
   lessonFilter: { range: "thisWeek", start: "", end: "" },
   testFilter: { range: "thisWeek", start: "", end: "" },
-  wrFilter: { range: "all", start: "", end: "" },   // 라이팅 첨삭 목록 기간 (글이 드물어 기본은 전체)
+  wrFilter: { range: "thisWeek", start: "", end: "" },   // 라이팅 첨삭 목록 기간
   allRecs: [],
   evals: { year: new Date().getFullYear(), month: new Date().getMonth() + 1, studentId: null, data: null, loading: false, failed: false, key: "" },
   studentId: null,
