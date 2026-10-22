@@ -230,6 +230,11 @@ async function loadDetail(studentId) {
 }
 
 async function refresh() {
+  // 저장은 이미 끝난 뒤에 부르는 함수라, 화면을 다시 그리다 실패해도 저장 창이 열린 채 남지 않게 안내만 합니다.
+  try { await refreshInner(); }
+  catch (e) { console.error(e); toast(`저장은 됐지만 화면을 새로 불러오지 못했어요 (${(e && e.message) || e}). 새로고침해 주세요.`); }
+}
+async function refreshInner() {
   await loadCore();
   if (state.view === "recs") { try { await loadAllRecs(); } catch { /* 이전 목록 유지 */ } }
   if (state.view === "student" && state.studentId) {
@@ -661,7 +666,7 @@ function renderSidebar() {
   $("#nav-evals").classList.toggle("active", state.view === "evals");
   $("#nav-recs").classList.toggle("active", state.view === "recs");
   $("#btn-kinds").classList.toggle("active", state.view === "kinds");
-  $("#btn-backup").classList.toggle("active", state.view === "backup");
+  const bkb = $("#btn-backup"); if (bkb) bkb.classList.toggle("active", state.view === "backup");
   const list = state.students.filter((s) => s.active || state.showInactive);
   const nAct = state.students.filter((s) => s.active).length;
   const cnt = $("#student-count");
@@ -4521,7 +4526,7 @@ function bindEvents() {
     try { await loadKindCounts(); } catch (e) { return fail(e); }
     render();
   };
-  $("#btn-backup").onclick = () => {
+  if ($("#btn-backup")) $("#btn-backup").onclick = () => {
     state.view = "backup";
     state.studentId = null;
     render();
