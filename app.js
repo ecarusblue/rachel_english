@@ -4212,7 +4212,7 @@ function renderWritingTab(s) {
   if (open) return renderWritingDetail(s, open);
   w.openId = null;
   body.innerHTML = `
-    <div class="toolbar"><button class="btn primary" type="button" id="btn-add-writing">+ 라이팅 첨삭</button><button class="btn" type="button" id="btn-wr-reload">새로고침</button><span class="muted">Claude Code 에서 첨삭한 글은 새로고침하면 나타나요</span></div>
+    <div class="toolbar"><button class="btn" type="button" id="btn-wr-reload">새로고침</button><span class="muted">Claude Code 에서 첨삭한 글은 새로고침하면 나타나요</span></div>
     ${w.rows.length
       ? `<div class="wr-list">${w.rows
           .map((r) => {
@@ -4224,9 +4224,7 @@ function renderWritingTab(s) {
               <span class="wr-meta">${a == null ? "" : `<span class="badge">평균 ${a.toFixed(1)}/5</span>`}${Array.isArray(r.result?.sentences) ? `<span class="badge ${n ? "warn" : "done"}">${n ? `고친 곳 ${n}` : "고칠 곳 없음"}</span>` : `<span class="badge warn">첨삭 대기</span>`}</span></button>`;
           })
           .join("")}</div>`
-      : `<div class="card empty">아직 첨삭한 글이 없습니다. 위의 '+ 라이팅 첨삭'으로 학생이 쓴 글의 사진을 올려 보세요.</div>`}
-    <p class="muted wr-priv">올린 사진·글은 첨삭을 위해 Anthropic(Claude)으로 전송돼요. 이름·학교·연락처가 사진에 나오지 않게 해 주세요.</p>`;
-  $("#btn-add-writing").onclick = () => writingForm(s);
+      : `<div class="card empty">아직 첨삭한 글이 없습니다. Claude Code 에서 '${esc(s.name)} 영어 라이팅 첨삭해줘' 라고 하면 여기에 나타나요.</div>`}`;
   $("#btn-wr-reload").onclick = () => { w.sid = null; renderWritingTab(s); };
   body.onclick = (e) => {
     const b = e.target.closest("[data-wr-open]");
@@ -4383,12 +4381,11 @@ function renderWritingDetail(s, w) {
   body.onclick = null;
   body.innerHTML = `
     <div class="toolbar"><button class="btn" type="button" id="wr-back">← 목록</button><strong>${fmtDate(w.written_on)}</strong><span>${esc(w.title || "")}</span><span class="spacer"></span>
-      <button class="btn" type="button" id="wr-redo">원문 고쳐서 다시 첨삭</button>
       <button class="btn primary" type="button" id="wr-print" ${pending ? "hidden" : ""}>인쇄 / PDF</button>
       <button class="btn danger" type="button" id="wr-del">삭제</button></div>
     ${pending ? `<div class="wr-warn"><strong>첨삭 대기 중</strong> — 원문만 저장돼 있어요. Claude 세션에서 '첨삭해줘' 라고 하면 결과가 여기에 나타나요.</div><div class="card"><h3>저장된 원문</h3><pre class="wr-pre">${esc(w.ocr_text || "")}</pre></div>` : `
     <div class="ai-note"><strong>AI 첨삭</strong> — Claude 가 만든 첨삭이에요${w.ai_model ? ` (${esc(w.ai_model)})` : ""}. 학부모께 보내기 전에 선생님이 한 번 확인해 주세요.</div>
-    ${r.unreadable?.length ? `<div class="wr-warn"><strong>잘 안 보여서 짐작해서 읽은 곳</strong><ul>${r.unreadable.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>원문이 다르게 읽혔다면 '원문 고쳐서 다시 첨삭'을 눌러 주세요.</div>` : ""}
+    ${r.unreadable?.length ? `<div class="wr-warn"><strong>잘 안 보여서 짐작해서 읽은 곳</strong><ul>${r.unreadable.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>원문이 다르게 읽혔다면 Claude Code 에서 고쳐서 다시 첨삭해 달라고 하세요.</div>` : ""}
     <div class="grid">
       <div class="card"><h3>영역별 평가</h3>${wrScoresHtml(r.scores)}</div>
       <div class="card"><h3>총평</h3><p class="wr-sum">${esc(r.summary || "")}</p>
@@ -4432,20 +4429,6 @@ function renderWritingDetail(s, w) {
       renderWritingTab(s);
     } catch (e) { fail(e, "삭제하지 못했습니다"); }
   };
-  $("#wr-redo").onclick = () => openForm({
-    title: "원문 고쳐서 다시 첨삭",
-    fields: [{ name: "text", label: "학생이 쓴 원문 (잘못 읽힌 글자만 고치세요. 학생의 틀린 철자는 그대로 두세요)", type: "textarea", rows: 12, maxlength: 20000, required: true }],
-    values: { text: w.ocr_text || "" },
-    wide: true,
-    submitLabel: "다시 첨삭",
-    onSubmit: async (v) => {
-      const out = await wrCallCorrect({ grade: s.grade, topic: w.title, text: v.text });
-      const patch = { ocr_text: out.result.transcript || v.text, result: out.result, ai_model: out.model, updated_at: new Date().toISOString() };
-      await run(db.from("writings").update(patch).eq("id", w.id));
-      Object.assign(w, patch);
-      if (state.wr.openId === w.id && state.tab === "writing") renderWritingTab(s);
-    },
-  });
   const box = $("#wr-orig-box");
   if (box) {
     box.addEventListener("toggle", async () => {
