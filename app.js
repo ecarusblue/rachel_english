@@ -4212,7 +4212,7 @@ function renderWritingTab(s) {
   if (open) return renderWritingDetail(s, open);
   w.openId = null;
   body.innerHTML = `
-    <div class="toolbar"><button class="btn primary" type="button" id="btn-add-writing">+ 라이팅 첨삭</button><span class="muted">글 사진이나 문서를 올리면 Claude 가 읽고 문장별로 고쳐 줘요</span></div>
+    <div class="toolbar"><button class="btn primary" type="button" id="btn-add-writing">+ 라이팅 첨삭</button><button class="btn" type="button" id="btn-wr-reload">새로고침</button><span class="muted">Claude Code 에서 첨삭한 글은 새로고침하면 나타나요</span></div>
     ${w.rows.length
       ? `<div class="wr-list">${w.rows
           .map((r) => {
@@ -4227,6 +4227,7 @@ function renderWritingTab(s) {
       : `<div class="card empty">아직 첨삭한 글이 없습니다. 위의 '+ 라이팅 첨삭'으로 학생이 쓴 글의 사진을 올려 보세요.</div>`}
     <p class="muted wr-priv">올린 사진·글은 첨삭을 위해 Anthropic(Claude)으로 전송돼요. 이름·학교·연락처가 사진에 나오지 않게 해 주세요.</p>`;
   $("#btn-add-writing").onclick = () => writingForm(s);
+  $("#btn-wr-reload").onclick = () => { w.sid = null; renderWritingTab(s); };
   body.onclick = (e) => {
     const b = e.target.closest("[data-wr-open]");
     if (b) { w.openId = b.dataset.wrOpen; renderWritingTab(s); }
@@ -4464,6 +4465,7 @@ async function selectStudent(id) {
   state.view = "student";
   state.studentId = id;
   state.wr.openId = null;
+  state.wr.sid = null;
   state.tab = "progress";
   try {
     await loadDetail(id);
@@ -4577,6 +4579,7 @@ function bindEvents() {
     const tab = e.target.closest("[data-tab]");
     if (tab) {
       state.tab = tab.dataset.tab;
+      if (state.tab === "writing") state.wr.sid = null;   // Claude 세션이 저장한 글이 보이도록 탭을 열 때마다 다시 불러옴
       return renderStudent();
     }
     if (e.target.closest("#btn-assign")) return assignBook(s);
