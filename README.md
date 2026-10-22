@@ -13,6 +13,7 @@
 - 수업 추천: 사이드바 "수업 추천"에서 전체 학생의 제안을 한눈에 보고, 학생 화면의 "수업 추천" 탭에서 Claude 예약 작업이 저장한 제안을 확인하고, 수업 기록에 반영(채택/수정) 또는 거절
 - 월말평가서: 연도·월(기본 현재 월)별로 학생마다 출석·진도·숙제·시험은 자동 집계하고, 영역별 평가(듣기·말하기·읽기·쓰기·어휘·문법)와 학습 태도를 5단계로, 이달의 성취·보완할 점·다음 달 계획·학부모께 드리는 말씀을 직접 입력해 저장(작성 중/AI 초안/완료), A4 인쇄·PDF 저장, 폰에서는 PDF 공유(공유 창)
 - 수업 시간표: 전체 현황 상단에 요일·타임별 배정 학생을 표로 표시(오늘 요일 강조, 이름을 누르면 학생 화면으로 이동). "시간표 편집"에서 요일·타임 이름·시간을 자유롭게 바꾸고 학생을 배정해 매주 반복으로 저장(`schedule_slots` 테이블 — 최신 schema.sql 실행 필요)
+- 라이팅 첨삭: 학생 화면의 "라이팅" 탭에서 학생이 쓴 영어 글의 사진·PDF·워드·텍스트를 올리면 Claude 가 원문을 읽고 문장별 교정·이유·영역별 점수·총평을 만들어 학생별로 저장. 학부모용 A4 인쇄·PDF 공유. 두 가지 방법: Claude 세션(Claude Code·데스크톱 앱)에서 "OO 영어 라이팅 첨삭해줘"로 구독 사용량으로 처리 ([docs/writing-session.md](docs/writing-session.md)), 또는 앱에서 바로(Anthropic API 키 필요, [docs/writing-api.md](docs/writing-api.md))
 - 리포트: 기간(주·월·직접) 요약과 학부모 안내문 초안 복사, 인쇄/PDF 저장, 발송 기록 표시
 - 교재 관리, JSON 백업 내려받기, 인쇄(진도표 출력)
 - 선생님 1계정 로그인 + DB 수준 접근 제한(RLS)
@@ -80,7 +81,7 @@ GitHub 저장소를 연결하면 push 할 때마다 자동 배포됩니다.
 | `_headers` | Cloudflare Pages 보안 헤더 |
 | `vendor/` | PDF 공유용 외부 라이브러리(html2canvas, jsPDF — MIT). 처음 공유할 때만 불러옴 |
 | `schema.sql` | DB 테이블 + RLS 정책 + 추천·월말평가서 API 함수 |
-| `src/worker.js` | Claude 예약 작업용 API (`/api/ping`, `/api/progress`, `/api/recommendations`, `/api/evaluation-source`, `/api/evaluations`). 빌드 때 `build/worker.js` 로 만들어짐 |
+| `src/worker.js` | Claude 예약 작업용 API (`/api/ping`, `/api/progress`, `/api/recommendations`, `/api/evaluation-source`, `/api/evaluations`)와 라이팅 첨삭 API (`/api/correct`, 로그인한 선생님 전용). 빌드 때 `build/worker.js` 로 만들어짐 |
 | `wrangler.jsonc` | Cloudflare 배포 설정 (Worker + dist 정적 파일) |
 
 `recommendations` 테이블은 AI 추천 이력 저장용으로 DB에만 준비되어 있고, 현재 화면(`app.js`)에서는 아직 사용하지 않습니다.

@@ -1101,3 +1101,58 @@ body.rc-lock { overflow: hidden; }
   .book-actions .btn:nth-child(4), .book-actions .btn:nth-child(5) { grid-column: span 3; }
   .book-actions .btn.danger { grid-column: 1 / -1; min-height: 38px; font-size: .85rem; border-style: dashed; }
 }
+
+/* 라이팅 첨삭 */
+.wr-list { display: grid; gap: .5rem; }
+.wr-row { display: grid; grid-template-columns: 5.5rem 1fr auto; gap: .8rem; align-items: center; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; margin: 0; }
+.wr-row:hover { border-color: var(--accent); }
+.wr-date { color: var(--muted); font-size: .9rem; }
+.wr-main { display: grid; gap: .1rem; min-width: 0; }
+.wr-main > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wr-meta { display: flex; gap: .3rem; flex-wrap: wrap; justify-content: flex-end; }
+.wr-priv { font-size: .85rem; line-height: 1.6; margin: .8rem 0 0; }
+.wr-pick { display: grid; gap: .5rem; margin: .4rem 0 .8rem; }
+.wr-pick-btns { display: flex; gap: .5rem; flex-wrap: wrap; }
+.wr-hint { font-size: .85rem; }
+.wr-files { display: grid; gap: .4rem; }
+.wr-file { display: flex; align-items: center; gap: .6rem; padding: .35rem .5rem; border: 1px solid var(--border); border-radius: 10px; }
+.wr-file img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; }
+.wr-ico { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-size: .75rem; font-weight: 700; }
+.wr-fn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wr-warn { margin: 0 0 .8rem; padding: .6rem .9rem; border-radius: 10px; background: var(--warn-soft); color: var(--warn); font-size: .9rem; }
+.wr-warn ul { margin: .3rem 0; padding-left: 1.2rem; }
+.wr-sum { margin: 0 0 .6rem; line-height: 1.7; white-space: pre-wrap; }
+.wr-ul { margin: .2rem 0 .6rem; padding-left: 1.2rem; line-height: 1.6; }
+.wr-sents { display: grid; gap: .6rem; }
+.wr-s { padding: .55rem .8rem; border-left: 3px solid var(--warn); background: var(--bg); border-radius: 0 8px 8px 0; line-height: 1.65; break-inside: avoid; }
+.wr-s.ok { border-left-color: var(--good); }
+.wr-okmark { color: var(--good); font-weight: 700; margin-right: .4em; }
+.wr-orig { color: var(--muted); }
+.wr-fix { font-weight: 600; }
+.wr-s del { text-decoration: line-through; text-decoration-color: #c4402f; background: #fbe3df; color: inherit; border-radius: 3px; }
+.wr-s ins { text-decoration: none; background: #d8f1e0; border-radius: 3px; }
+@media (prefers-color-scheme: dark) { .wr-s del { background: #4a2420; } .wr-s ins { background: #1f4130; } }
+.wr-notes { margin: .3rem 0 0; padding: 0; list-style: none; font-size: .9rem; display: grid; gap: .15rem; }
+.wr-tag { display: inline-block; margin-right: .5em; padding: 0 .55em; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: .75rem; font-weight: 700; }
+.wr-origs { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .6rem; }
+.wr-origs img { max-width: min(100%, 360px); max-height: 420px; border-radius: 8px; border: 1px solid var(--border); }
+.wr-pre { white-space: pre-wrap; font: inherit; line-height: 1.7; margin: .6rem 0 0; }
+/* 인쇄·PDF 용지 안의 첨삭 */
+.rp-page .wr-pscores { margin-bottom: 5mm; break-inside: avoid; }
+.rp-page .wr-ph { margin-top: 5mm; }
+.rp-page .wr-ph small { font-weight: 400; font-size: 8.5pt; color: #50656a; margin-left: 2mm; }
+.rp-page .wr-s { background: #f4f8f8; border-left-color: #f4a27a; margin-bottom: 2.5mm; font-size: 10.5pt; padding: 2mm 3mm; color: #16282b; }
+.rp-page .wr-s.ok { border-left-color: #18767d; }
+.rp-page .wr-orig { color: #50656a; }
+.rp-page .wr-notes { font-size: 9.5pt; }
+.rp-page .wr-tag { background: #dfeeee; color: #0f3d44; }
+.rp-page .wr-s del { background: #fbe3df; }
+.rp-page .wr-s ins { background: #d8f1e0; }
+@media print {
+  .print-wr #main > :not(#tab-body) { display: none !important; }
+  .print-wr #tab-body > :not(.eval-print) { display: none !important; }
+}
+@media (max-width: 600px) {
+  .wr-row { grid-template-columns: 1fr; gap: .3rem; }
+  .wr-meta { justify-content: flex-start; }
+}

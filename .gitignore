@@ -2,6 +2,7 @@
 .env
 .env.*
 *.local
+.dev.vars
 
 # OS / 편집기
 .DS_Store

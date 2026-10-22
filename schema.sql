@@ -779,3 +779,159 @@ drop policy if exists "owner_all" on public.makeup_quota;
 create policy "owner_all" on public.makeup_quota for all to authenticated
   using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
 revoke all on public.makeup_quota from anon;
+
+-- ============================================================
+-- 라이팅 첨삭 (학생이 쓴 영어 글의 사진·문서를 올리면 Claude 가 첨삭한 결과를 저장)
+--  - 원본 파일은 비공개 Storage 버킷 'writings' 에, 첨삭 결과는 writings 테이블에 저장합니다.
+--  - 파일 경로는 '<선생님 id>/<학생 id>/<첨삭 id>/<번호>.<확장자>' 이고, 첫 폴더가 본인 id 일 때만 접근됩니다.
+-- ============================================================
+create table if not exists public.writings (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  student_id  uuid not null references public.students(id) on delete cascade,
+  written_on  date not null default current_date,
+  title       text check (char_length(title) <= 100),         -- 글 제목·주제 (선택)
+  files       jsonb not null default '[]'::jsonb check (jsonb_typeof(files) = 'array'),   -- [{"path":"…","name":"…","type":"image/jpeg"}]
+  ocr_text    text check (char_length(ocr_text) <= 20000),   -- 사진·문서에서 읽은 원문 (선생님이 고칠 수 있음)
+  result      jsonb not null default '{}'::jsonb check (jsonb_typeof(result) = 'object'),   -- 문장별 교정·점수·총평
+  teacher_note text check (char_length(teacher_note) <= 3000),   -- 선생님이 덧붙이는 말 (학부모용 인쇄에 포함)
+  ai_model    text,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists writings_student_idx on public.writings (student_id, written_on desc);
+alter table public.writings enable row level security;
+drop policy if exists "owner_all" on public.writings;
+create policy "owner_all" on public.writings for all to authenticated
+  using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
+revoke all on public.writings from anon;
+
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('writings', 'writings', false, 10485760)
+on conflict (id) do update set public = false, file_size_limit = 10485760;
+
+drop policy if exists "writings_owner_all" on storage.objects;
+create policy "writings_owner_all" on storage.objects for all to authenticated
+  using (bucket_id = 'writings' and (storage.foldername(name))[1] = (select auth.uid())::text)
+  with check (bucket_id = 'writings' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- ------------------------------------------------------------
+-- 라이팅 첨삭: Claude 세션(Claude Code·데스크톱 앱)용 API  (docs/writing-session.md)
+--  1) api_find_student  : 이름으로 학생 찾기 (이 토큰에서 학생 이름을 돌려주는 유일한 함수)
+--  2) api_save_writing  : 사진·문서에서 읽은 원문을 먼저 저장 (첨삭 결과는 비어 있음)
+--  3) api_save_correction: 첨삭 결과를 같은 행에 저장
+--  토큰으로 할 수 있는 일은 이 세 가지뿐이고, 학생·글을 지우거나 다른 표를 읽을 수 없습니다.
+-- ------------------------------------------------------------
+create or replace function public._api_owner(p_token text)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_hash  text := encode(extensions.digest(convert_to(coalesce(p_token, ''), 'UTF8'), 'sha256'), 'hex');
+  v_owner uuid;
+begin
+  select t.owner into v_owner from public.api_tokens t where t.token_hash = v_hash and t.revoked_at is null;
+  if v_owner is null then
+    raise exception 'unauthorized' using errcode = '28000';
+  end if;
+  update public.api_tokens set last_used_at = now() where token_hash = v_hash;
+  return v_owner;
+end $$;
+revoke all on function public._api_owner(text) from public, anon, authenticated;
+
+create or replace function public.api_find_student(p_token text, p_name text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_owner uuid := public._api_owner(p_token);
+  v_name  text := btrim(coalesce(p_name, ''));
+begin
+  if char_length(v_name) < 1 or char_length(v_name) > 50 then
+    raise exception 'name required (1-50 chars)';
+  end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object('id', s.id, 'name', s.name, 'grade', s.grade, 'active', s.active)
+                     order by (s.name = v_name) desc, s.active desc, s.name)
+      from public.students s
+     where s.owner = v_owner
+       and (s.name = v_name or s.name ilike '%' || replace(replace(replace(v_name, '\', '\'), '%', '\%'), '_', '\_') || '%')
+  ), '[]'::jsonb);
+end $$;
+
+create or replace function public.api_save_writing(p_token text, p_student_id uuid, p_ocr_text text,
+                                                   p_title text default null, p_written_on date default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_owner uuid := public._api_owner(p_token);
+  v_text  text := btrim(coalesce(p_ocr_text, ''));
+  v_id    uuid;
+begin
+  if not exists (select 1 from public.students s where s.id = p_student_id and s.owner = v_owner) then
+    raise exception 'student not found';
+  end if;
+  if char_length(v_text) < 1 or char_length(v_text) > 20000 then
+    raise exception 'ocr_text required (1-20000 chars)';
+  end if;
+  insert into public.writings (owner, student_id, written_on, title, ocr_text, result)
+  values (v_owner, p_student_id,
+          coalesce(p_written_on, (now() at time zone 'Asia/Seoul')::date),
+          nullif(left(btrim(coalesce(p_title, '')), 100), ''),
+          v_text, '{}'::jsonb)
+  returning id into v_id;
+  return jsonb_build_object('id', v_id);
+end $$;
+
+create or replace function public.api_save_correction(p_token text, p_writing_id uuid, p_result jsonb,
+                                                      p_model text default 'Claude(세션)', p_ocr_text text default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_owner uuid := public._api_owner(p_token);
+  v_sc    jsonb;
+  k       text;
+begin
+  if not exists (select 1 from public.writings w where w.id = p_writing_id and w.owner = v_owner) then
+    raise exception 'writing not found';
+  end if;
+  if p_result is null or jsonb_typeof(p_result) <> 'object'
+     or jsonb_typeof(p_result->'sentences') is distinct from 'array'
+     or jsonb_typeof(p_result->'scores') is distinct from 'object'
+     or jsonb_typeof(p_result->'summary') is distinct from 'string' then
+    raise exception 'result needs sentences(array), scores(object), summary(string)';
+  end if;
+  if jsonb_array_length(p_result->'sentences') > 300 then
+    raise exception 'too many sentences';
+  end if;
+  v_sc := p_result->'scores';
+  foreach k in array array['content', 'grammar', 'vocabulary', 'organization'] loop
+    if jsonb_typeof(v_sc->k) is distinct from 'number' or (v_sc->>k)::numeric not between 1 and 5 then
+      raise exception 'scores.% must be a number 1-5', k;
+    end if;
+  end loop;
+  update public.writings
+     set result = p_result,
+         ai_model = left(coalesce(nullif(btrim(p_model), ''), 'Claude(세션)'), 100),
+         ocr_text = case when p_ocr_text is null then ocr_text else left(btrim(p_ocr_text), 20000) end,
+         updated_at = now()
+   where id = p_writing_id;
+  return jsonb_build_object('id', p_writing_id, 'saved', true);
+end $$;
+
+revoke all on function public.api_find_student(text, text) from public;
+revoke all on function public.api_save_writing(text, uuid, text, text, date) from public;
+revoke all on function public.api_save_correction(text, uuid, jsonb, text, text) from public;
+grant execute on function public.api_find_student(text, text) to anon, authenticated;
+grant execute on function public.api_save_writing(text, uuid, text, text, date) to anon, authenticated;
+grant execute on function public.api_save_correction(text, uuid, jsonb, text, text) to anon, authenticated;

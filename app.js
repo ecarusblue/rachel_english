@@ -29,6 +29,7 @@ const state = {
   makeup: { rows: [], quotas: [], absences: [], missing: false, tab: "need", calMonth: null, calSel: null },   // 결석·보강
   makeupNeed: 0,
   recsUi: { mode: "student", sid: null },   // 수업 추천 화면: 학생별/날짜별
+  wr: { sid: null, rows: [], missing: false, loading: false, openId: null },   // 라이팅 첨삭 (학생 화면의 라이팅 탭)
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1240,7 +1241,7 @@ function renderStudent() {
     </div>
     ${s.memo ? `<p class="card muted memo-cell" style="margin:0 0 1rem">${esc(s.memo)}</p>` : ""}
     <div class="tabs" role="tablist">
-      ${[["progress", "교재 진도"], ["lessons", "수업 기록"], ["tests", "시험·단어"], ["recs", "수업 추천"]]
+      ${[["progress", "교재 진도"], ["lessons", "수업 기록"], ["tests", "시험·단어"], ["writing", "라이팅"], ["recs", "수업 추천"]]
         .map(([k, t]) => `<button class="tab ${state.tab === k ? "active" : ""}" role="tab" data-tab="${k}">${t}</button>`)
         .join("")}
     </div>
@@ -1249,6 +1250,7 @@ function renderStudent() {
   else if (state.tab === "lessons") renderLessonsTab(s);
   else if (state.tab === "report") renderReportTab(s);
   else if (state.tab === "recs") renderRecsTab(s);
+  else if (state.tab === "writing") renderWritingTab(s);
   else renderTestsTab(s);
 }
 
@@ -3788,7 +3790,7 @@ function lessonForm(s, lesson, rec = null, preset = null) {
 const BACKUP_TABLES = [
   ["students", "학생"], ["textbooks", "교재"], ["progress", "교재 진도"], ["lessons", "수업 기록"], ["tests", "시험 점수"],
   ["recommendations", "수업 추천"], ["makeups", "결석·보강"], ["makeup_quota", "보강 기준"], ["monthly_evaluations", "월말 평가서"],
-  ["schedule_slots", "시간표"], ["test_kinds", "시험 종류"], ["report_logs", "안내문 발송 기록"],
+  ["schedule_slots", "시간표"], ["test_kinds", "시험 종류"], ["report_logs", "안내문 발송 기록"], ["writings", "라이팅 첨삭"],
 ];
 async function fetchAllRows(table) {
   const out = [];
@@ -4064,9 +4066,404 @@ async function backup() {
 }
 
 /* ---------- 이벤트 ---------- */
+/* ---------- 라이팅 첨삭 ---------- */
+// 학생이 쓴 영어 글의 사진·문서를 올리면 Worker(/api/correct)가 Claude 로 원문을 읽고 문장별로 첨삭합니다.
+// 원본은 비공개 Storage 버킷 'writings', 결과는 writings 테이블에 저장합니다. (schema.sql 마지막 부분)
+const WR_TYPES = { grammar: "문법", spelling: "철자", vocabulary: "어휘", punctuation: "문장부호", capitalization: "대소문자", word_order: "어순", expression: "표현" };
+const WR_SCORES = [["content", "내용"], ["grammar", "문법"], ["vocabulary", "어휘"], ["organization", "구성"]];
+const WR_MAX_SIDE = 2000;           // 사진은 긴 변을 이 크기로 줄여서 보냄
+const WR_MAX_FILES = 8;
+const WR_MAX_PDF = 8 * 1024 * 1024;
+
+function wrBlobBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] || "");
+    r.onerror = () => reject(new Error("파일을 읽지 못했어요"));
+    r.readAsDataURL(blob);
+  });
+}
+async function wrImage(file) {
+  let bmp;
+  try {
+    bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    throw new Error(`${file.name}: 이 사진 형식은 열 수 없어요. JPG나 PNG로 올려 주세요`);
+  }
+  const k = Math.min(1, WR_MAX_SIDE / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(bmp.width * k));
+  c.height = Math.max(1, Math.round(bmp.height * k));
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(bmp, 0, 0, c.width, c.height);
+  if (bmp.close) bmp.close();
+  const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.85));
+  return { kind: "image", name: file.name, type: "image/jpeg", blob, data: await wrBlobBase64(blob) };
+}
+// .docx 는 zip 파일이라 브라우저 기능(DecompressionStream)만으로 본문(word/document.xml)을 꺼내 글자만 뽑는다.
+async function wrDocx(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const dv = new DataView(buf.buffer);
+  let e = buf.length - 22;
+  while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
+  if (e < 0) throw new Error(`${file.name}: 워드(.docx) 파일이 아니에요`);
+  const count = dv.getUint16(e + 10, true);
+  let p = dv.getUint32(e + 16, true);
+  for (let i = 0; i < count && dv.getUint32(p, true) === 0x02014b50; i++) {
+    const method = dv.getUint16(p + 10, true);
+    const csize = dv.getUint32(p + 20, true);
+    const nlen = dv.getUint16(p + 28, true), xlen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true);
+    const off = dv.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(buf.subarray(p + 46, p + 46 + nlen));
+    if (name === "word/document.xml") {
+      const start = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true);
+      const data = buf.subarray(start, start + csize);
+      let bytes = data;
+      if (method === 8) bytes = new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+      else if (method !== 0) throw new Error(`${file.name}: 열 수 없는 워드 파일이에요`);
+      const ent = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+      return new TextDecoder().decode(bytes)
+        .replace(/<w:tab\/>/g, "\t").replace(/<w:br[^>]*\/>/g, "\n").replace(/<\/w:p>/g, "\n").replace(/<[^>]+>/g, "")
+        .replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (m, g) => (g[0] === "#" ? String.fromCodePoint(g[1].toLowerCase() === "x" ? parseInt(g.slice(2), 16) : Number(g.slice(1))) : ent[g.toLowerCase()]))
+        .replace(/\n{3,}/g, "\n\n").trim();
+    }
+    p += 46 + nlen + xlen + clen;
+  }
+  throw new Error(`${file.name}: 워드 파일에서 글을 찾지 못했어요`);
+}
+async function wrPrepare(file) {
+  const name = file.name || "";
+  if (file.type.startsWith("image/") || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(name)) return wrImage(file);
+  if (file.type === "application/pdf" || /\.pdf$/i.test(name)) {
+    if (file.size > WR_MAX_PDF) throw new Error(`${name}: PDF가 너무 커요 (8MB까지)`);
+    return { kind: "pdf", name, type: "application/pdf", blob: file, data: await wrBlobBase64(file) };
+  }
+  if (/\.docx$/i.test(name)) {
+    const text = await wrDocx(file);
+    if (!text) throw new Error(`${name}: 문서에 글이 없어요. 손글씨 사진이라면 사진으로 올려 주세요`);
+    return { kind: "text", name, text };
+  }
+  if (file.type === "text/plain" || /\.txt$/i.test(name)) {
+    const text = (await file.text()).trim();
+    if (!text) throw new Error(`${name}: 파일이 비어 있어요`);
+    return { kind: "text", name, text };
+  }
+  throw new Error(`${name}: 지원하지 않는 형식이에요 (사진, PDF, 워드, 텍스트)`);
+}
+
+async function wrCallCorrect(payload) {
+  const { data } = await db.auth.getSession();
+  const token = data?.session?.access_token;
+  if (!token) throw new Error("로그인이 필요해요");
+  let res;
+  try {
+    res = await fetch("/api/correct", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(180000),
+    });
+  } catch (e) {
+    throw new Error(e && e.name === "TimeoutError" ? "시간이 너무 오래 걸려요. 사진을 줄이거나 나눠서 다시 해 주세요" : "첨삭 서버에 연결하지 못했어요");
+  }
+  const j = await res.json().catch(() => null);
+  if (res.status === 404 || !j) throw new Error("첨삭 서버(Worker)가 연결되지 않았어요. 배포된 주소에서 사용해 주세요");
+  if (!j.ok) throw new Error(j.error || "첨삭하지 못했어요");
+  return j.data;
+}
+
+async function loadWritings(s) {
+  const w = state.wr;
+  try {
+    w.rows = await run(db.from("writings").select("*").eq("student_id", s.id).order("written_on", { ascending: false }).order("created_at", { ascending: false }).limit(200));
+    w.missing = false;
+  } catch {
+    w.rows = [];
+    w.missing = true;   // schema.sql 업그레이드 전
+  }
+  w.sid = s.id;
+}
+function wrAvg(r) {
+  const sc = r.result?.scores;
+  const v = sc ? WR_SCORES.map(([k]) => sc[k]).filter((n) => Number.isFinite(n)) : [];
+  return v.length ? avg(v) : null;
+}
+function wrFixCount(r) {
+  return (r.result?.sentences || []).reduce((n, st) => n + (st.notes?.length || 0), 0);
+}
+function renderWritingTab(s) {
+  const w = state.wr;
+  const body = $("#tab-body");
+  if (w.sid !== s.id) {
+    w.openId = null;
+    body.innerHTML = `<div class="card empty">불러오는 중…</div>`;
+    loadWritings(s).then(() => {
+      if (state.view === "student" && state.studentId === s.id && state.tab === "writing") renderWritingTab(s);
+    });
+    return;
+  }
+  if (w.missing) {
+    body.innerHTML = `<div class="card empty">라이팅 첨삭 저장소를 찾지 못했어요. Supabase SQL Editor 에서 최신 <code>schema.sql</code> 을 실행했는지 확인해 주세요.</div>`;
+    return;
+  }
+  const open = w.openId && w.rows.find((r) => r.id === w.openId);
+  if (open) return renderWritingDetail(s, open);
+  w.openId = null;
+  body.innerHTML = `
+    <div class="toolbar"><button class="btn primary" type="button" id="btn-add-writing">+ 라이팅 첨삭</button><span class="muted">글 사진이나 문서를 올리면 Claude 가 읽고 문장별로 고쳐 줘요</span></div>
+    ${w.rows.length
+      ? `<div class="wr-list">${w.rows
+          .map((r) => {
+            const a = wrAvg(r), n = wrFixCount(r);
+            const first = r.title || (r.ocr_text || "").split(/\n/)[0].slice(0, 60) || "(제목 없음)";
+            return `<button type="button" class="card wr-row" data-wr-open="${esc(r.id)}">
+              <span class="wr-date">${fmtDate(r.written_on)}</span>
+              <span class="wr-main"><b>${esc(first)}</b><span class="muted">${esc((r.result?.summary || "").slice(0, 70))}</span></span>
+              <span class="wr-meta">${a == null ? "" : `<span class="badge">평균 ${a.toFixed(1)}/5</span>`}${Array.isArray(r.result?.sentences) ? `<span class="badge ${n ? "warn" : "done"}">${n ? `고친 곳 ${n}` : "고칠 곳 없음"}</span>` : `<span class="badge warn">첨삭 대기</span>`}</span></button>`;
+          })
+          .join("")}</div>`
+      : `<div class="card empty">아직 첨삭한 글이 없습니다. 위의 '+ 라이팅 첨삭'으로 학생이 쓴 글의 사진을 올려 보세요.</div>`}
+    <p class="muted wr-priv">올린 사진·글은 첨삭을 위해 Anthropic(Claude)으로 전송돼요. 이름·학교·연락처가 사진에 나오지 않게 해 주세요.</p>`;
+  $("#btn-add-writing").onclick = () => writingForm(s);
+  body.onclick = (e) => {
+    const b = e.target.closest("[data-wr-open]");
+    if (b) { w.openId = b.dataset.wrOpen; renderWritingTab(s); }
+  };
+}
+
+function writingForm(s) {
+  const picked = [];
+  const urls = [];
+  const fields = [
+    { name: "written_on", label: "글 쓴 날짜", type: "date", required: true, default: todayStr(), half: true },
+    { name: "title", label: "제목·주제 (선택)", maxlength: 100, half: true },
+    { name: "wr-slot", type: "slot" },
+    { name: "text", label: "또는 글을 직접 붙여넣기", type: "textarea", rows: 5, maxlength: 20000 },
+    { name: "note", label: "Claude 에게 전할 말 (선택)", maxlength: 300 },
+  ];
+  openForm({
+    title: `${s.name} 라이팅 첨삭`,
+    fields,
+    wide: true,
+    submitLabel: "첨삭 시작",
+    onSubmit: async (v) => {
+      const text = [v.text, ...picked.filter((p) => p.kind === "text").map((p) => p.text)].filter(Boolean).join("\n\n");
+      const media = picked.filter((p) => p.kind !== "text");
+      if (!media.length && !text) throw new Error("사진이나 문서를 올리거나 글을 붙여넣어 주세요");
+      const st = $("#wr-status");
+      st.textContent = "Claude 가 글을 읽고 첨삭하는 중이에요… (20~60초 걸려요)";
+      const out = await wrCallCorrect({ grade: s.grade, topic: v.title, note: v.note, text, files: media.map((p) => ({ type: p.type, data: p.data })) });
+      const id = crypto.randomUUID();
+      const owner = (await db.auth.getUser()).data.user.id;
+      const files = [];
+      let upFail = 0;
+      for (let i = 0; i < media.length; i++) {
+        const m = media[i];
+        const path = `${owner}/${s.id}/${id}/${i + 1}.${m.kind === "pdf" ? "pdf" : "jpg"}`;
+        const { error } = await db.storage.from("writings").upload(path, m.blob, { contentType: m.type });
+        if (error) upFail++;
+        else files.push({ path, name: m.name, type: m.type });
+      }
+      const row = await run(db.from("writings").insert({
+        id, student_id: s.id, written_on: v.written_on, title: v.title, files, ocr_text: out.result.transcript || text || null, result: out.result, ai_model: out.model,
+      }).select("*").single());
+      state.wr.rows.unshift(row);
+      state.wr.openId = row.id;
+      if (state.view === "student" && state.studentId === s.id && state.tab === "writing") renderWritingTab(s);
+      toast(upFail ? "첨삭은 저장했지만 원본 파일 일부를 저장하지 못했어요" : "첨삭이 끝났어요");
+    },
+  });
+  const slot = $("#wr-slot");
+  slot.innerHTML = `
+    <div class="wr-pick">
+      <div class="wr-pick-btns">
+        <button type="button" class="btn" id="wr-btn-file">사진·문서 고르기</button>
+        <button type="button" class="btn" id="wr-btn-cam">카메라로 찍기</button>
+        <input type="file" id="wr-in" accept="image/*,.pdf,.docx,.txt" multiple hidden>
+        <input type="file" id="wr-cam" accept="image/*" capture="environment" hidden>
+      </div>
+      <div class="muted wr-hint">사진(JPG·PNG), PDF, 워드(.docx), 텍스트(.txt) · 최대 ${WR_MAX_FILES}개. 여러 쪽이면 순서대로 올려 주세요.</div>
+      <div class="wr-files" id="wr-files"></div>
+      <div class="muted" id="wr-status" role="status"></div>
+    </div>`;
+  const draw = () => {
+    $("#wr-files").innerHTML = picked
+      .map((p, i) => `<div class="wr-file">${p.kind === "image" ? `<img src="${esc(p.url)}" alt="">` : `<span class="wr-ico">${p.kind === "pdf" ? "PDF" : "TXT"}</span>`}<span class="wr-fn">${esc(p.name)}</span><button type="button" class="btn small" data-wr-rm="${i}" aria-label="${esc(p.name)} 빼기">빼기</button></div>`)
+      .join("");
+  };
+  const add = async (list) => {
+    const st = $("#wr-status");
+    for (const f of list) {
+      if (picked.length >= WR_MAX_FILES) { st.textContent = `파일은 ${WR_MAX_FILES}개까지 올릴 수 있어요`; break; }
+      st.textContent = `${f.name} 준비 중…`;
+      try {
+        const p = await wrPrepare(f);
+        if (p.blob && p.kind === "image") { p.url = URL.createObjectURL(p.blob); urls.push(p.url); }
+        picked.push(p);
+        st.textContent = "";
+      } catch (e) {
+        st.textContent = e.message || String(e);
+      }
+    }
+    draw();
+  };
+  $("#wr-btn-file").onclick = () => $("#wr-in").click();
+  $("#wr-btn-cam").onclick = () => $("#wr-cam").click();
+  for (const id of ["wr-in", "wr-cam"]) {
+    $("#" + id).onchange = (e) => { const l = [...e.target.files]; e.target.value = ""; add(l); };
+  }
+  slot.onclick = (e) => {
+    const b = e.target.closest("[data-wr-rm]");
+    if (b) { picked.splice(Number(b.dataset.wrRm), 1); draw(); }
+  };
+  $("#dlg").addEventListener("close", () => urls.forEach((u) => URL.revokeObjectURL(u)), { once: true });
+}
+
+// text 안에서 frags 에 해당하는 부분을 <tag> 로 감싸 강조한 HTML (나머지는 이스케이프)
+function wrMark(text, frags, tag) {
+  const t = String(text ?? "");
+  const ranges = [];
+  for (const f of frags) {
+    if (!f) continue;
+    let i = t.indexOf(f);
+    while (i >= 0 && ranges.some(([a, b]) => i < b && i + f.length > a)) i = t.indexOf(f, i + 1);
+    if (i >= 0) ranges.push([i, i + f.length]);
+  }
+  ranges.sort((a, b) => a[0] - b[0]);
+  let out = "", pos = 0;
+  for (const [a, b] of ranges) {
+    out += esc(t.slice(pos, a)) + `<${tag}>${esc(t.slice(a, b))}</${tag}>`;
+    pos = b;
+  }
+  return out + esc(t.slice(pos));
+}
+function wrSentenceHtml(st) {
+  const notes = st.notes || [];
+  if (!notes.length && st.original === st.corrected) return `<div class="wr-s ok"><span class="wr-okmark" aria-label="맞아요">✓</span>${esc(st.original)}</div>`;
+  return `<div class="wr-s">
+    <div class="wr-orig">${wrMark(st.original, notes.map((n) => n.wrong), "del")}</div>
+    <div class="wr-fix">${wrMark(st.corrected, notes.map((n) => n.right), "ins")}</div>
+    ${notes.length ? `<ul class="wr-notes">${notes.map((n) => `<li><span class="wr-tag">${esc(WR_TYPES[n.type] || n.type)}</span>${esc(n.explanation)}</li>`).join("")}</ul>` : ""}
+  </div>`;
+}
+function wrScoresHtml(sc) {
+  const segs = (v) => Array.from({ length: 5 }, (_, k) => `<i class="${k < (v || 0) ? "on" : ""}"></i>`).join("");
+  return WR_SCORES.map(([k, t]) => `<div class="rp-rr"><span class="rp-rn">${t}</span><span class="rp-seg">${segs(sc?.[k])}</span><span class="rp-rl">${sc?.[k] ? sc[k] + "/5" : "-"}</span></div>`).join("");
+}
+function wrPrintHtml(s, w) {
+  const r = w.result || {};
+  const [yy, mm, dd] = w.written_on.split("-").map(Number);
+  const tx = (h, t) => (t ? `<div class="rp-tx"><h4>${h}</h4><p>${esc(t)}</p></div>` : "");
+  const list = (h, arr) => (arr?.length ? `<div class="rp-tx"><h4>${h}</h4><p>${arr.map((x) => "• " + esc(x)).join("\n")}</p></div>` : "");
+  const blocks = [
+    `<div class="rp-who"><b>${esc(s.name)}</b><span>${s.grade ? esc(s.grade) + " 학생" : "학생"}${w.title ? " · " + esc(w.title) : ""}</span></div>`,
+    `<div class="wr-pscores"><h3>영역별 평가</h3>${wrScoresHtml(r.scores)}</div>`,
+    tx("총평", r.summary),
+    list("잘한 점", r.strengths),
+    list("더 노력할 점", r.improvements),
+    tx("선생님 한마디", w.teacher_note),
+    (r.sentences || []).length ? `<h3 class="wr-ph">문장별 첨삭 <small>밑줄·취소선은 고친 부분이에요</small></h3>` : "",
+    ...(r.sentences || []).map(wrSentenceHtml),
+  ];
+  return `<div class="rp-page">
+    <div class="rp-top"><div class="rp-brand pv-row">${LOGO_SVG}<div>${esc(ACADEMY_NAME)}<small>라이팅 첨삭</small></div></div><div class="rp-when">${yy}년<b>${mm}월 ${dd}일</b></div></div>
+    <div class="rp-body">${blocks.join("")}</div>
+    <div class="rp-foot"><span>${esc(ACADEMY_NAME)} 공부방</span><span>${shortDate(todayStr())} 출력</span></div>
+  </div>`;
+}
+
+function renderWritingDetail(s, w) {
+  const r = w.result || {};
+  const pending = !Array.isArray(r.sentences);   // 원문만 저장되고 첨삭은 아직 없는 상태 (Claude 세션이 나중에 채움)
+  const files = w.files || [];
+  const body = $("#tab-body");
+  body.onclick = null;
+  body.innerHTML = `
+    <div class="toolbar"><button class="btn" type="button" id="wr-back">← 목록</button><strong>${fmtDate(w.written_on)}</strong><span>${esc(w.title || "")}</span><span class="spacer"></span>
+      <button class="btn" type="button" id="wr-redo">원문 고쳐서 다시 첨삭</button>
+      <button class="btn primary" type="button" id="wr-print" ${pending ? "hidden" : ""}>인쇄 / PDF</button>
+      <button class="btn danger" type="button" id="wr-del">삭제</button></div>
+    ${pending ? `<div class="wr-warn"><strong>첨삭 대기 중</strong> — 원문만 저장돼 있어요. Claude 세션에서 '첨삭해줘' 라고 하면 결과가 여기에 나타나요.</div><div class="card"><h3>저장된 원문</h3><pre class="wr-pre">${esc(w.ocr_text || "")}</pre></div>` : `
+    <div class="ai-note"><strong>AI 첨삭</strong> — Claude 가 만든 첨삭이에요${w.ai_model ? ` (${esc(w.ai_model)})` : ""}. 학부모께 보내기 전에 선생님이 한 번 확인해 주세요.</div>
+    ${r.unreadable?.length ? `<div class="wr-warn"><strong>잘 안 보여서 짐작해서 읽은 곳</strong><ul>${r.unreadable.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>원문이 다르게 읽혔다면 '원문 고쳐서 다시 첨삭'을 눌러 주세요.</div>` : ""}
+    <div class="grid">
+      <div class="card"><h3>영역별 평가</h3>${wrScoresHtml(r.scores)}</div>
+      <div class="card"><h3>총평</h3><p class="wr-sum">${esc(r.summary || "")}</p>
+        ${r.strengths?.length ? `<h4>잘한 점</h4><ul class="wr-ul">${r.strengths.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+        ${r.improvements?.length ? `<h4>더 노력할 점</h4><ul class="wr-ul">${r.improvements.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}</div>
+    </div>
+    <div class="card"><h3>문장별 첨삭</h3>${(r.sentences || []).length ? `<div class="wr-sents">${r.sentences.map(wrSentenceHtml).join("")}</div>` : `<p class="muted">읽을 수 있는 영어 문장이 없었어요.</p>`}</div>`}
+    <div class="card"><h3>선생님 한마디 <small class="muted">(인쇄에 들어가요)</small></h3>
+      <textarea id="wr-note" rows="3" maxlength="3000" style="width:100%">${esc(w.teacher_note || "")}</textarea>
+      <div class="toolbar" style="margin:.5rem 0 0"><button class="btn" type="button" id="wr-note-save">저장</button></div></div>
+    ${files.length ? `<details class="card" id="wr-orig-box"><summary>올린 원본 보기 (${files.length})</summary><div class="wr-origs" id="wr-origs"><span class="muted">불러오는 중…</span></div></details>` : ""}
+    ${w.ocr_text ? `<details class="card"><summary>Claude 가 읽은 원문</summary><pre class="wr-pre">${esc(w.ocr_text)}</pre></details>` : ""}
+    <div class="eval-print" id="wr-print-area"></div>`;
+
+  $("#wr-back").onclick = () => { state.wr.openId = null; renderWritingTab(s); };
+  const doPrint = () => {
+    $("#wr-print-area").innerHTML = wrPrintHtml(s, w);
+    document.body.classList.add("print-wr");
+    try { window.print(); } finally { document.body.classList.remove("print-wr"); }
+  };
+  $("#wr-print").onclick = () => openEvalPreview(wrPrintHtml(s, w), doPrint, $("#wr-print"), "첨삭 미리보기", {
+    onRender: paginateEvalPreview,
+    share: { filename: `라이팅첨삭_${s.name}_${w.written_on}.pdf`, title: `${s.name} 라이팅 첨삭` },
+  });
+  $("#wr-note-save").onclick = async () => {
+    try {
+      const note = $("#wr-note").value.trim() || null;
+      await run(db.from("writings").update({ teacher_note: note, updated_at: new Date().toISOString() }).eq("id", w.id));
+      w.teacher_note = note;
+      toast("저장했습니다");
+    } catch (e) { fail(e, "저장하지 못했습니다"); }
+  };
+  $("#wr-del").onclick = async () => {
+    if (!confirm("이 첨삭 기록과 올린 파일을 삭제할까요? 되돌릴 수 없습니다.")) return;
+    try {
+      const paths = files.map((f) => f.path);
+      if (paths.length) await db.storage.from("writings").remove(paths);
+      await run(db.from("writings").delete().eq("id", w.id));
+      state.wr.rows = state.wr.rows.filter((x) => x.id !== w.id);
+      state.wr.openId = null;
+      renderWritingTab(s);
+    } catch (e) { fail(e, "삭제하지 못했습니다"); }
+  };
+  $("#wr-redo").onclick = () => openForm({
+    title: "원문 고쳐서 다시 첨삭",
+    fields: [{ name: "text", label: "학생이 쓴 원문 (잘못 읽힌 글자만 고치세요. 학생의 틀린 철자는 그대로 두세요)", type: "textarea", rows: 12, maxlength: 20000, required: true }],
+    values: { text: w.ocr_text || "" },
+    wide: true,
+    submitLabel: "다시 첨삭",
+    onSubmit: async (v) => {
+      const out = await wrCallCorrect({ grade: s.grade, topic: w.title, text: v.text });
+      const patch = { ocr_text: out.result.transcript || v.text, result: out.result, ai_model: out.model, updated_at: new Date().toISOString() };
+      await run(db.from("writings").update(patch).eq("id", w.id));
+      Object.assign(w, patch);
+      if (state.wr.openId === w.id && state.tab === "writing") renderWritingTab(s);
+    },
+  });
+  const box = $("#wr-orig-box");
+  if (box) {
+    box.addEventListener("toggle", async () => {
+      if (!box.open || box.dataset.done) return;
+      box.dataset.done = "1";
+      const host = $("#wr-origs");
+      const { data, error } = await db.storage.from("writings").createSignedUrls(files.map((f) => f.path), 600);
+      if (error || !data) { host.textContent = "원본을 불러오지 못했어요"; delete box.dataset.done; return; }
+      host.innerHTML = data.map((d, i) => (d.signedUrl
+        ? (files[i].type === "application/pdf" ? `<a class="btn" href="${esc(d.signedUrl)}" target="_blank" rel="noopener">PDF 열기 (${esc(files[i].name || "")})</a>` : `<a href="${esc(d.signedUrl)}" target="_blank" rel="noopener"><img src="${esc(d.signedUrl)}" alt="올린 사진 ${i + 1}"></a>`)
+        : `<span class="muted">${i + 1}번째 파일을 불러오지 못했어요</span>`)).join("");
+    });
+  }
+}
+
 async function selectStudent(id) {
   state.view = "student";
   state.studentId = id;
+  state.wr.openId = null;
   state.tab = "progress";
   try {
     await loadDetail(id);
