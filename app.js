@@ -16,6 +16,7 @@ const state = {
   recFilter: { range: "thisWeek", start: "", end: "" },
   lessonFilter: { range: "thisWeek", start: "", end: "" },
   testFilter: { range: "thisWeek", start: "", end: "" },
+  wrFilter: { range: "all", start: "", end: "" },   // 라이팅 첨삭 목록 기간 (글이 드물어 기본은 전체)
   allRecs: [],
   evals: { year: new Date().getFullYear(), month: new Date().getMonth() + 1, studentId: null, data: null, loading: false, failed: false, key: "" },
   studentId: null,
@@ -4216,10 +4217,12 @@ function renderWritingTab(s) {
   const open = w.openId && w.rows.find((r) => r.id === w.openId);
   if (open) return renderWritingDetail(s, open);
   w.openId = null;
+  const shown = w.rows.filter((r) => inRange(state.wrFilter, r.written_on));
   body.innerHTML = `
     <div class="toolbar"><button class="btn" type="button" id="btn-wr-reload">새로고침</button><span class="muted">Claude Code 에서 첨삭한 글은 새로고침하면 나타나요</span></div>
-    ${w.rows.length
-      ? `<div class="wr-list">${w.rows
+    ${w.rows.length ? filterHtml(state.wrFilter, "wf", false) : ""}
+    ${shown.length
+      ? `<div class="wr-list">${shown
           .map((r) => {
             const a = wrAvg(r), n = wrFixCount(r);
             const first = r.title || (r.ocr_text || "").split(/\n/)[0].slice(0, 60) || "(제목 없음)";
@@ -4229,8 +4232,10 @@ function renderWritingTab(s) {
               <span class="wr-meta">${a == null ? "" : `<span class="badge">평균 ${a.toFixed(1)}/5</span>`}${Array.isArray(r.result?.sentences) ? `<span class="badge ${n ? "warn" : "done"}">${n ? `고친 곳 ${n}` : "고칠 곳 없음"}</span>` : `<span class="badge warn">첨삭 대기</span>`}</span></button>`;
           })
           .join("")}</div>`
+      : w.rows.length ? `<div class="card empty">이 기간에는 첨삭한 글이 없습니다. 위에서 기간을 바꿔 보세요.</div>`
       : `<div class="card empty">아직 첨삭한 글이 없습니다. Claude Code 에서 '${esc(s.name)} 영어 라이팅 첨삭해줘' 라고 하면 여기에 나타나요.</div>`}`;
   $("#btn-wr-reload").onclick = () => { w.sid = null; renderWritingTab(s); };
+  if (w.rows.length) bindFilter(state.wrFilter, "wf", () => renderWritingTab(s));
   body.onclick = (e) => {
     const b = e.target.closest("[data-wr-open]");
     if (b) { w.openId = b.dataset.wrOpen; renderWritingTab(s); }
