@@ -1777,7 +1777,11 @@ function renderTestsTab(s) {
   const recent = pcts.slice(0, 5);
   const scoped = state.testFilter.range !== "all";
   $("#tab-body").innerHTML = `
-    <div class="toolbar"><button class="btn primary" id="btn-add-test">+ 시험 점수</button></div>
+    <div class="toolbar"><button class="btn primary" id="btn-add-test">+ 시험 점수</button>
+      <span class="xl-sep" aria-hidden="true"></span>
+      <button class="btn xl-btn" id="btn-txl-tpl" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0 0l-4-4m4 4l4-4M4 16h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>양식 다운로드</button>
+      <button class="btn xl-btn" id="btn-txl-up" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 13V3m0 0L6 7m4-4l4 4M4 16h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>엑셀 업로드</button>
+      <input type="file" id="txl-file" accept=".xlsx" hidden></div>
     ${all.length ? trendCards(all) : ""}
     ${filterHtml(state.testFilter, "tf", false)}
     ${
@@ -1800,6 +1804,15 @@ function renderTestsTab(s) {
         : `<div class="card empty">${all.length ? "이 기간에는 시험 기록이 없습니다. 위에서 기간을 바꿔 보세요." : "시험 기록이 없습니다."}</div>`
     }`;
   bindFilter(state.testFilter, "tf", () => renderTestsTab(s));
+  $("#btn-txl-tpl").onclick = () => downloadTestTemplate(s).catch((e) => fail(e));
+  const tfile = $("#txl-file");
+  $("#btn-txl-up").onclick = () => tfile.click();
+  tfile.onchange = async () => {
+    const f = tfile.files && tfile.files[0];
+    tfile.value = "";
+    if (!f) return;
+    try { await uploadTestSheet(s, f); } catch (e) { fail(e); }
+  };
 }
 
 /* ---------- 리포트 (기간 요약 + 학부모 안내문 초안) ---------- */
@@ -4038,6 +4051,159 @@ function testForm(s, test) {
     ksel.onchange = () => { if (!test) { const k = kl.find((x) => x.name === ksel.value); if (k) msel.value = k.max; } unitLabels(); };
     unitLabels();
   }
+}
+
+/* ---------- 시험·단어 엑셀: 양식 다운로드 / 업로드 ----------
+   양식: 날짜 · 종류 · 시험 이름 · 점수 · 만점 (한 줄이 시험 한 건). 종류는 목록에서 고르고, 만점을 비우면 그 종류의 기본 만점. */
+const XLT_HEAD = ["날짜", "종류", "시험 이름", "점수", "만점", "구분"];
+async function downloadTestTemplate(s) {
+  const X = await loadXlsx();
+  const kl = kindList();
+  const wb = new X.Workbook();
+  const ws = wb.addWorksheet("점수입력");
+  const info = wb.addWorksheet("안내");
+  const lst = wb.addWorksheet("종류목록");
+  lst.addRow(["종류", "기본 만점", "단위"]);
+  lst.getRow(1).font = { bold: true };
+  kl.forEach((k) => lst.addRow([k.name, k.max, k.unit]));
+  [16, 12, 8].forEach((w, i) => { lst.getColumn(i + 1).width = w; });
+  const kindRef = `종류목록!$A$2:$A$${kl.length + 1}`;
+
+  ws.addRow(XLT_HEAD);
+  ws.getRow(1).height = 24;
+  ws.getRow(1).eachCell((c) => {
+    c.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2C47" } };
+    c.alignment = { horizontal: "center", vertical: "middle" };
+  });
+  const thin = { style: "thin", color: { argb: "FFD3DBE7" } };
+  const grey = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEEF1F6" } };
+  const ex = ws.addRow([utcD(todayStr()), kl[0].name, "Unit 7 단어", 28, 30, "예시"]);
+  ex.eachCell({ includeEmpty: true }, (c) => { c.fill = grey; c.font = { italic: true, color: { argb: "FF8B95A5" } }; });
+  for (let i = 0; i < 100; i++) ws.addRow([null, null, null, null, null, null]);
+  ws.eachRow({ includeEmpty: true }, (row, rn) => {
+    if (rn === 1) return;
+    row.eachCell({ includeEmpty: true }, (c) => { c.border = { top: thin, left: thin, bottom: thin, right: thin }; });
+    row.getCell(1).numFmt = "yyyy-mm-dd";
+    row.getCell(2).dataValidation = { type: "list", allowBlank: true, formulae: [kindRef] };
+  });
+  [14, 14, 28, 10, 10, 8].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+
+  [["시험·단어 업로드 양식", ""], ["", ""], ["학생", `${s.name}${s.grade ? ` (${s.grade})` : ""}`], ["", ""], ["작성 방법", ""],
+    ["1", "[점수입력] 시트에 시험 한 건을 한 줄씩 적습니다. 맨 위 회색 줄(구분 칸에 '예시')은 예시라서 업로드할 때 무시됩니다."],
+    ["2", "날짜는 2026-10-21 처럼 적습니다. 엑셀 날짜 칸이어도 됩니다."],
+    ["3", "종류는 칸의 ▼ 목록에서 고릅니다. 목록에 없는 이름은 오류로 표시됩니다. ([종류목록] 시트 참고, 앱의 '시험 종류'에서 추가할 수 있어요)"],
+    ["4", "점수는 숫자만 적습니다. 만점을 비우면 그 종류의 기본 만점이 들어갑니다."],
+    ["5", "시험 이름은 비워도 됩니다."],
+    ["6", "이미 같은 날짜·종류·이름의 기록이 있으면 업로드할 때 건너뛰거나 덮어쓸지 고를 수 있습니다."]].forEach((r) => info.addRow(r));
+  info.getCell("A1").font = { bold: true, size: 16 };
+  info.getColumn(1).width = 12; info.getColumn(2).width = 95;
+  [3, 5].forEach((n) => { info.getCell(`A${n}`).font = { bold: true }; });
+
+  const buf = await wb.xlsx.writeBuffer();
+  saveBlob(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `시험점수_양식_${String(s.name).replace(/[\\/:*?"<>|]/g, "_")}.xlsx`);
+  toast("양식을 내려받았습니다");
+}
+async function readTestSheet(s, file) {
+  const X = await loadXlsx();
+  const wb = new X.Workbook();
+  try { await wb.xlsx.load(await file.arrayBuffer()); } catch { throw new Error("엑셀 파일(.xlsx)을 읽지 못했습니다."); }
+  const ws = wb.getWorksheet("점수입력") || wb.worksheets.find((w) => w.name !== "안내" && w.name !== "종류목록");
+  if (!ws) throw new Error("[점수입력] 시트를 찾을 수 없습니다. '양식 다운로드'로 받은 파일을 쓰세요.");
+  const head = {};
+  ws.getRow(1).eachCell((c, i) => { head[xlCellText(c)] = i; });
+  if (["날짜", "종류", "점수"].some((k) => !head[k])) throw new Error("양식 열(날짜·종류·점수)을 찾을 수 없습니다. '양식 다운로드'로 받은 파일을 쓰세요.");
+  const get = (row, k) => (head[k] ? xlCellText(row.getCell(head[k])) : "");
+  const kl = kindList();
+  const existing = await run(db.from("tests").select("id, test_date, kind, title").eq("student_id", s.id).limit(5000));
+  const keyOf = (d, k, t) => `${d}|${k}|${(t || "").trim()}`;
+  const exist = new Map(existing.map((t) => [keyOf(t.test_date, t.kind, t.title), t.id]));
+  const seen = new Set();
+  const rows = [];
+  ws.eachRow((row, rn) => {
+    if (rn === 1) return;
+    if (get(row, "구분") === "예시") return;
+    const r = { rn, dateRaw: get(row, "날짜"), kind: get(row, "종류"), title: get(row, "시험 이름"), scoreRaw: get(row, "점수"), maxRaw: get(row, "만점") };
+    if (!r.dateRaw && !r.kind && !r.title && !r.scoreRaw && !r.maxRaw) return; // 완전히 빈 줄
+    rows.push(r);
+  });
+  const num = (t) => (t === "" ? NaN : Number(String(t).replace(/,/g, "")));
+  rows.forEach((r) => {
+    const bad = (msg) => { r.status = "error"; r.msg = msg; };
+    r.date = xlDate(r.dateRaw);
+    if (!r.date) return bad(`날짜 '${r.dateRaw || "비어 있음"}' 을(를) 읽을 수 없어요`);
+    const k = kl.find((x) => x.name === r.kind);
+    if (!r.kind) return bad("종류를 골라 주세요");
+    if (!k) return bad("종류 목록에 없어요");
+    r.score = num(r.scoreRaw);
+    if (!Number.isFinite(r.score) || r.score < 0) return bad(r.scoreRaw ? "점수는 0 이상의 숫자여야 해요" : "점수가 비어 있어요");
+    r.max = r.maxRaw === "" ? k.max : num(r.maxRaw);
+    if (!Number.isFinite(r.max) || r.max <= 0) return bad("만점은 0보다 큰 숫자여야 해요");
+    if (r.score > r.max) return bad("점수가 만점보다 커요");
+    r.unit = k.unit;
+    r.title = r.title.slice(0, 100);
+    const key = keyOf(r.date, r.kind, r.title);
+    if (seen.has(key)) { r.status = "skip"; r.msg = "위에 같은 줄이 있어요"; return; }
+    seen.add(key);
+    r.existingId = exist.get(key) || null;
+    r.status = "ok";
+  });
+  const stu = wb.getWorksheet("안내") ? xlCellText(wb.getWorksheet("안내").getCell("B3")) : "";
+  return { fileName: file.name, studentName: stu, match: !stu ? null : stu.startsWith(s.name), rows };
+}
+function xlTestPreviewHtml(res, dupMode) {
+  const errN = res.rows.filter((r) => r.status === "error").length;
+  const dupN = res.rows.filter((r) => r.status === "ok" && r.existingId).length;
+  const skipN = res.rows.filter((r) => r.status === "skip" || (r.status === "ok" && r.existingId && dupMode === "skip")).length;
+  const saveN = res.rows.filter((r) => r.status === "ok" && !(r.existingId && dupMode === "skip")).length;
+  const body = res.rows.map((r) => {
+    const wd = r.date ? DAY_NAME[parseD(r.date).getDay()] : "";
+    const dupSkipped = r.status === "skip" || (r.status === "ok" && r.existingId && dupMode === "skip");
+    const st = r.status === "error" ? `<span class="badge bad">오류</span><div class="xl-msg">${esc(r.msg)}</div>`
+      : dupSkipped ? `<span class="badge">건너뜀</span><div class="xl-msg muted">${esc(r.msg || "이미 같은 기록 있음")}</div>`
+      : `<span class="badge done">저장</span>${r.existingId ? `<div class="xl-msg muted">덮어쓰기</div>` : ""}`;
+    const sc = r.status === "error" && !Number.isFinite(r.score) ? esc(r.scoreRaw) : `${r.score}/${r.max}${esc(r.unit || "")}`;
+    const p = r.status !== "error" && Number.isFinite(r.score) && Number.isFinite(r.max) && r.max > 0 ? `${pct(r.score, r.max).toFixed(0)}%` : "";
+    return `<tr class="${r.status === "error" ? "xl-err" : ""}"><td style="white-space:nowrap">${r.date ? `<b>${Number(r.date.slice(5, 7))}/${Number(r.date.slice(8, 10))}</b> (${wd})` : esc(r.dateRaw)}</td>
+      <td>${esc(r.kind)}</td><td>${esc(r.title || "")}</td><td class="num">${sc}</td><td class="num">${p}</td><td>${st}</td></tr>`;
+  }).join("");
+  return `
+    <div class="xl-file"><b>${esc(res.fileName)}</b><span class="muted">${res.studentName ? "양식 학생 " + esc(res.studentName) : "학생 정보 없음"}</span><span class="spacer"></span>
+      ${res.match === false ? '<span class="badge bad">학생 다름</span>' : res.match ? '<span class="badge done">학생 일치</span>' : ""}</div>
+    ${res.match === false ? '<p class="xl-warn">이 양식은 다른 학생의 것으로 보여요. 맞는지 확인하고 저장하세요.</p>' : ""}
+    <div class="xl-sum"><div class="ok"><span>저장</span><b>${saveN}건</b></div><div><span>건너뜀</span><b>${skipN}건</b></div><div class="${errN ? "err" : ""}"><span>확인 필요</span><b>${errN}건</b></div></div>
+    ${errN ? '<p class="xl-warn">확인 필요 줄은 저장되지 않아요. 엑셀에서 고쳐 다시 올리거나, 나머지만 저장할 수 있어요.</p>' : ""}
+    ${body ? `<div class="card table-wrap xl-tbl"><table><thead><tr><th>날짜</th><th>종류</th><th>이름</th><th class="num">점수</th><th class="num">백분율</th><th>상태</th></tr></thead><tbody>${body}</tbody></table></div>` : '<div class="card empty">입력된 내용이 없습니다.</div>'}
+    ${dupN ? `<p class="muted xl-dup">이미 같은 기록이 있는 줄 ${dupN}건이 있어요.</p>` : ""}`;
+}
+async function uploadTestSheet(s, file) {
+  const res = await readTestSheet(s, file);
+  let dupMode = "skip";
+  const dupN = res.rows.filter((r) => r.status === "ok" && r.existingId).length;
+  const count = () => res.rows.filter((r) => r.status === "ok" && !(r.existingId && dupMode === "skip")).length;
+  const fields = [{ name: "xlt-prev", type: "slot" }];
+  if (dupN) fields.push({ name: "dup", label: "이미 같은 기록이 있는 줄 (날짜·종류·이름이 같은 것)", type: "select", options: [["skip", "건너뛰기 (기존 기록 유지)"], ["overwrite", "덮어쓰기 (엑셀 점수로 바꿈)"]] });
+  openForm({
+    title: "엑셀 업로드 · 시험·단어",
+    wide: true,
+    fields,
+    values: {},
+    submitLabel: `${count()}건 저장`,
+    onSubmit: async (d) => {
+      const dup = d.dup || "skip";
+      const targets = res.rows.filter((r) => r.status === "ok" && !(r.existingId && dup === "skip"));
+      if (!targets.length) throw new Error("저장할 내용이 없습니다. 오류 줄을 고치거나 덮어쓰기를 고르세요.");
+      const fresh = targets.filter((r) => !r.existingId).map((r) => ({ student_id: s.id, test_date: r.date, kind: r.kind, title: r.title || null, score: r.score, max_score: r.max }));
+      if (fresh.length) await run(db.from("tests").insert(fresh));
+      for (const r of targets.filter((x) => x.existingId)) await run(db.from("tests").update({ score: r.score, max_score: r.max }).eq("id", r.existingId));
+      await refresh();
+      toast(`시험 점수 ${targets.length}건을 저장했습니다`);
+    },
+  });
+  $("#xlt-prev").innerHTML = xlTestPreviewHtml(res, dupMode);
+  const sel = $("#dlg-form").elements.dup;
+  if (sel) sel.onchange = () => { dupMode = sel.value; $("#xlt-prev").innerHTML = xlTestPreviewHtml(res, dupMode); $("#dlg-submit").textContent = `${count()}건 저장`; };
 }
 
 /* ---------- 백업 ---------- */
