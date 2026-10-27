@@ -3593,9 +3593,13 @@ function lessonForm(s, lesson, rec = null, preset = null) {
 
   // 날짜의 요일에 배정된 교재만 기록할 수 있습니다 (요일을 지정하지 않은 교재는 모든 요일).
   const wdOf = (ds) => { const d = new Date(`${ds}T00:00:00`); return Number.isNaN(d.getTime()) ? null : d.getDay(); };
-  const dayItems = (wd) => bookProgressFor(s.id).filter((x) => !dayList(x.p).length || (wd != null && dayList(x.p).includes(wd)));
+  let curAtt = (lesson && lesson.attendance) || (preset && preset.attendance) || "출석";
+  const isMk = () => curAtt === "보강"; // 보강 수업은 요일과 상관없이 어떤 교재든 기록할 수 있습니다
+  const dayItemsStrict = (wd) => bookProgressFor(s.id).filter((x) => !dayList(x.p).length || (wd != null && dayList(x.p).includes(wd)));
+  const dayItems = (wd) => (isMk() ? bookProgressFor(s.id) : dayItemsStrict(wd));
+  let pickOpen = false, pickQ = "";
   const defaultBlocks = (wd) => {
-    const items = dayItems(wd);
+    const items = dayItemsStrict(wd);
     const explicit = items.filter((x) => dayList(x.p).includes(wd));
     let ids = explicit.map((x) => x.book.id);
     if (!ids.length && items.length) {
@@ -3640,12 +3644,13 @@ function lessonForm(s, lesson, rec = null, preset = null) {
       const { sync_progress, ...data } = d;
       const used = new Set();
       const withBook = [];
+      const assignIds = new Set();
       let topicOnly = null;
       blocks.forEach((b, i) => {
         const hasText = b.topic && b.topic.trim();
         if (!b.textbook_id) {
           if (b.from_unit != null || b.to_unit != null) throw new Error(`교재 ${i + 1}: 단원 범위를 입력하려면 교재를 선택하세요.`);
-          if (hasText) { if (i > 0) throw new Error(`교재 ${i + 1}: 교재를 선택하세요.`); topicOnly = b; }
+          if (hasText) { if (i > 0 && !isMk()) throw new Error(`교재 ${i + 1}: 교재를 선택하세요.`); topicOnly = topicOnly ? { topic: `${topicOnly.topic.trim()} / ${b.topic.trim()}` } : b; }
           return;
         }
         const book = bookOf(b.textbook_id);
@@ -3654,8 +3659,10 @@ function lessonForm(s, lesson, rec = null, preset = null) {
         used.add(b.textbook_id);
         if (b.from_unit != null && b.to_unit != null && b.from_unit > b.to_unit) throw new Error(`${book.title}: 시작 단원이 종료 단원보다 클 수 없습니다.`);
         if ((b.from_unit || 0) > book.total_units || (b.to_unit || 0) > book.total_units) throw new Error(`${book.title}: 전체 단원 수는 ${book.total_units}입니다.`);
+        if (b.assign) assignIds.add(b.textbook_id);
         withBook.push({ textbook_id: b.textbook_id, from_unit: b.from_unit ?? null, to_unit: b.to_unit ?? null, topic: hasText ? b.topic.trim().slice(0, 200) : null });
       });
+      if (topicOnly && withBook.length) withBook[0].topic = [withBook[0].topic, topicOnly.topic.trim()].filter(Boolean).join(" / ").slice(0, 200); // 교재 없이 적은 내용은 첫 교재의 학습 내용에 붙여 저장
       const primary = withBook[0] || (topicOnly ? { textbook_id: null, from_unit: null, to_unit: null, topic: topicOnly.topic.trim().slice(0, 200) } : { textbook_id: null, from_unit: null, to_unit: null, topic: null });
       const extras = withBook.slice(1);
       const row = { ...data, textbook_id: primary.textbook_id, from_unit: primary.from_unit, to_unit: primary.to_unit, topic: primary.topic, homework: data.homework || null };
@@ -3685,13 +3692,15 @@ function lessonForm(s, lesson, rec = null, preset = null) {
       }
 
       let synced = false;
-      if (!lesson && sync_progress && data.attendance !== "결석") {
+      if (!lesson && (sync_progress || assignIds.size) && data.attendance !== "결석") {
         for (const b of withBook) {
-          if (b.to_unit == null) continue;
           const pr = progOf(b.textbook_id);
           if (!pr) {
-            await run(db.from("progress").insert({ student_id: s.id, textbook_id: b.textbook_id, current_unit: b.to_unit }));
+            if (!assignIds.has(b.textbook_id)) continue; // 배정 안 된 교재는 '배정' 체크를 했을 때만 진도를 만듭니다
+            await run(db.from("progress").insert({ student_id: s.id, textbook_id: b.textbook_id, current_unit: b.to_unit ?? 0 }));
             synced = true;
+          } else if (!sync_progress || b.to_unit == null) {
+            continue;
           } else if (b.to_unit > pr.current_unit) {
             await run(db.from("progress").update({ current_unit: b.to_unit, updated_at: new Date().toISOString() }).eq("id", pr.id));
             synced = true;
@@ -3731,34 +3740,82 @@ function lessonForm(s, lesson, rec = null, preset = null) {
   const paint = () => {
     const usedIds = new Set(blocks.map((b) => b.textbook_id).filter(Boolean));
     const allowed = dayItems(curWd);
-    const skipped = allowed.filter((x) => !usedIds.has(x.book.id));
+    const skipped = isMk() ? [] : allowed.filter((x) => !usedIds.has(x.book.id));
     const dn = curWd != null ? DAY_NAME[curWd] + "요일 " : "";
     const blockHtml = blocks.map((b, i) => {
       const book = bookOf(b.textbook_id);
       const p = book ? progOf(book.id) : null;
       const pr = p;
-      const hint = book ? `<div class="ls-hint">${pr ? `현재 진도 ${esc(curLabel(book, pr.current_unit))}` : "배정이 해제된 교재예요"}${b.from_unit != null && b.to_unit != null && b.from_unit <= b.to_unit && b.from_unit >= 1 ? ` · 기록 <b>${esc(unitName(book, b.from_unit))} – ${esc(unitName(book, b.to_unit))} (${b.to_unit - b.from_unit + 1}${bookLeaves(book) ? "단원" : ""})</b>` : ""}</div>` : "";
+      const hint = book ? `<div class="ls-hint">${pr ? `현재 진도 ${esc(curLabel(book, pr.current_unit))}` : isMk() ? `이 학생에게 배정되지 않은 교재예요 · 총 ${esc(book.total_units)}${bookLeaves(book) ? " 단원" : " " + esc(book.unit_label)}` : "배정이 해제된 교재예요"}${b.from_unit != null && b.to_unit != null && b.from_unit <= b.to_unit && b.from_unit >= 1 ? ` · 기록 <b>${esc(unitName(book, b.from_unit))} – ${esc(unitName(book, b.to_unit))} (${b.to_unit - b.from_unit + 1}${bookLeaves(book) ? "단원" : ""})</b>` : ""}</div>` : "";
       const days = p ? dayList(p) : [];
       return `<div class="ls-block">
         <div class="ls-head"><span class="tb-n">${i + 1}</span>
-          <strong class="ls-name">${esc(book ? book.title : "교재 없음")}</strong>
-          ${book ? `<span class="ls-kind">${days.length ? SCH_ORDER.filter((d) => days.includes(d)).map((d) => DAY_NAME[d]).join(" · ") : "모든 수업"}</span><span class="ls-kind">${bookLeaves(book) && bookLeaves(book).some((l) => l.child >= 0) ? "1레벨 → 2레벨" : "1레벨만"}</span>` : ""}
-          <button type="button" class="btn small" data-ls="skip" data-i="${i}">오늘은 안 나감</button></div>
+          <strong class="ls-name">${esc(book ? book.title : isMk() ? "교재 없이 내용만" : "교재 없음")}</strong>${book && !p && isMk() ? `<span class="ls-un">배정 안 된 교재</span>` : ""}
+          ${book ? `${p ? `<span class="ls-kind">${days.length ? SCH_ORDER.filter((d) => days.includes(d)).map((d) => DAY_NAME[d]).join(" · ") : "모든 수업"}</span>` : ""}<span class="ls-kind">${bookLeaves(book) && bookLeaves(book).some((l) => l.child >= 0) ? "1레벨 → 2레벨" : "1레벨만"}</span>` : ""}
+          <button type="button" class="btn small" data-ls="skip" data-i="${i}">${isMk() ? "빼기" : "오늘은 안 나감"}</button></div>
         ${book ? `<div class="ls-units ${bookLeaves(book) ? "tree" : ""}">${unitField(b, i, "from_unit", "시작 단원")}${unitField(b, i, "to_unit", "종료 단원")}</div>${hint}` : ""}
+        ${book && !p && isMk() && !lesson ? `<label class="ls-assign"><input type="checkbox" data-i="${i}" data-k="assign" ${b.assign ? "checked" : ""}><span>이 학생에게 이 교재도 배정하고 진도 올리기<small>체크하지 않으면 이 수업 기록에만 남고 교재 진도 탭은 그대로예요.</small></span></label>` : ""}
         <label>학습 내용 (예: 현재완료, 본문 읽기)<input type="text" maxlength="200" data-i="${i}" data-k="topic" value="${esc(b.topic || "")}"></label></div>`;
     }).join("");
     const skippedHtml = skipped.map((x) => `<div class="ls-skip"><strong>${esc(x.book.title)}</strong><span class="muted">오늘은 안 나감</span><button type="button" class="btn small" data-ls="addbook" data-id="${esc(x.book.id)}">+ 넣기</button></div>`).join("");
-    const empty = !blocks.length && !skipped.length
+    const empty = !blocks.length && !skipped.length && !isMk()
       ? `<div class="ls-empty"><strong>${curWd != null ? DAY_NAME[curWd] + "요일에 " : ""}배정된 교재가 없어요</strong><span class="muted">교재 진도 탭에서 교재의 요일을 바꾸면 이 날에도 기록할 수 있어요. 진도 없이 출결·숙제·메모는 그대로 저장돼요.</span>${bookProgressFor(s.id).length ? `<span class="muted">현재 배정: ${bookProgressFor(s.id).map((x) => `${esc(x.book.title)} (${dayList(x.p).length ? SCH_ORDER.filter((d) => dayList(x.p).includes(d)).map((d) => DAY_NAME[d]).join("·") : "모든 수업"})`).join(", ")}</span>` : ""}</div>`
       : "";
-    host.innerHTML = `${curWd != null ? `<div class="ls-banner"><b>${DAY_NAME[curWd]}요일</b> 수업 교재만 기록할 수 있어요</div>` : ""}
-      <div class="ls-title"><strong>${dn}수업 교재 · 진도</strong><span class="muted">${allowed.length ? `${allowed.length}개 중 ${blocks.filter((b) => b.textbook_id).length}개 포함` : "0개"}</span></div>${blockHtml}${skippedHtml}${empty}`;
+    const nb = blocks.filter((b) => b.textbook_id).length;
+    const addBar = isMk() ? `<div class="ls-addbar"><button type="button" class="btn ls-add" data-ls="pick">＋ 교재 추가</button>${blocks.some((b) => !b.textbook_id) ? "" : `<button type="button" class="btn ls-add quiet" data-ls="nobook">＋ 교재 없이 내용만</button>`}</div><div id="ls-pickwrap"></div>` : "";
+    host.innerHTML = `${isMk() ? `<div class="ls-banner"><b>보강 수업</b>은 요일과 상관없이 어떤 교재든 추가할 수 있어요</div>` : curWd != null ? `<div class="ls-banner"><b>${DAY_NAME[curWd]}요일</b> 수업 교재만 기록할 수 있어요</div>` : ""}
+      <div class="ls-title"><strong>${isMk() ? "" : dn}수업 교재 · 진도</strong><span class="muted">${isMk() ? `${nb}개 포함` : allowed.length ? `${allowed.length}개 중 ${nb}개 포함` : "0개"}</span></div>${blockHtml}${skippedHtml}${empty}${addBar}`;
+    if (pickOpen) paintPick();
+  };
+  const hlq = (t, q) => { const i = q ? t.toLowerCase().indexOf(q.toLowerCase()) : -1; return i < 0 ? esc(t) : `${esc(t.slice(0, i))}<mark>${esc(t.slice(i, i + q.length))}</mark>${esc(t.slice(i + q.length))}`; };
+  const paintPick = () => {
+    const wrap = host.querySelector("#ls-pickwrap");
+    if (!wrap) return;
+    if (!wrap.firstChild) {
+      wrap.innerHTML = `<div class="ls-pick"><div class="ls-pk-top"><input type="search" id="ls-pkq" placeholder="교재 이름 검색" autocomplete="off" lang="ko"><button type="button" class="btn small" data-ls="pickclose">닫기</button></div><div id="ls-pklist"></div></div>`;
+      const q = wrap.querySelector("#ls-pkq");
+      q.value = pickQ;
+      q.addEventListener("input", () => { pickQ = q.value.trim(); paintPick(); });
+      q.focus();
+      wrap.scrollIntoView({ block: "nearest" });
+    }
+    const used = new Set(blocks.map((b) => b.textbook_id).filter(Boolean));
+    const match = (t) => !pickQ || t.toLowerCase().includes(pickQ.toLowerCase());
+    const mine = bookProgressFor(s.id).filter((x) => match(x.book.title)).sort((a, b) => a.book.title.localeCompare(b.book.title, "ko"));
+    const mineIds = new Set(bookProgressFor(s.id).map((x) => x.book.id));
+    const others = state.textbooks.filter((b) => !mineIds.has(b.id) && match(b.title)).sort((a, b) => a.title.localeCompare(b.title, "ko"));
+    const row = (b, sub) => `<div class="ls-pk-row ${used.has(b.id) ? "dim" : ""}"><div><b>${hlq(b.title, pickQ)}</b><small>${sub}</small></div>${used.has(b.id) ? `<span class="muted">이미 넣음</span>` : `<button type="button" class="btn small primary" data-ls="pickadd" data-id="${esc(b.id)}">넣기</button>`}</div>`;
+    const total = (b) => `총 ${esc(b.total_units)}${bookLeaves(b) ? " 단원" : " " + esc(b.unit_label)}`;
+    const dayTxt = (p) => (dayList(p).length ? SCH_ORDER.filter((d) => dayList(p).includes(d)).map((d) => DAY_NAME[d]).join("·") : "모든 수업");
+    $("#ls-pklist").innerHTML =
+      (mine.length ? `<div class="ls-pk-h">이 학생 교재 (${mine.length})</div>${mine.map((x) => row(x.book, `${dayTxt(x.p)} · 현재 ${esc(curLabel(x.book, x.p.current_unit))}`)).join("")}` : "") +
+      (others.length ? `<div class="ls-pk-h">다른 교재 (${others.length}) · 배정 안 된 교재</div>${others.map((b) => row(b, total(b))).join("")}` : "") +
+      (!mine.length && !others.length ? `<div class="ls-pk-empty">${pickQ ? `"${esc(pickQ)}"에 맞는 교재가 없어요.` : "등록된 교재가 없어요."}<br><span class="muted">찾는 교재가 없으면 교재 관리에서 먼저 등록하세요.</span></div>` : `<div class="ls-pk-foot muted">찾는 교재가 없나요? 교재 관리에서 먼저 등록하세요.</div>`);
   };
   host.addEventListener("click", (e) => {
     const b = e.target.closest("[data-ls]");
     if (!b) return;
+    if (b.dataset.ls === "pick") { pickOpen = !pickOpen; pickQ = ""; paint(); return; }
+    if (b.dataset.ls === "pickclose") { pickOpen = false; paint(); return; }
+    if (b.dataset.ls === "pickadd") { blocks.push({ textbook_id: b.dataset.id, from_unit: autoFrom(b.dataset.id), to_unit: null, topic: "" }); paint(); return; }
+    if (b.dataset.ls === "nobook") { blocks.push({ textbook_id: "", from_unit: null, to_unit: null, topic: "" }); paint(); return; }
     if (b.dataset.ls === "skip") blocks.splice(Number(b.dataset.i), 1);
     else if (b.dataset.ls === "addbook") blocks.push({ textbook_id: b.dataset.id, from_unit: autoFrom(b.dataset.id), to_unit: null, topic: "" });
+    paint();
+  });
+  const attEl = $("#dlg-form [name='attendance']");
+  let prevAtt = curAtt;
+  attEl.addEventListener("change", () => {
+    const next = attEl.value;
+    if (next === prevAtt) return;
+    if (prevAtt === "보강") {
+      const okIds = new Set(dayItemsStrict(curWd).map((x) => x.book.id));
+      const off = blocks.filter((b) => b.textbook_id && !okIds.has(b.textbook_id));
+      if (off.length && !confirm(`보강이 아니면 ${curWd != null ? DAY_NAME[curWd] + "요일 " : ""}교재만 기록할 수 있어요. 다른 교재 ${off.length}개는 빠져요. 계속할까요?`)) { attEl.value = prevAtt; return; }
+      blocks = blocks.filter((b) => !b.textbook_id || okIds.has(b.textbook_id));
+      pickOpen = false;
+    }
+    curAtt = prevAtt = next;
     paint();
   });
   const dateEl = $("#dlg-form [name='lesson_date']");
@@ -3797,6 +3854,7 @@ function lessonForm(s, lesson, rec = null, preset = null) {
       return;
     }
     if (k === "textbook_id") { b.textbook_id = el.value; b.from_unit = el.value ? autoFrom(el.value) : null; b.to_unit = null; paint(); return; }
+    if (k === "assign") { b.assign = el.checked; return; }
     if (k === "topic") b.topic = el.value;
     else b[k] = el.value === "" ? null : Number(el.value);
   };
