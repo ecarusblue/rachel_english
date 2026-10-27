@@ -890,6 +890,8 @@ function swapUnitCtl(form, name, book, opts = {}) {
     nel = document.createElement("input");
     nel.type = "number";
     nel.min = "0";
+    nel.step = "0.5";
+    nel.inputMode = "decimal";
     nel.value = cur;
   }
   nel.name = name;
@@ -3712,13 +3714,16 @@ function assignBook(s) {
     title: "교재 배정",
     fields: [
       { name: "textbook_id", label: "교재", type: "select", options, required: true },
-      { name: "current_unit", label: "현재 진도 (이미 나간 단원 수)", type: "number", min: 0, default: 0 },
+      { name: "current_unit", label: "현재 진도 (이미 나간 단원 수)", type: "number", min: 0, step: 0.5, default: 0 },
       { name: "next_textbook_id", label: "다음 교재 (선택 · 이 교재를 끝낸 뒤 이어서 할 교재)", type: "select", options: nextOptions() },
       { name: "as-days", type: "slot" },
       { name: "as-rng", type: "slot" },
     ],
     onSubmit: async (d) => {
-      const row = { student_id: s.id, textbook_id: d.textbook_id, current_unit: d.current_unit || 0 };
+      const cu = d.current_unit || 0;
+      const bk = state.textbooks.find((x) => x.id === d.textbook_id);
+      if (cu * 2 !== Math.round(cu * 2) || cu < 0 || (bk && cu > bk.total_units)) throw new Error(`현재 진도는 0.5 단위로 0 ~ ${bk ? bk.total_units : ""} 사이로 입력하세요. 예: 7, 7.5`);
+      const row = { student_id: s.id, textbook_id: d.textbook_id, current_unit: cu };
       if (sel.size) row.weekdays = SCH_ORDER.filter((x) => sel.has(x));
       if (d.next_textbook_id) {
         if (d.next_textbook_id === d.textbook_id) throw new Error("다음 교재는 지금 배정하는 교재와 달라야 해요.");
