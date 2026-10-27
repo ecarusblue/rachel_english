@@ -3570,7 +3570,8 @@ async function setProgress(pid, unit) {
   await run(db.from("progress").update({ current_unit: next, updated_at: new Date().toISOString() }).eq("id", pid));
   p.current_unit = next;
   p.updated_at = new Date().toISOString();
-  renderStudent();
+  renderStudent(); // 바로 보이게 먼저 그리고
+  await refresh(); // DB 값으로 화면 전체를 다시 불러옴
 }
 
 /* ---------- 하루 추천 진도 범위 (교재 배정 · 수업 추천의 기준) ---------- */
