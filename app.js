@@ -745,16 +745,46 @@ function unitName(book, n) {
   if (lv) return lv[n - 1] ? lv[n - 1].label : `${n}번째`;
   return `${book.unit_label} ${n}`;
 }
+/* 0.5 단위 단원 번호: x.5 는 단원의 절반입니다.
+   종료(to)·현재 진도 = "끝낸 단원 수" → 8.5 는 "9단원 중간까지", 시작(from) = "시작 단원 번호" → 9.5 는 "9단원 중간부터".
+   분량 = to - from + 1 (from 8 ~ to 8.5 = 1.5단원, from 8 ~ to 7.5 = 8단원 앞 절반) */
+const isHalfN = (v) => v != null && Math.round(v * 2) % 2 === 1;
+const snapHalf = (v) => Math.round(v * 2) / 2;
+const fmtN = (n) => String(Number(n));
+const amountN = (from, to) => (from != null && to != null ? to - from + 1 : null);
+function unitNameH(book, v, role) {
+  if (v == null || !Number.isFinite(Number(v))) return "";
+  v = Number(v);
+  if (role === "from") return isHalfN(v) ? `${unitName(book, Math.floor(v))} 중간부터` : `${unitName(book, v)} 처음부터`;
+  if (v <= 0) return "시작 전";
+  return isHalfN(v) ? `${unitName(book, Math.ceil(v))} 중간까지` : `${unitName(book, v)} 끝까지`;
+}
 function curNum(book, n) {
+  if (isHalfN(n)) return `${unitName(book, Math.ceil(n))} 중간까지 (${fmtN(n)}/${book.total_units})`;
   if (!bookLeaves(book)) return `${n}/${book.total_units}`;
   return n > 0 ? `${unitName(book, n)} (${n}/${book.total_units})` : `시작 전 (0/${book.total_units})`;
 }
 function curLabel(book, n) {
+  if (isHalfN(n)) return curNum(book, n);
   return bookLeaves(book) ? curNum(book, n) : `${book.unit_label} ${n}/${book.total_units}`;
+}
+// 카드 큰 글씨용: 현재 진도 한 줄
+function curShort(book, n) {
+  if (isHalfN(n)) return `${unitName(book, Math.ceil(n))} 중간까지`;
+  if (bookLeaves(book)) return n > 0 ? unitName(book, n) : "시작 전";
+  return `${book.unit_label} ${n}`;
 }
 function rangeText(book, l) {
   const a = l.from_unit, b = l.to_unit;
   const lv = bookLeaves(book);
+  if (a != null && b != null && (isHalfN(a) || isHalfN(b))) {
+    // 반 단원이 끼어 있을 때
+    if (!isHalfN(a) && isHalfN(b) && b === a - 0.5) return ` ${unitName(book, a)} 앞 절반`;
+    if (isHalfN(a) && !isHalfN(b) && b === a - 0.5) return ` ${unitName(book, b)} 뒤 절반`;
+    const left = isHalfN(a) ? `${unitName(book, Math.floor(a))} 중간` : unitName(book, a);
+    const right = isHalfN(b) ? `${unitName(book, Math.ceil(b))} 중간` : unitName(book, b);
+    return ` ${left} ~ ${right}`;
+  }
   if (lv) {
     if (a != null && b != null) {
       if (a === b) return ` ${unitName(book, a)}`;
@@ -772,6 +802,54 @@ function rangeText(book, l) {
   if (a != null) return ` ${lab} ${a}~`;
   return "";
 }
+
+/* 단원 번호 입력 칸(−0.5 / +0.5 버튼 + 직접 입력). 아래 이벤트는 문서 전체에서 한 번만 연결합니다.
+   입력 칸에는 data-half 가 붙고, 바깥 .us 에 data-book(교재 id)·data-role(from/to)이 있어 칸 밑에 단원 이름을 풀어 줍니다. */
+function unitStep(book, role, value, attrs = "", minOverride = null) {
+  const lo = minOverride != null ? minOverride : role === "from" ? 1 : 0.5;
+  return `<div class="us" data-book="${esc(book.id)}" data-role="${role}">
+    <span class="dr-st us-st"><button type="button" data-ust="-0.5" aria-label="0.5 줄이기">−0.5</button><input type="number" data-half min="${lo}" max="${book.total_units}" step="0.5" inputmode="decimal" ${attrs} value="${value == null ? "" : esc(fmtN(value))}"><button type="button" data-ust="0.5" aria-label="0.5 늘리기">+0.5</button></span>
+    <div class="us-nm">${esc(unitNameH(book, value, role))}</div></div>`;
+}
+function usRefresh(inp) {
+  const box = inp.closest(".us");
+  if (!box) return;
+  const book = state.textbooks.find((b) => b.id === box.dataset.book);
+  const nm = box.querySelector(".us-nm");
+  const st = box.querySelector(".us-st");
+  const v = inp.value === "" ? null : Number(inp.value);
+  const bad = v != null && (!Number.isFinite(v) || v * 2 !== Math.round(v * 2));
+  if (st) st.classList.toggle("bad", bad);
+  if (nm && book) {
+    nm.classList.toggle("bad", bad);
+    nm.textContent = bad ? "0.5 단위로 입력해 주세요. 예: 9, 9.5" : unitNameH(book, v, box.dataset.role);
+  }
+}
+function usClamp(inp, v) {
+  const mn = Number(inp.min) || 0, mx = Number(inp.max) || 500;
+  return Math.max(mn, Math.min(mx, snapHalf(v)));
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest && e.target.closest("[data-ust]");
+  if (!b) return;
+  const inp = b.parentElement.querySelector("input[data-half]");
+  if (!inp) return;
+  const d = Number(b.dataset.ust);
+  const cur = inp.value === "" ? null : Number(inp.value);
+  const next = cur == null || !Number.isFinite(cur) ? (d > 0 ? Number(inp.min) || 1 : 0) : usClamp(inp, snapHalf(cur) + d);
+  inp.value = fmtN(usClamp(inp, next));
+  usRefresh(inp);
+  inp.dispatchEvent(new Event("input", { bubbles: true }));
+  inp.dispatchEvent(new Event("change", { bubbles: true }));
+});
+// 칸에서 벗어나면 0.5 단위로 맞춤(9.3 → 9.5). 다른 change 처리보다 먼저 실행되도록 capture 로 받습니다.
+document.addEventListener("change", (e) => {
+  const inp = e.target;
+  if (!(inp && inp.matches && inp.matches("input[data-half]"))) return;
+  if (inp.value !== "" && Number.isFinite(Number(inp.value))) inp.value = fmtN(usClamp(inp, Number(inp.value)));
+  usRefresh(inp);
+}, true);
+document.addEventListener("input", (e) => { if (e.target && e.target.matches && e.target.matches("input[data-half]")) usRefresh(e.target); }, true);
 
 /* 들여쓰기 목록 ↔ 구조: 한 줄에 항목 하나, 앞에 공백(또는 탭)을 두면 바로 윗 항목의 하위 */
 function parseOutline(text) {
@@ -1300,11 +1378,13 @@ function renderProgressTab(s) {
         <div class="dchips">${dayChips(p)}${dailyChip(book, p)}</div>
         ${recNote(book, p, state.detail.lessons)}
         ${nextLine(p, book)}
-        <div class="stat"><strong>${bookLeaves(book) ? (p.current_unit > 0 ? esc(unitName(book, p.current_unit)) : "시작 전") : esc(book.unit_label) + " " + p.current_unit} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong></div>
+        <div class="stat"><strong>${esc(curShort(book, p.current_unit))} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong></div>
         ${recent ? `<div style="font-size:.85rem;margin-top:.5rem">최근 수업 <span class="muted">${fmtDate(recent.lesson_date)}</span> ·${esc(rangeText(book, recentEnt) || " 범위 미입력")}</div>` : ""}
         <div class="muted" style="font-size:.8rem;margin-top:.4rem">진도 갱신 ${fmtDate((p.updated_at || "").slice(0, 10))}</div>
         <div class="book-actions">
           <button class="btn small" data-act="dec">-1</button>
+          <button class="btn small" data-act="dech">-0.5</button>
+          <button class="btn small primary" data-act="inch">+0.5</button>
           <button class="btn small primary" data-act="inc">+1</button>
           <button class="btn small" data-act="set">직접 입력</button>
           <button class="btn small" data-act="days">요일 변경</button>
@@ -1465,7 +1545,7 @@ async function downloadLessonTemplate(s) {
     const wd = parseD(d).getDay();
     list.forEach((r, k) => {
       const b = r ? state.textbooks.find((x) => x.id === r.textbook_id) : null;
-      const row = ws.addRow([utcD(d), b ? `${b.title} | ${rangeText(b, r).trim()} (${r.to_unit - r.from_unit + 1}단원)` : "", k > 0 ? XL_SAME : "", "", "", "", b ? b.title : ""]);
+      const row = ws.addRow([utcD(d), b ? `${b.title} | ${rangeText(b, r).trim()} (${fmtN(amountN(r.from_unit, r.to_unit))}단원)` : "", k > 0 ? XL_SAME : "", "", "", "", b ? b.title : ""]);
       row.eachCell({ includeEmpty: true }, (c, ci) => {
         c.border = { top: thin, left: thin, bottom: thin, right: thin };
         c.alignment = { vertical: "middle", wrapText: ci === 2 || ci === 6, horizontal: ci === 3 ? "center" : undefined };
@@ -2747,7 +2827,6 @@ function editRecsForm(s, ids) {
   if (!list.length) { toast("수정할 추천이 없습니다"); return; }
   const date = list[0].target_date;
   if (date && recLessonOn(s.id, { target_date: date })) { alert("이 날은 수업 기록이 있어 추천을 수정할 수 없어요."); return; }
-  const unitOpts = (b, sel) => { const o = []; for (let n = 1; n <= b.total_units; n++) o.push(`<option value="${n}" ${n === sel ? "selected" : ""}>${esc(unitName(b, n))}</option>`); return o.join(""); };
   const items = list.map((r) => ({ r, b: state.textbooks.find((x) => x.id === r.textbook_id) })).filter((x) => x.b);
   const wd = date ? DAY_NAME[new Date(`${date}T00:00:00`).getDay()] : "";
   openForm({
@@ -2762,7 +2841,8 @@ function editRecsForm(s, ids) {
         const from = Number(document.querySelector(`[data-re-from="${r.id}"]`).value);
         const to = Number(document.querySelector(`[data-re-to="${r.id}"]`).value);
         const why = document.querySelector(`[data-re-why="${r.id}"]`).value.trim().slice(0, 600);
-        if (from > to) throw new Error(`${b.title}: 시작 단원이 종료 단원보다 뒤예요.`);
+        if (![from, to].every((v) => Number.isFinite(v) && v * 2 === Math.round(v * 2))) throw new Error(`${b.title}: 단원 번호는 0.5 단위로 입력하세요. 예: 9, 9.5`);
+        if (to < from - 0.5) throw new Error(`${b.title}: 종료 단원이 시작 단원보다 앞서요.`);
         if (from < 1 || to > b.total_units) throw new Error(`${b.title}: 전체 단원 수(${b.total_units})를 벗어났어요.`);
         if (from !== r.from_unit || to !== r.to_unit || why !== (r.rationale || "")) upd.push({ r, patch: { from_unit: from, to_unit: to, rationale: why || null } });
       }
@@ -2783,8 +2863,8 @@ function editRecsForm(s, ids) {
   });
   $("#re-slot").innerHTML = `<p class="muted" style="margin:0 0 .6rem">아직 수업 기록에 반영되지 않은 추천입니다. 저장해도 "제안" 상태로 남고 "직접 수정" 표시가 붙습니다.</p>` +
     items.map(({ r, b }) => `<fieldset class="re-box"><legend>${esc(b.title)}</legend>
-      <div class="re-row"><label>시작 단원<select data-re-from="${esc(r.id)}">${unitOpts(b, r.from_unit)}</select></label>
-      <label>종료 단원<select data-re-to="${esc(r.id)}">${unitOpts(b, r.to_unit)}</select></label></div>
+      <div class="re-row"><div class="us-col"><span class="cap">시작 단원</span>${unitStep(b, "from", r.from_unit, `data-re-from="${esc(r.id)}" aria-label="시작 단원"`)}</div>
+      <div class="us-col"><span class="cap">종료 단원</span>${unitStep(b, "to", r.to_unit, `data-re-to="${esc(r.id)}" aria-label="종료 단원"`)}</div></div>
       <label>추천 이유<textarea rows="2" maxlength="600" data-re-why="${esc(r.id)}">${esc(r.rationale || "")}</textarea></label></fieldset>`).join("");
 }
 
@@ -2799,7 +2879,6 @@ function manualRecForm(s) {
   const upcoming = [];
   for (let i = 0; i < 28 && upcoming.length < 4; i++) { const d = addDays(todayStr(), i); if (days.has(parseD(d).getDay()) && !recLessonOn(s.id, { target_date: d })) upcoming.push(d); }
   const dateOf = (d) => `${Number(d.slice(5, 7))}.${Number(d.slice(8, 10))}(${DAY_NAME[parseD(d).getDay()]})`;
-  const unitOpts = (b, sel) => { const o = []; for (let n = 1; n <= b.total_units; n++) o.push(`<option value="${n}" ${n === sel ? "selected" : ""}>${esc(unitName(b, n))}</option>`); return o.join(""); };
   const defBlock = (date, usedIds) => {
     const wd = date ? parseD(date).getDay() : null;
     const free = books.filter((b) => !usedIds.includes(b.id));
@@ -2828,7 +2907,9 @@ function manualRecForm(s) {
         const bk = state.textbooks.find((x) => x.id === b.bid);
         if (seen.has(b.bid)) throw new Error(`${bk.title}: 같은 교재가 두 번 들어 있어요.`);
         seen.add(b.bid);
-        if (b.from > b.to) throw new Error(`${bk.title}: 시작 단원이 끝 단원보다 뒤예요.`);
+        if (![b.from, b.to].every((v) => Number.isFinite(v) && v * 2 === Math.round(v * 2))) throw new Error(`${bk.title}: 단원 번호는 0.5 단위로 입력하세요. 예: 9, 9.5`);
+        if (b.to < b.from - 0.5) throw new Error(`${bk.title}: 끝 단원이 시작 단원보다 앞서요.`);
+        if (b.from < 1 || b.to > bk.total_units) throw new Error(`${bk.title}: 전체 단원 수(${bk.total_units})를 벗어났어요.`);
         const dup = (state.detail.recs || []).find((r) => r.status === "제안" && r.textbook_id === b.bid && r.target_date === date);
         if (dup) throw new Error(`${bk.title}: ${dateOf(date)}에 이미 제안이 있어요. 목록에서 "추천 수정"을 쓰세요.`);
       }
@@ -2862,8 +2943,8 @@ function manualRecForm(s) {
         const bk = state.textbooks.find((x) => x.id === b.bid); const pr = prOf(b.bid);
         return `<fieldset class="re-box"><legend>교재 ${i + 1}</legend>
         <label>교재<select data-mr-book="${i}">${books.map((x) => `<option value="${esc(x.id)}" ${x.id === b.bid ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select></label>
-        <div class="re-row"><label>시작 단원<select data-mr-from="${i}">${unitOpts(bk, b.from)}</select></label>
-        <label>끝 단원<select data-mr-to="${i}">${unitOpts(bk, b.to)}</select></label></div>
+        <div class="re-row"><div class="us-col"><span class="cap">시작 단원</span>${unitStep(bk, "from", b.from, `data-mr-from="${i}" aria-label="시작 단원"`)}</div>
+        <div class="us-col"><span class="cap">끝 단원</span>${unitStep(bk, "to", b.to, `data-mr-to="${i}" aria-label="끝 단원"`)}</div></div>
         <div class="muted" style="font-size:.8rem">${pr ? `현재 진도 ${esc(curLabel(bk, pr.current_unit))}` : "진도 기록 없음"}${blocks.length > 1 ? ` · <a href="#" data-mr-del="${i}">삭제</a>` : ""}</div></fieldset>`;
       }).join("")}
       ${blocks.length < books.length ? `<button type="button" class="btn small" id="mr-add">＋ 교재 추가</button>` : ""}
@@ -3482,7 +3563,7 @@ function editTextbook(book, presetTitle) {
 async function setProgress(pid, unit) {
   const p = state.progress.find((x) => x.id === pid);
   const book = state.textbooks.find((b) => b.id === p.textbook_id);
-  const next = Math.max(0, Math.min(book.total_units, unit));
+  const next = Math.max(0, Math.min(book.total_units, snapHalf(unit)));
   await run(db.from("progress").update({ current_unit: next, updated_at: new Date().toISOString() }).eq("id", pid));
   p.current_unit = next;
   p.updated_at = new Date().toISOString();
@@ -3491,8 +3572,6 @@ async function setProgress(pid, unit) {
 
 /* ---------- 하루 진도 범위 (교재 배정 · 수업 추천의 기준) ---------- */
 const dailyWord = (book, p) => (bookLeaves(book) ? (p && p.daily_unit === "top" ? "대단원" : "소단원") : (book.unit_label || "단원"));
-const fmtN = (n) => String(Number(n));
-const snapHalf = (v) => Math.round(v * 2) / 2;
 const dailyAmt = (n, word) => `${n}${/[A-Za-z]/.test(word) ? " " : ""}${word}`;
 function dailyChip(book, p) {
   if (!p || !p.daily_min) return "";
@@ -3533,16 +3612,13 @@ function dailyNext(book, cur, max, unit) {
   }
   return from === to ? unitName(book, from) : `${unitName(book, from)} ~ ${unitName(book, to)}`;
 }
-// 0.5 단위 분량까지 풀어서 설명: 1.5 = 이번 수업 2개, 다음 수업 1개 / 0.5 = 한 단원을 두 수업에 나눔
+// 다음 수업 추천 범위를 글자로. 분량(max)과 현재 진도(cur)가 0.5 단위여도 됩니다. 예) 현재 7, 분량 1.5 → "Unit 8 ~ Unit 9 중간"
 function dailyPlan(book, cur, max, unit) {
-  const whole = Math.floor(max), half = max - whole > 0;
-  if (!half) return dailyNext(book, cur, max, unit);
-  const n = Math.ceil(max);
-  const first = dailyNext(book, cur, n, unit);
-  if (!first) return "";
-  if (!whole) return `${first} (앞부분, 다음 수업에 이어서)`;
-  const after = cur + n < book.total_units && unit !== "top" ? dailyNext(book, cur + n, whole, unit) : "";
-  return after ? `${first} (다음 수업은 ${after})` : first;
+  if (cur >= book.total_units) return "";
+  const lv = bookLeaves(book);
+  if (lv && unit === "top") return dailyNext(book, Math.floor(cur), Math.ceil(max), unit);
+  if (!isHalfN(cur) && !isHalfN(max)) return dailyNext(book, cur, max, unit);
+  return rangeText(book, { from_unit: cur + 1, to_unit: Math.min(book.total_units, cur + max) }).trim();
 }
 const bookTopCount = (book) => (book.structure && Array.isArray(book.structure.items) ? book.structure.items.length : 0);
 // 배정 창·범위 변경 창에 들어가는 입력 칸. getBook/getCur 는 입력이 바뀔 때마다 다시 읽습니다.
@@ -3820,7 +3896,8 @@ function lessonForm(s, lesson, rec = null, preset = null) {
         if (!book) throw new Error(`교재 ${i + 1}: 교재를 찾을 수 없습니다.`);
         if (used.has(b.textbook_id)) throw new Error(`${book.title} 교재가 두 번 들어 있습니다. 한 블록으로 합쳐 주세요.`);
         used.add(b.textbook_id);
-        if (b.from_unit != null && b.to_unit != null && b.from_unit > b.to_unit) throw new Error(`${book.title}: 시작 단원이 종료 단원보다 클 수 없습니다.`);
+        if ([b.from_unit, b.to_unit].some((v) => v != null && v * 2 !== Math.round(v * 2))) throw new Error(`${book.title}: 단원 번호는 0.5 단위로 입력하세요. 예: 9, 9.5`);
+        if (b.from_unit != null && b.to_unit != null && b.to_unit < b.from_unit - 0.5) throw new Error(`${book.title}: 종료 단원이 시작 단원보다 앞설 수 없습니다.`);
         if ((b.from_unit || 0) > book.total_units || (b.to_unit || 0) > book.total_units) throw new Error(`${book.title}: 전체 단원 수는 ${book.total_units}입니다.`);
         if (b.assign) assignIds.add(b.textbook_id);
         withBook.push({ textbook_id: b.textbook_id, from_unit: b.from_unit ?? null, to_unit: b.to_unit ?? null, topic: hasText ? b.topic.trim().slice(0, 200) : null });
@@ -3883,22 +3960,19 @@ function lessonForm(s, lesson, rec = null, preset = null) {
 
   const host = $("#ls-books");
   let focusIdx = null;
-  const leafNo = (book, top, child) => bookLeaves(book).findIndex((l) => l.top === top && l.child === child) + 1;
-  const topRange = (book, top) => { const lv = bookLeaves(book); const ix = lv.map((l, n) => (l.top === top ? n + 1 : 0)).filter(Boolean); return [ix[0], ix[ix.length - 1]]; };
   const unitField = (b, i, key, label) => {
     const book = bookOf(b.textbook_id);
+    const role = key === "from_unit" ? "from" : "to";
     const lv = bookLeaves(book);
-    const v = b[key];
-    if (!lv) return `<label>${label}<input type="number" min="0" inputmode="numeric" data-i="${i}" data-k="${key}" aria-label="${label}" value="${v == null ? "" : esc(v)}"></label>`;
-    const items = book.structure.items;
-    const leaf = v ? lv[v - 1] : null;
-    const top = leaf ? leaf.top : null;
-    const kids = top != null ? items[top].children || [] : [];
-    const l1 = `<select data-i="${i}" data-k="${key}" data-lv="1" aria-label="${label} 1레벨"><option value="">-</option>${items.map((it, n) => `<option value="${n}" ${top === n ? "selected" : ""}>${esc(it.name)}</option>`).join("")}</select>`;
-    const l2 = kids.length
-      ? `<select data-i="${i}" data-k="${key}" data-lv="2" aria-label="${label} 2레벨"><option value="all" ${b[key + "All"] ? "selected" : ""}>${esc(items[top].name)} 전체</option>${kids.map((k, n) => `<option value="${n}" ${!b[key + "All"] && leaf && leaf.child === n ? "selected" : ""}>${esc(k)}</option>`).join("")}</select>`
-      : `<select disabled aria-label="${label} 2레벨"><option>${top == null ? "-" : "하위 없음"}</option></select>`;
-    return `<div class="ls-lv"><span>${label}</span><div class="ls-lv2">${l1}${l2}</div></div>`;
+    const pick = lv
+      ? `<select class="ls-pk1" data-i="${i}" data-k="${key}" data-pick aria-label="${label} 목록에서 고르기"><option value="">목록에서 고르기</option>${lv.map((l, n) => `<option value="${n + 1}">${esc(l.label)}</option>`).join("")}</select>`
+      : "";
+    return `<div><span class="cap">${label}</span>${unitStep(book, role, b[key], `data-i="${i}" data-k="${key}" aria-label="${label}"`)}${pick}</div>`;
+  };
+  const hintHtml = (book, b, i) => {
+    const pr = progOf(book.id);
+    const ok = b.from_unit != null && b.to_unit != null && b.from_unit >= 1 && b.to_unit >= b.from_unit - 0.5;
+    return `<div class="ls-hint" data-hint="${i}">${pr ? `현재 진도 ${esc(curLabel(book, pr.current_unit))}` : isMk() ? `이 학생에게 배정되지 않은 교재예요 · 총 ${esc(book.total_units)}${bookLeaves(book) ? " 단원" : " " + esc(book.unit_label)}` : "배정이 해제된 교재예요"}${ok ? ` · 기록 <b>${esc(rangeText(book, { from_unit: b.from_unit, to_unit: b.to_unit }).trim())} (${esc(fmtN(amountN(b.from_unit, b.to_unit)))}단원)</b>` : ""}</div>`;
   };
   const paint = () => {
     const usedIds = new Set(blocks.map((b) => b.textbook_id).filter(Boolean));
@@ -3909,14 +3983,14 @@ function lessonForm(s, lesson, rec = null, preset = null) {
       const book = bookOf(b.textbook_id);
       const p = book ? progOf(book.id) : null;
       const pr = p;
-      const hint = book ? `<div class="ls-hint">${pr ? `현재 진도 ${esc(curLabel(book, pr.current_unit))}` : isMk() ? `이 학생에게 배정되지 않은 교재예요 · 총 ${esc(book.total_units)}${bookLeaves(book) ? " 단원" : " " + esc(book.unit_label)}` : "배정이 해제된 교재예요"}${b.from_unit != null && b.to_unit != null && b.from_unit <= b.to_unit && b.from_unit >= 1 ? ` · 기록 <b>${esc(unitName(book, b.from_unit))} – ${esc(unitName(book, b.to_unit))} (${b.to_unit - b.from_unit + 1}${bookLeaves(book) ? "단원" : ""})</b>` : ""}</div>` : "";
+      const hint = book ? hintHtml(book, b, i) : "";
       const days = p ? dayList(p) : [];
       return `<div class="ls-block">
         <div class="ls-head"><span class="tb-n">${i + 1}</span>
           <strong class="ls-name">${esc(book ? book.title : isMk() ? "교재 없이 내용만" : "교재 없음")}</strong>${book && !p && isMk() ? `<span class="ls-un">배정 안 된 교재</span>` : ""}
           ${book ? `${p ? `<span class="ls-kind">${days.length ? SCH_ORDER.filter((d) => days.includes(d)).map((d) => DAY_NAME[d]).join(" · ") : "모든 수업"}</span>` : ""}<span class="ls-kind">${bookLeaves(book) && bookLeaves(book).some((l) => l.child >= 0) ? "1레벨 → 2레벨" : "1레벨만"}</span>` : ""}
           <button type="button" class="btn small" data-ls="skip" data-i="${i}">${isMk() ? "빼기" : "오늘은 안 나감"}</button></div>
-        ${book ? `<div class="ls-units ${bookLeaves(book) ? "tree" : ""}">${unitField(b, i, "from_unit", "시작 단원")}${unitField(b, i, "to_unit", "종료 단원")}</div>${hint}` : ""}
+        ${book ? `<div class="ls-us-row">${unitField(b, i, "from_unit", "시작 단원")}${unitField(b, i, "to_unit", "종료 단원")}</div>${hint}` : ""}
         ${book && !p && isMk() && !lesson ? `<label class="ls-assign"><input type="checkbox" data-i="${i}" data-k="assign" ${b.assign ? "checked" : ""}><span>이 학생에게 이 교재도 배정하고 진도 올리기<small>체크하지 않으면 이 수업 기록에만 남고 교재 진도 탭은 그대로예요.</small></span></label>` : ""}
         <label>학습 내용 (예: 현재완료, 본문 읽기)<input type="text" maxlength="200" data-i="${i}" data-k="topic" value="${esc(b.topic || "")}"></label></div>`;
     }).join("");
@@ -3997,29 +4071,20 @@ function lessonForm(s, lesson, rec = null, preset = null) {
     if (el.dataset.i == null || !el.dataset.k) return;
     const b = blocks[Number(el.dataset.i)];
     const k = el.dataset.k;
-    if (el.dataset.lv) {
-      const book = bookOf(b.textbook_id);
-      const items = book.structure.items;
-      const first = k === "from_unit";
-      if (el.dataset.lv === "1") {
-        if (el.value === "") { b[k] = null; b[k + "All"] = false; }
-        else {
-          const top = Number(el.value);
-          if ((items[top].children || []).length) { b[k + "All"] = true; b[k] = topRange(book, top)[first ? 0 : 1]; }
-          else { b[k + "All"] = false; b[k] = leafNo(book, top, -1); }
-        }
-      } else {
-        const top = bookLeaves(book)[b[k] - 1].top;
-        if (el.value === "all") { b[k + "All"] = true; b[k] = topRange(book, top)[first ? 0 : 1]; }
-        else { b[k + "All"] = false; b[k] = leafNo(book, top, Number(el.value)); }
-      }
-      paint();
+    if (el.dataset.pick !== undefined) {
+      if (el.value !== "") { b[k] = Number(el.value); paint(); }
       return;
     }
     if (k === "textbook_id") { b.textbook_id = el.value; b.from_unit = el.value ? autoFrom(el.value) : null; b.to_unit = null; paint(); return; }
     if (k === "assign") { b.assign = el.checked; return; }
     if (k === "topic") b.topic = el.value;
-    else b[k] = el.value === "" ? null : Number(el.value);
+    else {
+      b[k] = el.value === "" ? null : Number(el.value);
+      if (k === "from_unit" || k === "to_unit") {
+        const bk = bookOf(b.textbook_id), h = host.querySelector(`[data-hint="${el.dataset.i}"]`);
+        if (bk && h) h.outerHTML = hintHtml(bk, b, Number(el.dataset.i)); // 칸을 다시 그리지 않고 안내 줄만 갱신
+      }
+    }
   };
   host.addEventListener("input", onField);
   host.addEventListener("change", onField);
@@ -4979,22 +5044,27 @@ function bindEvents() {
       try {
         if (act.dataset.act === "inc") await setProgress(pid, p.current_unit + 1);
         else if (act.dataset.act === "dec") await setProgress(pid, p.current_unit - 1);
+        else if (act.dataset.act === "inch") await setProgress(pid, p.current_unit + 0.5);
+        else if (act.dataset.act === "dech") await setProgress(pid, p.current_unit - 0.5);
         else if (act.dataset.act === "days") { changeDays(s, p, book); return; }
         else if (act.dataset.act === "range") { changeDaily(s, p, book); return; }
         else if (act.dataset.act === "next") { changeNext(s, p, book); return; }
         else if (act.dataset.act === "set") {
-          if (bookLeaves(book)) {
-            openForm({
-              title: `현재 진도 · ${book.title}`,
-              fields: [{ name: "current_unit", label: "끝낸 마지막 단원", type: "number", min: 0 }],
-              values: { current_unit: p.current_unit },
-              onSubmit: async (d) => { await setProgress(pid, d.current_unit || 0); },
-            });
-            swapUnitCtl($("#dlg-form"), "current_unit", book, { zero: true });
-            return;
-          }
-          const v = prompt(`현재 진도를 입력하세요 (0~${book.total_units})`, String(p.current_unit));
-          if (v !== null && v.trim() !== "" && !Number.isNaN(Number(v))) await setProgress(pid, Math.round(Number(v)));
+          openForm({
+            title: `현재 진도 · ${book.title}`,
+            fields: [{ name: "cu-slot", type: "slot" }],
+            values: {},
+            onSubmit: async () => {
+              const inp = $("#cu-slot input[data-half]");
+              const v = inp && inp.value !== "" ? Number(inp.value) : NaN;
+              if (!Number.isFinite(v) || v * 2 !== Math.round(v * 2) || v < 0 || v > book.total_units) throw new Error(`현재 진도는 0.5 단위로 0 ~ ${book.total_units} 사이로 입력하세요.`);
+              await setProgress(pid, v);
+            },
+          });
+          const lv = bookLeaves(book);
+          $("#cu-slot").innerHTML = `<div class="us-col"><span class="cap">현재 진도 (끝낸 단원 수)</span>${unitStep(book, "to", p.current_unit, `name="cu_v" aria-label="현재 진도"`, 0)}</div>${lv ? `<select class="ls-pk1" id="cu-pick" aria-label="목록에서 고르기"><option value="">목록에서 고르기</option>${lv.map((l, n) => `<option value="${n + 1}">${esc(l.label)} 까지 끝남</option>`).join("")}</select>` : ""}<div class="muted" style="font-size:.8rem;margin-top:.4rem">8.5 처럼 .5 를 넣으면 그 단원의 절반까지 나간 거예요. ＋/− 는 0.5씩 바뀌어요.</div>`;
+          const cp = $("#cu-pick");
+          if (cp) cp.onchange = () => { if (cp.value) { const inp = $("#cu-slot input[data-half]"); inp.value = cp.value; usRefresh(inp); } };
         } else if (act.dataset.act === "unassign") {
           if (!confirm("이 교재 배정을 해제할까요? 진도 기록이 사라집니다.")) return;
           await run(db.from("progress").delete().eq("id", pid));

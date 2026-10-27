@@ -37,7 +37,7 @@ create table if not exists public.progress (
   owner         uuid not null default auth.uid() references auth.users(id) on delete cascade,
   student_id    uuid not null references public.students(id) on delete cascade,
   textbook_id   uuid not null references public.textbooks(id) on delete cascade,
-  current_unit  integer not null default 0 check (current_unit >= 0),
+  current_unit  numeric(4,1) not null default 0,   -- 끝낸 단원 수. 0.5 단위 (7.5 = 7개 끝내고 8번째 절반까지)
   updated_at    timestamptz not null default now(),
   unique (student_id, textbook_id)
 );
@@ -74,8 +74,8 @@ create table if not exists public.lessons (
   memo         text,
   -- 수업 진도: 이번 수업에서 나간 교재와 단원 범위, 학습 내용, 다음 수업 예정 진도
   textbook_id  uuid references public.textbooks(id) on delete set null,
-  from_unit    integer check (from_unit >= 0),
-  to_unit      integer check (to_unit >= 0),
+  from_unit    numeric(4,1),
+  to_unit      numeric(4,1),
   topic        text,
   next_plan    text,
   created_at   timestamptz not null default now()
@@ -84,13 +84,35 @@ create table if not exists public.lessons (
 -- 기존 DB 업그레이드용: 예전 schema.sql 을 이미 실행했다면 아래 문장이 수업 진도 컬럼을 추가합니다.
 -- (신규 설치에서는 이미 존재하므로 아무 일도 일어나지 않습니다.)
 alter table public.lessons add column if not exists textbook_id uuid references public.textbooks(id) on delete set null;
-alter table public.lessons add column if not exists from_unit integer check (from_unit >= 0);
-alter table public.lessons add column if not exists to_unit integer check (to_unit >= 0);
+alter table public.lessons add column if not exists from_unit numeric(4,1);
+alter table public.lessons add column if not exists to_unit numeric(4,1);
 alter table public.lessons add column if not exists topic text;
 -- 한 번의 수업에서 교재를 여러 개 나갔을 때: 첫 교재는 위 컬럼에, 둘째부터는 이 JSON 배열에 저장
 -- 예: [{"textbook_id":"…","from_unit":7,"to_unit":8,"topic":"단어 암기"}]
 alter table public.lessons add column if not exists extra_books jsonb not null default '[]'::jsonb
   check (jsonb_typeof(extra_books) = 'array');
+
+-- ===== 단원 번호를 0.5 단위로 (수업 기록·추천·현재 진도) =====
+-- 번호 규칙: current_unit / to_unit = "끝낸 단원 수", from_unit = "시작 단원 번호"(보통 직전 to_unit + 1).
+--   .5 는 단원의 절반입니다. 예) 현재 진도 8.5 = Unit 9 중간까지 끝남, from 9.5 = Unit 9 중간부터,
+--   한 수업이 from 8 ~ to 8.5 이면 1.5단원, from 8 ~ to 7.5 이면 Unit 8 앞 절반(0.5단원). 분량 = to - from + 1
+-- 예전 버전(정수)으로 이미 만들었다면 아래가 숫자형으로 바꾸고 제약을 교체합니다. 기존 값은 그대로이며 여러 번 실행해도 안전합니다.
+drop view if exists public.lesson_book_rows;
+alter table public.progress alter column current_unit type numeric(4,1) using current_unit::numeric;
+alter table public.lessons alter column from_unit type numeric(4,1) using from_unit::numeric;
+alter table public.lessons alter column to_unit type numeric(4,1) using to_unit::numeric;
+alter table public.progress drop constraint if exists progress_current_unit_check;
+alter table public.progress drop constraint if exists progress_current_unit_half;
+alter table public.progress add constraint progress_current_unit_half
+  check (current_unit >= 0 and current_unit * 2 = round(current_unit * 2));
+alter table public.lessons drop constraint if exists lessons_from_unit_check;
+alter table public.lessons drop constraint if exists lessons_to_unit_check;
+alter table public.lessons drop constraint if exists lessons_from_unit_half;
+alter table public.lessons drop constraint if exists lessons_to_unit_half;
+alter table public.lessons add constraint lessons_from_unit_half
+  check (from_unit is null or (from_unit >= 0 and from_unit * 2 = round(from_unit * 2)));
+alter table public.lessons add constraint lessons_to_unit_half
+  check (to_unit is null or (to_unit >= 0 and to_unit * 2 = round(to_unit * 2)));
 
 -- 교재별 수업 한 줄 보기 (첫 교재 + 추가 교재). RLS 는 조회하는 사용자의 권한으로 적용됩니다.
 create or replace view public.lesson_book_rows with (security_invoker = true) as
@@ -99,7 +121,7 @@ create or replace view public.lesson_book_rows with (security_invoker = true) as
     from public.lessons l where l.textbook_id is not null
   union all
   select l.id, l.owner, l.student_id, l.lesson_date, l.attendance, l.created_at,
-         nullif(e->>'textbook_id', '')::uuid, nullif(e->>'from_unit', '')::integer, nullif(e->>'to_unit', '')::integer, e->>'topic'
+         nullif(e->>'textbook_id', '')::uuid, nullif(e->>'from_unit', '')::numeric, nullif(e->>'to_unit', '')::numeric, e->>'topic'
     from public.lessons l cross join lateral jsonb_array_elements(l.extra_books) e
    where nullif(e->>'textbook_id', '') is not null;
 alter table public.lessons add column if not exists next_plan text;
@@ -197,8 +219,8 @@ create table if not exists public.recommendations (
   student_id         uuid not null references public.students(id) on delete cascade,
   textbook_id        uuid references public.textbooks(id) on delete set null,
   target_date        date,                       -- 추천이 적용될 예정 수업일
-  from_unit          integer not null check (from_unit >= 0),
-  to_unit            integer not null,
+  from_unit          numeric(4,1) not null,       -- 시작 단원 번호 (0.5 단위)
+  to_unit            numeric(4,1) not null,       -- 끝낸 단원 수 (0.5 단위). 분량 = to - from + 1
   rationale          text,                       -- 추천 근거(에이전트가 남긴 설명)
   input_snapshot     jsonb,                      -- 추천 당시 입력(진도, 최근 점수, 출결 등)
   model              text,                       -- 추천을 만든 모델/에이전트 이름
@@ -207,7 +229,7 @@ create table if not exists public.recommendations (
   created_at         timestamptz not null default now(),
   decided_at         timestamptz,                -- 선생님이 채택/수정/거절한 시각
   edited_at          timestamptz,                -- 선생님이 '제안' 내용을 직접 고친 시각 (예약 작업이 덮어쓰지 않음)
-  check (to_unit >= from_unit)
+  check (to_unit >= from_unit - 0.5)
 );
 
 -- 학부모 안내문 발송 기록 (중복·누락 방지용 표시. 실제 발송은 카카오톡/문자로 직접)
@@ -228,6 +250,14 @@ create index if not exists idx_lessons_student_date on public.lessons(student_id
 create index if not exists idx_lessons_textbook on public.lessons(textbook_id);
 create index if not exists idx_tests_student_date on public.tests(student_id, test_date desc);
 alter table public.recommendations add column if not exists edited_at timestamptz;
+-- 추천 단원 번호도 0.5 단위 (예전 정수 컬럼이면 숫자형으로 바꾸고 제약 교체)
+alter table public.recommendations alter column from_unit type numeric(4,1) using from_unit::numeric;
+alter table public.recommendations alter column to_unit type numeric(4,1) using to_unit::numeric;
+alter table public.recommendations drop constraint if exists recommendations_from_unit_check;
+alter table public.recommendations drop constraint if exists recommendations_check;
+alter table public.recommendations drop constraint if exists recommendations_range_half;
+alter table public.recommendations add constraint recommendations_range_half
+  check (from_unit >= 0 and from_unit * 2 = round(from_unit * 2) and to_unit * 2 = round(to_unit * 2) and to_unit >= from_unit - 0.5);
 create index if not exists idx_recs_student_created on public.recommendations(student_id, created_at desc);
 
 -- ============================================================
@@ -386,8 +416,8 @@ declare
   v_item     jsonb;
   v_student  uuid;
   v_book     public.textbooks%rowtype;
-  v_from     integer;
-  v_to       integer;
+  v_from     numeric;
+  v_to       numeric;
   v_target   date;
   v_inserted integer := 0;
   v_updated  integer := 0;
@@ -425,10 +455,12 @@ begin
        where t.id = (v_item->>'textbook_id')::uuid and t.owner = v_owner;
       if not found then raise exception 'textbook is not assigned to the student'; end if;
 
-      v_from := (v_item->>'from_unit')::integer;
-      v_to   := (v_item->>'to_unit')::integer;
-      if v_from is null or v_to is null or v_from < 1 or v_to < v_from or v_to > v_book.total_units then
-        raise exception 'invalid unit range (1..%)', v_book.total_units;
+      v_from := (v_item->>'from_unit')::numeric;
+      v_to   := (v_item->>'to_unit')::numeric;
+      -- 단원 번호는 0.5 단위. from 은 1 이상, to 는 from - 0.5 이상(한 단원 앞 절반이면 from 8 ~ to 7.5), 전체 단원 수 이하
+      if v_from is null or v_to is null or v_from < 1 or v_to < v_from - 0.5 or v_to > v_book.total_units
+         or v_from * 2 <> round(v_from * 2) or v_to * 2 <> round(v_to * 2) then
+        raise exception 'invalid unit range (1..%, 0.5 steps)', v_book.total_units;
       end if;
       v_target := coalesce((v_item->>'target_date')::date, (now() at time zone 'Asia/Seoul')::date);
       -- 교재에 수업 요일이 지정돼 있으면 그 요일의 수업일에만 추천할 수 있음 (비어 있으면 모든 수업)
