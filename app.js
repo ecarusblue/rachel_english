@@ -805,6 +805,14 @@ function rangeText(book, l) {
 
 /* 단원 번호 입력 칸(−0.5 / +0.5 버튼 + 직접 입력). 아래 이벤트는 문서 전체에서 한 번만 연결합니다.
    입력 칸에는 data-half 가 붙고, 바깥 .us 에 data-book(교재 id)·data-role(from/to)이 있어 칸 밑에 단원 이름을 풀어 줍니다. */
+// 추천 수정·추천 직접 입력 칸: 구조가 있는 교재는 목록(드롭다운)에서 고르고, 일반 교재는 ±0.5 칸
+function recUnitField(book, role, value, attrs = "") {
+  if (!bookLeaves(book)) return unitStep(book, role, value, attrs);
+  const sel = value != null ? Math.max(1, Math.floor(value)) : null;
+  const o = [];
+  for (let n = 1; n <= book.total_units; n++) o.push(`<option value="${n}" ${n === sel ? "selected" : ""}>${esc(unitName(book, n))}</option>`);
+  return `<select ${attrs}>${o.join("")}</select>`;
+}
 function unitStep(book, role, value, attrs = "", minOverride = null) {
   const lo = minOverride != null ? minOverride : role === "from" ? 1 : 0.5;
   return `<div class="us" data-book="${esc(book.id)}" data-role="${role}">
@@ -2861,8 +2869,8 @@ function editRecsForm(s, ids) {
   });
   $("#re-slot").innerHTML = `<p class="muted" style="margin:0 0 .6rem">아직 수업 기록에 반영되지 않은 추천입니다. 저장해도 "제안" 상태로 남고 "직접 수정" 표시가 붙습니다.</p>` +
     items.map(({ r, b }) => `<fieldset class="re-box"><legend>${esc(b.title)}</legend>
-      <div class="re-row"><div class="us-col"><span class="cap">시작 단원</span>${unitStep(b, "from", r.from_unit, `data-re-from="${esc(r.id)}" aria-label="시작 단원"`)}</div>
-      <div class="us-col"><span class="cap">종료 단원</span>${unitStep(b, "to", r.to_unit, `data-re-to="${esc(r.id)}" aria-label="종료 단원"`)}</div></div>
+      <div class="re-row"><div class="us-col"><span class="cap">시작 단원</span>${recUnitField(b, "from", r.from_unit, `data-re-from="${esc(r.id)}" aria-label="시작 단원"`)}</div>
+      <div class="us-col"><span class="cap">종료 단원</span>${recUnitField(b, "to", r.to_unit, `data-re-to="${esc(r.id)}" aria-label="종료 단원"`)}</div></div>
       <label>추천 이유<textarea rows="2" maxlength="600" data-re-why="${esc(r.id)}">${esc(r.rationale || "")}</textarea></label></fieldset>`).join("");
 }
 
@@ -2941,8 +2949,8 @@ function manualRecForm(s) {
         const bk = state.textbooks.find((x) => x.id === b.bid); const pr = prOf(b.bid);
         return `<fieldset class="re-box"><legend>교재 ${i + 1}</legend>
         <label>교재<select data-mr-book="${i}">${books.map((x) => `<option value="${esc(x.id)}" ${x.id === b.bid ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select></label>
-        <div class="re-row"><div class="us-col"><span class="cap">시작 단원</span>${unitStep(bk, "from", b.from, `data-mr-from="${i}" aria-label="시작 단원"`)}</div>
-        <div class="us-col"><span class="cap">끝 단원</span>${unitStep(bk, "to", b.to, `data-mr-to="${i}" aria-label="끝 단원"`)}</div></div>
+        <div class="re-row"><div class="us-col"><span class="cap">시작 단원</span>${recUnitField(bk, "from", b.from, `data-mr-from="${i}" aria-label="시작 단원"`)}</div>
+        <div class="us-col"><span class="cap">끝 단원</span>${recUnitField(bk, "to", b.to, `data-mr-to="${i}" aria-label="끝 단원"`)}</div></div>
         <div class="muted" style="font-size:.8rem">${pr ? `현재 진도 ${esc(curLabel(bk, pr.current_unit))}` : "진도 기록 없음"}${blocks.length > 1 ? ` · <a href="#" data-mr-del="${i}">삭제</a>` : ""}</div></fieldset>`;
       }).join("")}
       ${blocks.length < books.length ? `<button type="button" class="btn small" id="mr-add">＋ 교재 추가</button>` : ""}
