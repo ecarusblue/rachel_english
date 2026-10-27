@@ -82,8 +82,9 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 4. 교재별로, 그 교재가 나가는 수업일끼리만 이어서 단원 범위를 정합니다.
    - 한 수업 분량은 books[].basis 로 정합니다.
      · `lesson_avg` (이 교재로 수업한 기록이 있는 진행 중 교재): n = avg_units_per_lesson(최근 8회 평균)을 반올림(최소 1). daily_min~daily_max 는 쓰지 않습니다.
-     · `daily_range` (수업 기록이 아직 없는 새 교재): daily_min~daily_max 가 있으면 그 범위 안에서 정합니다(단위는 daily_unit: 'leaf'=소단원·단원, 'top'=1레벨). 범위도 없으면 n=2.
+     · `daily_range` (수업 기록이 아직 없는 새 교재): daily_min~daily_max 가 있으면 그 범위 안에서 정합니다(0.5 단위 값, 단위는 daily_unit: 'leaf'=소단원·단원, 'top'=1레벨). 범위도 없으면 n=2.
      첫 날은 current_unit+1 부터 n개, 다음 날은 직전 to_unit+1 부터.
+     n 이 0.5 단위(예: 1.5)이면 수업마다 올림·내림을 번갈아 합니다(2개 → 1개 → 2개 …, 평균 1.5). n=0.5 이면 한 단원을 두 수업에 나눠 같은 단원을 두 번 추천하고(from_unit=to_unit), rationale 에 "앞부분" / "이어서 마무리"라고 적습니다.
    - 숙제는 추천에 반영하지 않습니다(API에도 포함되지 않습니다). 최근 시험 percent 가 70 미만이면 분량을 줄이고(최소 1) 첫 날 복습을 권합니다. 매우 좋으면 1단원 늘릴 수 있습니다.
    - from_unit 은 1 이상, to_unit 은 from_unit 이상이며 total_units 를 넘기지 않습니다. total_units 를 채우면 그 뒤 날짜는 추천하지 않습니다.
    - 번호는 누적 번호로 계산하고, rationale 에는 structure 가 있으면 이름("Unit 2 › Part B")으로 풀어 씁니다.

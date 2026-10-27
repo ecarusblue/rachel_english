@@ -1,7 +1,7 @@
 // 서비스 워커: 앱 화면(정적 파일)만 저장해 두고, 항상 네트워크를 먼저 시도합니다.
 // - 새 배포가 바로 반영되도록 "네트워크 우선", 연결이 없을 때만 저장본을 사용합니다.
 // - 학생 데이터(Supabase)와 /api/ 는 가로채지 않으므로 어디에도 저장되지 않습니다.
-const CACHE = "rachel-shell-v27";
+const CACHE = "rachel-shell-v28";
 const SHELL = ["./", "index.html", "app.js", "style.css", "config.js", "fonts/pretendard.css", "manifest.webmanifest", "icons/icon-192.png", "icons/logo-dark.svg"];
 
 self.addEventListener("install", (e) => {
