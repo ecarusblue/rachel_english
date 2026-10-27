@@ -3957,14 +3957,23 @@ function lessonForm(s, lesson, rec = null, preset = null) {
 
   const host = $("#ls-books");
   let focusIdx = null;
+  const leafNo = (book, top, child) => bookLeaves(book).findIndex((l) => l.top === top && l.child === child) + 1;
+  const topRange = (book, top) => { const lv = bookLeaves(book); const ix = lv.map((l, n) => (l.top === top ? n + 1 : 0)).filter(Boolean); return [ix[0], ix[ix.length - 1]]; };
   const unitField = (b, i, key, label) => {
     const book = bookOf(b.textbook_id);
-    const role = key === "from_unit" ? "from" : "to";
     const lv = bookLeaves(book);
-    const pick = lv
-      ? `<select class="ls-pk1" data-i="${i}" data-k="${key}" data-pick aria-label="${label} 목록에서 고르기"><option value="">목록에서 고르기</option>${lv.map((l, n) => `<option value="${n + 1}">${esc(l.label)}</option>`).join("")}</select>`
-      : "";
-    return `<div><span class="cap">${label}</span>${unitStep(book, role, b[key], `data-i="${i}" data-k="${key}" aria-label="${label}"`)}${pick}</div>`;
+    if (!lv) return `<div><span class="cap">${label}</span>${unitStep(book, key === "from_unit" ? "from" : "to", b[key], `data-i="${i}" data-k="${key}" aria-label="${label}"`)}</div>`;
+    // 구조가 있는 교재: 1레벨 · 2레벨 드롭다운으로 고릅니다
+    const items = book.structure.items;
+    const v = b[key] != null ? Math.max(1, Math.floor(b[key])) : null;
+    const leaf = v ? lv[v - 1] : null;
+    const top = leaf ? leaf.top : null;
+    const kids = top != null ? items[top].children || [] : [];
+    const l1 = `<select data-i="${i}" data-k="${key}" data-lv="1" aria-label="${label} 1레벨"><option value="">-</option>${items.map((it, n) => `<option value="${n}" ${top === n ? "selected" : ""}>${esc(it.name)}</option>`).join("")}</select>`;
+    const l2 = kids.length
+      ? `<select data-i="${i}" data-k="${key}" data-lv="2" aria-label="${label} 2레벨"><option value="all" ${b[key + "All"] ? "selected" : ""}>${esc(items[top].name)} 전체</option>${kids.map((k, n) => `<option value="${n}" ${!b[key + "All"] && leaf && leaf.child === n ? "selected" : ""}>${esc(k)}</option>`).join("")}</select>`
+      : `<select disabled aria-label="${label} 2레벨"><option>${top == null ? "-" : "하위 없음"}</option></select>`;
+    return `<div class="ls-lv"><span>${label}</span><div class="ls-lv2">${l1}${l2}</div></div>`;
   };
   const hintHtml = (book, b, i) => {
     const pr = progOf(book.id);
@@ -4068,8 +4077,23 @@ function lessonForm(s, lesson, rec = null, preset = null) {
     if (el.dataset.i == null || !el.dataset.k) return;
     const b = blocks[Number(el.dataset.i)];
     const k = el.dataset.k;
-    if (el.dataset.pick !== undefined) {
-      if (el.value !== "") { b[k] = Number(el.value); paint(); }
+    if (el.dataset.lv) {
+      const book = bookOf(b.textbook_id);
+      const items = book.structure.items;
+      const first = k === "from_unit";
+      if (el.dataset.lv === "1") {
+        if (el.value === "") { b[k] = null; b[k + "All"] = false; }
+        else {
+          const top = Number(el.value);
+          if ((items[top].children || []).length) { b[k + "All"] = true; b[k] = topRange(book, top)[first ? 0 : 1]; }
+          else { b[k + "All"] = false; b[k] = leafNo(book, top, -1); }
+        }
+      } else {
+        const top = bookLeaves(book)[Math.max(1, Math.floor(b[k])) - 1].top;
+        if (el.value === "all") { b[k + "All"] = true; b[k] = topRange(book, top)[first ? 0 : 1]; }
+        else { b[k + "All"] = false; b[k] = leafNo(book, top, Number(el.value)); }
+      }
+      paint();
       return;
     }
     if (k === "textbook_id") { b.textbook_id = el.value; b.from_unit = el.value ? autoFrom(el.value) : null; b.to_unit = null; paint(); return; }
