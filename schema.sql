@@ -321,6 +321,17 @@ begin
             'remaining_units', greatest(t.total_units - p.current_unit, 0),
             'next_textbook', (select jsonb_build_object('textbook_id', nt.id, 'title', nt.title)
                                 from public.textbooks nt where nt.id = p.next_textbook_id),
+            'lessons_done', (
+              select count(*) from public.lesson_book_rows l
+               where l.student_id = st.id and l.textbook_id = t.id and l.attendance <> '결석'
+                 and l.from_unit is not null and l.to_unit is not null),
+            -- 추천 기준: 이 교재로 수업한 기록이 있으면(진행 중) 'lesson_avg' = avg_units_per_lesson,
+            --           기록이 없으면(새로 시작) 'daily_range' = daily_min~daily_max
+            'basis', case when exists (
+                select 1 from public.lesson_book_rows l
+                 where l.student_id = st.id and l.textbook_id = t.id and l.attendance <> '결석'
+                   and l.from_unit is not null and l.to_unit is not null)
+              then 'lesson_avg' else 'daily_range' end,
             'avg_units_per_lesson', (
               select round(avg(x.n)::numeric, 1) from (
                 select (l.to_unit - l.from_unit + 1) as n from public.lesson_book_rows l
@@ -333,7 +344,6 @@ begin
         'recent_lessons', coalesce((
           select jsonb_agg(r order by r->>'date' desc) from (
             select jsonb_build_object('date', l.lesson_date, 'attendance', l.attendance,
-                   'homework', l.homework, 'homework_note', l.homework_note,
                    'textbook_id', l.textbook_id, 'from_unit', l.from_unit, 'to_unit', l.to_unit,
                    'topic', l.topic, 'extra_books', l.extra_books, 'next_plan', l.next_plan) as r
               from public.lessons l where l.student_id = st.id

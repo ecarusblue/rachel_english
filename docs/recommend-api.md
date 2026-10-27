@@ -42,9 +42,9 @@ curl -H "Authorization: Bearer $TOKEN" https://.../api/progress
     "alias": "S01", "grade": "초5", "lessons_per_week": 1.5,
     "class_weekdays": [1, 3],
     "books": [{"textbook_id": "…", "title": "Grammar Zone 1", "unit_label": "Unit", "structure": null,
-               "weekdays": [1], "total_units": 20, "current_unit": 7, "remaining_units": 13, "avg_units_per_lesson": 2.0,
+               "weekdays": [1], "total_units": 20, "current_unit": 7, "remaining_units": 13, "lessons_done": 6, "basis": "lesson_avg", "avg_units_per_lesson": 2.0,
                "next_textbook": {"textbook_id": "…", "title": "Grammar Zone 2"}}],
-    "recent_lessons": [{"date": "…", "attendance": "출석", "homework": "완료", "homework_note": "…",
+    "recent_lessons": [{"date": "…", "attendance": "출석",
                         "textbook_id": "…", "from_unit": 6, "to_unit": 7, "topic": "…", "extra_books": null, "next_plan": "…"}],
     "recent_tests": [{"date": "…", "kind": "단어시험", "percent": 90}]
   }]}}
@@ -80,8 +80,11 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
    recent_lessons 에 같은 날짜 기록이 있는 날은 그 학생에게 추천하지 않습니다.
 3. 수업일마다 그날 요일에 맞는 교재만 고릅니다: books[].weekdays 가 비어 있거나 그 요일을 포함하는 교재.
 4. 교재별로, 그 교재가 나가는 수업일끼리만 이어서 단원 범위를 정합니다.
-   - 한 수업 분량: books[].daily_min~daily_max 가 있으면 그 범위 안에서 정합니다(선생님이 정한 하루 진도 범위, 단위는 daily_unit: 'leaf'=소단원·단원, 'top'=1레벨). 없으면 n = avg_units_per_lesson(없으면 2)을 반올림. 첫 날은 current_unit+1 부터 n개, 다음 날은 직전 to_unit+1 부터.
-   - 최근 시험 percent 가 70 미만이거나 숙제가 '일부'/'미제출'이 반복되면 분량을 줄이고(최소 1) 첫 날 복습을 권합니다. 매우 좋으면 1단원 늘릴 수 있습니다.
+   - 한 수업 분량은 books[].basis 로 정합니다.
+     · `lesson_avg` (이 교재로 수업한 기록이 있는 진행 중 교재): n = avg_units_per_lesson(최근 8회 평균)을 반올림(최소 1). daily_min~daily_max 는 쓰지 않습니다.
+     · `daily_range` (수업 기록이 아직 없는 새 교재): daily_min~daily_max 가 있으면 그 범위 안에서 정합니다(단위는 daily_unit: 'leaf'=소단원·단원, 'top'=1레벨). 범위도 없으면 n=2.
+     첫 날은 current_unit+1 부터 n개, 다음 날은 직전 to_unit+1 부터.
+   - 숙제는 추천에 반영하지 않습니다(API에도 포함되지 않습니다). 최근 시험 percent 가 70 미만이면 분량을 줄이고(최소 1) 첫 날 복습을 권합니다. 매우 좋으면 1단원 늘릴 수 있습니다.
    - from_unit 은 1 이상, to_unit 은 from_unit 이상이며 total_units 를 넘기지 않습니다. total_units 를 채우면 그 뒤 날짜는 추천하지 않습니다.
    - 번호는 누적 번호로 계산하고, rationale 에는 structure 가 있으면 이름("Unit 2 › Part B")으로 풀어 씁니다.
 5. POST /api/recommendations 로 한 번에 보냅니다(최대 100개). 항목은 (학생, 교재, 수업일)마다 하나: alias, textbook_id, from_unit, to_unit, target_date, rationale(한국어 1~3문장, 요일 포함).
@@ -100,7 +103,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 (`[{"textbook_id","from_unit","to_unit","topic"}]`, 없으면 `null`)에 들어 있습니다. 교재별 진도를 볼 때는 둘 다 확인하세요.
 
 ## 교재별 수업 요일
-`books[].daily_min` / `daily_max` 는 선생님이 교재 배정 때 정한 **하루(한 번의 수업) 진도 범위**입니다(없으면 null). 이 범위를 넘기지 마세요. (최신 `schema.sql` 을 다시 실행해야 컬럼이 생깁니다.)
+`books[].daily_min` / `daily_max` 는 선생님이 교재 배정 때 정한 **하루(한 번의 수업) 진도 범위**입니다(없으면 null). **새로 시작하는 교재(`basis`='daily_range')에만** 쓰고, 진행 중인 교재는 최근 수업 평균을 씁니다. (최신 `schema.sql` 을 다시 실행해야 컬럼이 생깁니다.)
 
 `books[].weekdays` 는 그 교재를 쓰는 수업 요일 배열입니다(0=일 … 6=토, 예: `[1,3]` = 월·수). **빈 배열이면 모든 수업**에서 쓰는 교재입니다.
 추천할 날짜의 요일에 맞는 교재만 추천하세요(서버도 요일이 맞지 않는 항목은 거절합니다). 학생의 수업 요일은 `class_weekdays`(시간표)입니다. (최신 `schema.sql` 을 다시 실행해야 `weekdays` 컬럼이 생깁니다.)

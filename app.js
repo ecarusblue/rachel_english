@@ -1298,7 +1298,7 @@ function renderProgressTab(s) {
       return `<div class="card book-card" data-pid="${esc(p.id)}">
         <h3>${esc(book.title)}</h3>
         <div class="dchips">${dayChips(p)}${dailyChip(book, p)}</div>
-        ${p.daily_min && p.current_unit < book.total_units ? `<div class="dr-next">다음 수업 추천 기준 <b>${esc(dailyNext(book, p.current_unit, p.daily_max || p.daily_min, p.daily_unit))}</b></div>` : ""}
+        ${recNote(book, p, state.detail.lessons)}
         ${nextLine(p, book)}
         <div class="stat"><strong>${bookLeaves(book) ? (p.current_unit > 0 ? esc(unitName(book, p.current_unit)) : "시작 전") : esc(book.unit_label) + " " + p.current_unit} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong></div>
         ${recent ? `<div style="font-size:.85rem;margin-top:.5rem">최근 수업 <span class="muted">${fmtDate(recent.lesson_date)}</span> ·${esc(rangeText(book, recentEnt) || " 범위 미입력")}</div>` : ""}
@@ -3497,6 +3497,25 @@ function dailyChip(book, p) {
   const lo = p.daily_min, hi = p.daily_max || p.daily_min;
   return `<span class="dchip dr-chip">하루 ${esc(dailyAmt(lo === hi ? lo : lo + "~" + hi, dailyWord(book, p)))}</span>`;
 }
+// 추천 기준 안내: 수업 기록이 있는 진행 중 교재는 최근 수업 평균, 새 교재는 하루 진도 범위
+function recNote(book, p, lessons) {
+  if (p.current_unit >= book.total_units) return "";
+  const ns = [];
+  (lessons || []).forEach((l) => {
+    if (l.attendance === "결석") return;
+    lessonBooks(l).forEach((b) => {
+      if (b.textbook_id === book.id && b.from_unit && b.to_unit) ns.push(b.to_unit - b.from_unit + 1);
+    });
+  });
+  if (ns.length) {
+    const recent = ns.slice(0, 8);
+    const avg = Math.max(1, Math.round(recent.reduce((a, b) => a + b, 0) / recent.length));
+    const t = dailyNext(book, p.current_unit, avg, "leaf");
+    return `<div class="dr-next">진행 중이라 최근 수업 평균(${recent.length}회, 한 수업 약 ${avg}개)으로 추천해요 · <b>${esc(t)}</b></div>`;
+  }
+  if (p.daily_min) return `<div class="dr-next">이 교재 수업 기록이 아직 없어 하루 진도 범위로 추천해요 · <b>${esc(dailyNext(book, p.current_unit, p.daily_max || p.daily_min, p.daily_unit))}</b></div>`;
+  return "";
+}
 // 현재 진도(cur) 다음부터 하루 최대(max)만큼의 범위를 글자로
 function dailyNext(book, cur, max, unit) {
   const total = book.total_units;
@@ -3523,7 +3542,7 @@ function mountDaily(hostId, form, getBook, getCur, vals = {}) {
     const word = book ? dailyWord(book, { daily_unit: st.unit }) : "단원";
     host.innerHTML = `<div class="dr-box">
       <div class="dr-t"><b>하루 진도 범위</b><span class="muted">(선택)</span></div>
-      <div class="dr-sub muted">한 번 수업에 나갈 양이에요. 나중에 수업을 추천할 때 이 범위를 기준으로 삼아요.</div>
+      <div class="dr-sub muted">한 번 수업에 나갈 양이에요. 새로 시작하는 교재의 수업 추천에 쓰고, 수업이 진행되면 최근 수업 평균으로 추천해요.</div>
       <div class="dr-row"><span>한 수업에</span>${stepHtml("daily_min", st.lo)}<span>~</span>${stepHtml("daily_max", st.hi)}
         ${tree ? `<select name="daily_unit" aria-label="단위"><option value="leaf" ${st.unit === "leaf" ? "selected" : ""}>소단원</option><option value="top" ${st.unit === "top" ? "selected" : ""}>대단원</option></select>` : `<span class="dr-w">${esc(word)}</span>`}</div>
       <div class="dr-hint" id="${hostId}-hint"></div></div>`;
@@ -3535,7 +3554,7 @@ function mountDaily(hostId, form, getBook, getCur, vals = {}) {
     const book = getBook();
     if (!el || !book) return;
     const lo = Number(st.lo) || 0, hi = Number(st.hi) || lo;
-    if (!lo) { el.textContent = "비워 두면 최근 수업 평균으로 추천해요."; return; }
+    if (!lo) { el.textContent = "비워 두면 첫 수업도 평균(없으면 2개)으로 추천해요."; return; }
     const cur = Number(getCur()) || 0;
     const t = dailyNext(book, cur, Math.max(hi, lo), st.unit);
     el.innerHTML = t ? `이렇게 추천해요 · 현재 진도가 <b>${esc(cur > 0 ? unitName(book, cur) : "시작 전")}</b>이면 다음 수업은 <b>${esc(t)}</b> (${esc(dailyAmt(lo === hi ? lo : lo + "~" + hi, dailyWord(book, { daily_unit: st.unit })))})` : "이 교재는 모두 끝났어요.";
