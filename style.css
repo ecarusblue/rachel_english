@@ -1098,7 +1098,6 @@ body.rc-lock { overflow: hidden; }
 @media (max-width: 640px) {
   .book-actions { display: grid; grid-template-columns: repeat(6, 1fr); gap: .45rem; margin-top: .8rem; }
   .book-actions .btn { grid-column: span 2; width: 100%; padding-left: .3em; padding-right: .3em; white-space: nowrap; font-size: .92rem; }
-  .book-actions .btn:nth-child(4), .book-actions .btn:nth-child(5) { grid-column: span 3; }
   .book-actions .btn.danger { grid-column: 1 / -1; min-height: 38px; font-size: .85rem; border-style: dashed; }
   .book-actions .btn[data-act="days"], .book-actions .btn[data-act="next"] { grid-column: span 3; }
   .book-actions .btn[data-act="range"] { grid-column: 1 / -1; order: 1; }

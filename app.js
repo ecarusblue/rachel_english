@@ -1385,11 +1385,6 @@ function renderProgressTab(s) {
         ${recent ? `<div style="font-size:.85rem;margin-top:.5rem">최근 수업 <span class="muted">${fmtDate(recent.lesson_date)}</span> ·${esc(rangeText(book, recentEnt) || " 범위 미입력")}</div>` : ""}
         <div class="muted" style="font-size:.8rem;margin-top:.4rem">진도 갱신 ${fmtDate((p.updated_at || "").slice(0, 10))}</div>
         <div class="book-actions">
-          <button class="btn small" data-act="dec">-1</button>
-          <button class="btn small" data-act="dech">-0.5</button>
-          <button class="btn small primary" data-act="inch">+0.5</button>
-          <button class="btn small primary" data-act="inc">+1</button>
-          <button class="btn small" data-act="set">직접 입력</button>
           <button class="btn small" data-act="days">요일 변경</button>
           <button class="btn small" data-act="range">${p.daily_min ? "하루 추천 진도 범위 변경" : "하루 추천 진도 범위 정하기"}</button>
           <button class="btn small" data-act="next">다음 교재</button>
@@ -3563,17 +3558,6 @@ function editTextbook(book, presetTitle) {
 }
 
 /* ---------- 학생 상세 동작 ---------- */
-async function setProgress(pid, unit) {
-  const p = state.progress.find((x) => x.id === pid);
-  const book = state.textbooks.find((b) => b.id === p.textbook_id);
-  const next = Math.max(0, Math.min(book.total_units, snapHalf(unit)));
-  await run(db.from("progress").update({ current_unit: next, updated_at: new Date().toISOString() }).eq("id", pid));
-  p.current_unit = next;
-  p.updated_at = new Date().toISOString();
-  renderStudent(); // 바로 보이게 먼저 그리고
-  await refresh(); // DB 값으로 화면 전체를 다시 불러옴
-}
-
 /* ---------- 하루 추천 진도 범위 (교재 배정 · 수업 추천의 기준) ---------- */
 const dailyWord = (book, p) => (bookLeaves(book) ? (p && p.daily_unit === "top" ? "대단원" : "소단원") : (book.unit_label || "단원"));
 const dailyAmt = (n, word) => `${n}${/[A-Za-z]/.test(word) ? " " : ""}${word}`;
@@ -5055,30 +5039,10 @@ function bindEvents() {
       const p = state.progress.find((x) => x.id === pid);
       const book = state.textbooks.find((b) => b.id === p.textbook_id);
       try {
-        if (act.dataset.act === "inc") await setProgress(pid, p.current_unit + 1);
-        else if (act.dataset.act === "dec") await setProgress(pid, p.current_unit - 1);
-        else if (act.dataset.act === "inch") await setProgress(pid, p.current_unit + 0.5);
-        else if (act.dataset.act === "dech") await setProgress(pid, p.current_unit - 0.5);
-        else if (act.dataset.act === "days") { changeDays(s, p, book); return; }
+        if (act.dataset.act === "days") { changeDays(s, p, book); return; }
         else if (act.dataset.act === "range") { changeDaily(s, p, book); return; }
         else if (act.dataset.act === "next") { changeNext(s, p, book); return; }
-        else if (act.dataset.act === "set") {
-          openForm({
-            title: `현재 진도 · ${book.title}`,
-            fields: [{ name: "cu-slot", type: "slot" }],
-            values: {},
-            onSubmit: async () => {
-              const inp = $("#cu-slot input[data-half]");
-              const v = inp && inp.value !== "" ? Number(inp.value) : NaN;
-              if (!Number.isFinite(v) || v * 2 !== Math.round(v * 2) || v < 0 || v > book.total_units) throw new Error(`현재 진도는 0.5 단위로 0 ~ ${book.total_units} 사이로 입력하세요.`);
-              await setProgress(pid, v);
-            },
-          });
-          const lv = bookLeaves(book);
-          $("#cu-slot").innerHTML = `<div class="us-col"><span class="cap">현재 진도 (끝낸 단원 수)</span>${unitStep(book, "to", p.current_unit, `name="cu_v" aria-label="현재 진도"`, 0)}</div>${lv ? `<select class="ls-pk1" id="cu-pick" aria-label="목록에서 고르기"><option value="">목록에서 고르기</option>${lv.map((l, n) => `<option value="${n + 1}">${esc(l.label)} 까지 끝남</option>`).join("")}</select>` : ""}<div class="muted" style="font-size:.8rem;margin-top:.4rem">8.5 처럼 .5 를 넣으면 그 단원의 절반까지 나간 거예요. ＋/− 는 0.5씩 바뀌어요.</div>`;
-          const cp = $("#cu-pick");
-          if (cp) cp.onchange = () => { if (cp.value) { const inp = $("#cu-slot input[data-half]"); inp.value = cp.value; usRefresh(inp); } };
-        } else if (act.dataset.act === "unassign") {
+        else if (act.dataset.act === "unassign") {
           if (!confirm("이 교재 배정을 해제할까요? 진도 기록이 사라집니다.")) return;
           await run(db.from("progress").delete().eq("id", pid));
           await refresh();
