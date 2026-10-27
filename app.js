@@ -1354,7 +1354,7 @@ function renderProgressTab(s) {
   const classDays = studentClassDays(s.id);
   const week = state.progView === "week" && items.length > 0;
   const mini = ({ p, book }) => {
-    return `<button type="button" class="wk-book" data-act="days" data-pid="${esc(p.id)}" title="누르면 요일을 바꿀 수 있어요"><b>${esc(book.title)}</b><span>${p.current_unit > 0 ? esc(curLabel(book, p.current_unit)) : "시작 전"}</span></button>`;
+    return `<button type="button" class="wk-book" data-act="days" data-pid="${esc(p.id)}" title="누르면 요일을 바꿀 수 있어요"><b>${esc(book.title)}</b><span>${p.current_unit > 0 ? esc(curLabel(book, p.current_unit)) : "시작 전"}</span>${dailyVal(book, p) ? `<em class="wk-dr">하루 ${esc(dailyVal(book, p))}</em>` : `<em class="wk-dr none">추천 범위 없음</em>`}</button>`;
   };
   const dayCols = (() => {
     const cols = [];
@@ -1377,7 +1377,8 @@ function renderProgressTab(s) {
       const recentEnt = recent ? lessonBooks(recent).find((b) => b.textbook_id === book.id) : null;
       return `<div class="card book-card" data-pid="${esc(p.id)}">
         <h3>${esc(book.title)}</h3>
-        <div class="dchips">${dayChips(p)}${dailyChip(book, p)}</div>
+        <div class="dchips">${dayChips(p)}</div>
+        ${dailyRow(book, p)}
         ${recNote(book, p, state.detail.lessons)}
         ${nextLine(p, book)}
         <div class="stat"><strong>${esc(curShort(book, p.current_unit))} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong></div>
@@ -1390,7 +1391,7 @@ function renderProgressTab(s) {
           <button class="btn small primary" data-act="inc">+1</button>
           <button class="btn small" data-act="set">직접 입력</button>
           <button class="btn small" data-act="days">요일 변경</button>
-          <button class="btn small" data-act="range">하루 범위 변경</button>
+          <button class="btn small" data-act="range">${p.daily_min ? "하루 추천 진도 범위 변경" : "하루 추천 진도 범위 정하기"}</button>
           <button class="btn small" data-act="next">다음 교재</button>
           <button class="btn small danger" data-act="unassign">배정 해제</button>
         </div>
@@ -3572,15 +3573,23 @@ async function setProgress(pid, unit) {
   renderStudent();
 }
 
-/* ---------- 하루 진도 범위 (교재 배정 · 수업 추천의 기준) ---------- */
+/* ---------- 하루 추천 진도 범위 (교재 배정 · 수업 추천의 기준) ---------- */
 const dailyWord = (book, p) => (bookLeaves(book) ? (p && p.daily_unit === "top" ? "대단원" : "소단원") : (book.unit_label || "단원"));
 const dailyAmt = (n, word) => `${n}${/[A-Za-z]/.test(word) ? " " : ""}${word}`;
+function dailyVal(book, p) {
+  if (!p || !p.daily_min) return "";
+  return dailyAmt(fmtN(Number(p.daily_max || p.daily_min)), dailyWord(book, p));
+}
+function dailyRow(book, p) {
+  const v = dailyVal(book, p);
+  return `<div class="rng ${v ? "" : "none"}"><b>하루 추천 진도 범위</b><span class="v">${v ? esc(v) : "정하지 않음"}</span><span class="why">${v ? "새 교재 추천에 쓰는 값 · 수업 기록이 생기면 최근 평균 우선" : "정하면 새 교재 추천에 써요. 아래 버튼으로 입력하세요."}</span></div>`;
+}
 function dailyChip(book, p) {
   if (!p || !p.daily_min) return "";
   const lo = Number(p.daily_min), hi = Number(p.daily_max || p.daily_min);
   return `<span class="dchip dr-chip">하루 ${esc(dailyAmt(lo === hi ? fmtN(lo) : fmtN(lo) + "~" + fmtN(hi), dailyWord(book, p)))}</span>`;
 }
-// 추천 기준 안내: 수업 기록이 있는 진행 중 교재는 최근 수업 평균, 새 교재는 하루 진도 범위
+// 추천 기준 안내: 수업 기록이 있는 진행 중 교재는 최근 수업 평균, 새 교재는 하루 추천 진도 범위
 function recNote(book, p, lessons) {
   if (p.current_unit >= book.total_units) return "";
   const ns = [];
@@ -3596,7 +3605,7 @@ function recNote(book, p, lessons) {
     const t = dailyPlan(book, p.current_unit, avg, "leaf");
     return `<div class="dr-next">진행 중이라 최근 수업 평균(${recent.length}회, 한 수업 약 ${fmtN(avg)}개)으로 추천해요 · <b>${esc(t)}</b></div>`;
   }
-  if (p.daily_min) return `<div class="dr-next">이 교재 수업 기록이 아직 없어 하루 진도 범위로 추천해요 · <b>${esc(dailyPlan(book, p.current_unit, Number(p.daily_max || p.daily_min), p.daily_unit))}</b></div>`;
+  if (p.daily_min) return `<div class="dr-next">이 교재 수업 기록이 아직 없어 하루 추천 진도 범위로 추천해요 · <b>${esc(dailyPlan(book, p.current_unit, Number(p.daily_max || p.daily_min), p.daily_unit))}</b></div>`;
   return "";
 }
 // 현재 진도(cur) 다음부터 하루 최대(max)만큼의 범위를 글자로
@@ -3626,15 +3635,16 @@ const bookTopCount = (book) => (book.structure && Array.isArray(book.structure.i
 // 배정 창·범위 변경 창에 들어가는 입력 칸. getBook/getCur 는 입력이 바뀔 때마다 다시 읽습니다.
 function mountDaily(hostId, form, getBook, getCur, vals = {}) {
   const host = $("#" + hostId);
-  const st = { lo: vals.daily_min ?? "", hi: vals.daily_max ?? "", unit: vals.daily_unit || "leaf" };
+  const one = vals.daily_max ?? vals.daily_min ?? "";
+  const st = { lo: one, hi: one, unit: vals.daily_unit || "leaf" };
   const paint = () => {
     const book = getBook();
     const tree = !!(book && bookLeaves(book));
     const word = book ? dailyWord(book, { daily_unit: st.unit }) : "단원";
     host.innerHTML = `<div class="dr-box">
-      <div class="dr-t"><b>하루 진도 범위</b><span class="muted">(선택)</span></div>
+      <div class="dr-t"><b>하루 추천 진도 범위</b><span class="muted">(선택)</span></div>
       <div class="dr-sub muted">한 번 수업에 나갈 양이에요. ＋/−는 0.5씩, 숫자 칸을 눌러 직접 입력할 수 있어요(0.5 ~ 50). 새로 시작하는 교재의 수업 추천에 쓰고, 수업이 진행되면 최근 수업 평균으로 추천해요.</div>
-      <div class="dr-row"><span>한 수업에</span>${stepHtml("daily_min", st.lo)}<span>~</span>${stepHtml("daily_max", st.hi)}
+      <div class="dr-row"><span>한 수업에</span>${stepHtml("daily_max", st.hi)}
         ${tree ? `<select name="daily_unit" aria-label="단위"><option value="leaf" ${st.unit === "leaf" ? "selected" : ""}>소단원</option><option value="top" ${st.unit === "top" ? "selected" : ""}>대단원</option></select>` : `<span class="dr-w">${esc(word)}</span>`}</div>
       <div class="dr-hint" id="${hostId}-hint"></div></div>`;
     hint();
@@ -3644,8 +3654,8 @@ function mountDaily(hostId, form, getBook, getCur, vals = {}) {
     const el = $("#" + hostId + "-hint");
     const book = getBook();
     if (!el || !book) return;
-    const lo = Number(st.lo) || 0, hi = Number(st.hi) || lo;
-    if (!lo) { el.textContent = "비워 두면 첫 수업도 평균(없으면 2개)으로 추천해요."; return; }
+    const hi = Number(st.hi) || 0, lo = hi;
+    if (!hi) { el.textContent = "비워 두면 첫 수업도 평균(없으면 2개)으로 추천해요."; return; }
     if ([lo, hi].some((x) => x < 0.5 || x > 50 || x * 2 !== Math.round(x * 2))) { el.textContent = "0.5 단위로 입력해 주세요. 예: 0.5, 1, 1.5, 2"; el.classList.add("bad"); return; }
     el.classList.remove("bad");
     const cur = Number(getCur()) || 0;
@@ -3654,33 +3664,31 @@ function mountDaily(hostId, form, getBook, getCur, vals = {}) {
   };
   host.addEventListener("input", (e) => {
     const el = e.target;
-    if (el.name === "daily_min") st.lo = el.value;
-    else if (el.name === "daily_max") st.hi = el.value;
+    if (el.name === "daily_max") { st.hi = el.value; st.lo = el.value; }
     else if (el.name === "daily_unit") { st.unit = el.value; paint(); return; }
     hint();
   });
   // 칸에서 벗어나면 0.5 단위로 맞춤(1.3 → 1.5). 최소가 최대보다 크면 같게 맞춤
   host.addEventListener("change", (e) => {
     const el = e.target;
-    if (el.name !== "daily_min" && el.name !== "daily_max") return;
-    const key = el.name === "daily_min" ? "lo" : "hi";
+    if (el.name !== "daily_max") return;
+    const key = "hi";
     const raw = Number(el.value);
     st[key] = el.value === "" || !isFinite(raw) ? "" : fmtN(Math.max(0.5, Math.min(50, snapHalf(raw))));
-    if (Number(st.lo) && Number(st.hi) && Number(st.hi) < Number(st.lo)) { if (key === "lo") st.hi = st.lo; else st.lo = st.hi; }
+    st.lo = st.hi;
     // 다시 그리지 않고 값만 갈아 끼움(바로 이어서 누른 ＋/− 버튼이 사라지지 않게)
-    const lo = host.querySelector("[name=daily_min]"), hi = host.querySelector("[name=daily_max]");
-    if (lo) lo.value = st.lo;
-    if (hi) hi.value = st.hi;
+    const hiEl = host.querySelector("[name=daily_max]");
+    if (hiEl) hiEl.value = st.hi;
     hint();
   });
   host.addEventListener("click", (e) => {
     const b = e.target.closest("[data-st]");
     if (!b) return;
-    const key = b.dataset.st === "daily_min" ? "lo" : "hi";
-    const base = Number(st[key]) || (key === "hi" && Number(st.lo)) || 0;
+    const key = "hi";
+    const base = Number(st.hi) || 0;
     const d = Number(b.dataset.d);
     st[key] = fmtN(base === 0 && d > 0 ? 1 : Math.max(0.5, Math.min(50, snapHalf(base) + d)));
-    if (Number(st.lo) && Number(st.hi) && Number(st.hi) < Number(st.lo)) { if (key === "lo") st.hi = st.lo; else st.lo = st.hi; }
+    st.lo = st.hi;
     paint();
   });
   const bs = form.elements.textbook_id;
@@ -3698,11 +3706,10 @@ function readDaily(form) {
   if (lo == null && hi == null) return { daily_min: null, daily_max: null, daily_unit: "leaf" };
   if (lo == null) lo = hi;
   if (hi == null) hi = lo;
-  if ([lo, hi].some((x) => !(x >= 0.5 && x <= 50) || x * 2 !== Math.round(x * 2))) throw new Error("하루 진도 범위는 0.5 단위로 0.5 ~ 50 사이로 입력하세요. 예: 0.5, 1, 1.5");
-  if (hi < lo) throw new Error("하루 진도 범위의 최대가 최소보다 작을 수 없어요.");
+  if ([lo, hi].some((x) => !(x >= 0.5 && x <= 50) || x * 2 !== Math.round(x * 2))) throw new Error("하루 추천 진도 범위는 0.5 단위로 0.5 ~ 50 사이로 입력하세요. 예: 0.5, 1, 1.5");
   return { daily_min: lo, daily_max: hi, daily_unit: un === "top" ? "top" : "leaf" };
 }
-const dailyErr = (e) => (/daily_(min|max|unit)/i.test((e && e.message) || "") ? new Error("하루 진도 범위를 저장하려면 최신 schema.sql 을 Supabase 에서 먼저 실행하세요.") : e);
+const dailyErr = (e) => (/daily_(min|max|unit)/i.test((e && e.message) || "") ? new Error("하루 추천 진도 범위를 저장하려면 최신 schema.sql 을 Supabase 에서 먼저 실행하세요.") : e);
 
 const nextOptions = () => [["", "(정하지 않음)"], ...state.textbooks.map((b) => [b.id, b.title])];
 function assignBook(s) {
@@ -3752,19 +3759,19 @@ function assignBook(s) {
 
 function changeDaily(s, p, book) {
   openForm({
-    title: `하루 진도 범위 · ${book.title}`,
+    title: `하루 추천 진도 범위 · ${book.title}`,
     fields: [{ name: "cd-rng", type: "slot" }],
     deleteLabel: "범위 없애기",
-    deleteConfirm: "하루 진도 범위를 없앨까요? 이 교재는 최근 수업 평균으로 추천돼요.",
+    deleteConfirm: "하루 추천 진도 범위를 없앨까요? 이 교재는 최근 수업 평균으로 추천돼요.",
     onDelete: async () => {
       try { await run(db.from("progress").update({ daily_min: null, daily_max: null, daily_unit: "leaf" }).eq("id", p.id)); } catch (e) { throw dailyErr(e); }
-      await refresh(); toast("하루 진도 범위를 없앴어요");
+      await refresh(); toast("하루 추천 진도 범위를 없앴어요");
     },
     onSubmit: async () => {
       const dr = readDaily($("#dlg-form"));
       try { await run(db.from("progress").update(dr).eq("id", p.id)); } catch (e) { throw dailyErr(e); }
       await refresh();
-      toast(dr.daily_min == null ? "하루 진도 범위를 없앴어요" : "하루 진도 범위를 저장했습니다");
+      toast(dr.daily_min == null ? "하루 추천 진도 범위를 없앴어요" : "하루 추천 진도 범위를 저장했습니다");
     },
   });
   mountDaily("cd-rng", $("#dlg-form"), () => book, () => p.current_unit, p);

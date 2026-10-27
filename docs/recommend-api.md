@@ -82,7 +82,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 4. 교재별로, 그 교재가 나가는 수업일끼리만 이어서 단원 범위를 정합니다.
    - 한 수업 분량은 books[].basis 로 정합니다.
      · `lesson_avg` (이 교재로 수업한 기록이 있는 진행 중 교재): n = avg_units_per_lesson(최근 8회 평균)을 0.5 단위로 반올림한 값(최소 1). daily_min~daily_max 는 쓰지 않습니다.
-     · `daily_range` (수업 기록이 아직 없는 새 교재): daily_min~daily_max 가 있으면 그 범위 안에서 정합니다(0.5 단위 값, 단위는 daily_unit: 'leaf'=소단원·단원, 'top'=1레벨). 범위도 없으면 n=2.
+     · `daily_range` (수업 기록이 아직 없는 새 교재): 하루 추천 진도 범위 daily_max 가 있으면 n = daily_max 입니다(0.5 단위 값 하나. 예전에 범위로 저장된 교재도 daily_max 를 씁니다. 단위는 daily_unit: 'leaf'=소단원·단원, 'top'=1레벨). 값이 없으면 n=2.
      번호 규칙(0.5 단위): to_unit·current_unit 은 "끝낸 단원 수"(8.5 = 9단원 중간까지), from_unit 은 시작 단원 번호(9.5 = 9단원 중간부터)입니다. 분량 = to_unit − from_unit + 1.
      첫 날 from_unit = current_unit+1, to_unit = from_unit + n − 1. 다음 날 from_unit = 직전 to_unit + 1.
      예) current_unit 7, n 1.5 → 8~8.5, 다음 9.5~10, 다음 11~11.5. n 0.5 → 8~7.5(8단원 앞 절반), 다음 8.5~8(8단원 뒤 절반)처럼 to_unit 이 from_unit−0.5 까지 내려갈 수 있습니다. 같은 단원을 두 번 보내는 우회는 쓰지 않습니다.
@@ -105,7 +105,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 (`[{"textbook_id","from_unit","to_unit","topic"}]`, 없으면 `null`)에 들어 있습니다. 교재별 진도를 볼 때는 둘 다 확인하세요.
 
 ## 교재별 수업 요일
-`books[].daily_min` / `daily_max` 는 선생님이 교재 배정 때 정한 **하루(한 번의 수업) 진도 범위**입니다(없으면 null). **새로 시작하는 교재(`basis`='daily_range')에만** 쓰고, 진행 중인 교재는 최근 수업 평균을 씁니다. (최신 `schema.sql` 을 다시 실행해야 컬럼이 생깁니다.)
+`books[].daily_min` / `daily_max` 는 선생님이 교재 배정 때 정한 **하루 추천 진도 범위**(한 번의 수업에 나갈 양, 숫자 하나)입니다. 앱은 두 값을 같게 저장하며 `daily_max` 를 쓰면 됩니다(없으면 null). **새로 시작하는 교재(`basis`='daily_range')에만** 쓰고, 진행 중인 교재는 최근 수업 평균을 씁니다. (최신 `schema.sql` 을 다시 실행해야 컬럼이 생깁니다.)
 
 `books[].weekdays` 는 그 교재를 쓰는 수업 요일 배열입니다(0=일 … 6=토, 예: `[1,3]` = 월·수). **빈 배열이면 모든 수업**에서 쓰는 교재입니다.
 추천할 날짜의 요일에 맞는 교재만 추천하세요(서버도 요일이 맞지 않는 항목은 거절합니다). 학생의 수업 요일은 `class_weekdays`(시간표)입니다. (최신 `schema.sql` 을 다시 실행해야 `weekdays` 컬럼이 생깁니다.)
