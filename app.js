@@ -1297,7 +1297,8 @@ function renderProgressTab(s) {
       const recentEnt = recent ? lessonBooks(recent).find((b) => b.textbook_id === book.id) : null;
       return `<div class="card book-card" data-pid="${esc(p.id)}">
         <h3>${esc(book.title)}</h3>
-        <div class="dchips">${dayChips(p)}</div>
+        <div class="dchips">${dayChips(p)}${dailyChip(book, p)}</div>
+        ${p.daily_min && p.current_unit < book.total_units ? `<div class="dr-next">다음 수업 추천 기준 <b>${esc(dailyNext(book, p.current_unit, p.daily_max || p.daily_min, p.daily_unit))}</b></div>` : ""}
         ${nextLine(p, book)}
         <div class="stat"><strong>${bookLeaves(book) ? (p.current_unit > 0 ? esc(unitName(book, p.current_unit)) : "시작 전") : esc(book.unit_label) + " " + p.current_unit} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong></div>
         ${recent ? `<div style="font-size:.85rem;margin-top:.5rem">최근 수업 <span class="muted">${fmtDate(recent.lesson_date)}</span> ·${esc(rangeText(book, recentEnt) || " 범위 미입력")}</div>` : ""}
@@ -1307,6 +1308,7 @@ function renderProgressTab(s) {
           <button class="btn small primary" data-act="inc">+1</button>
           <button class="btn small" data-act="set">직접 입력</button>
           <button class="btn small" data-act="days">요일 변경</button>
+          <button class="btn small" data-act="range">하루 범위 변경</button>
           <button class="btn small" data-act="next">다음 교재</button>
           <button class="btn small danger" data-act="unassign">배정 해제</button>
         </div>
@@ -3487,6 +3489,94 @@ async function setProgress(pid, unit) {
   renderStudent();
 }
 
+/* ---------- 하루 진도 범위 (교재 배정 · 수업 추천의 기준) ---------- */
+const dailyWord = (book, p) => (bookLeaves(book) ? (p && p.daily_unit === "top" ? "대단원" : "소단원") : (book.unit_label || "단원"));
+const dailyAmt = (n, word) => `${n}${/[A-Za-z]/.test(word) ? " " : ""}${word}`;
+function dailyChip(book, p) {
+  if (!p || !p.daily_min) return "";
+  const lo = p.daily_min, hi = p.daily_max || p.daily_min;
+  return `<span class="dchip dr-chip">하루 ${esc(dailyAmt(lo === hi ? lo : lo + "~" + hi, dailyWord(book, p)))}</span>`;
+}
+// 현재 진도(cur) 다음부터 하루 최대(max)만큼의 범위를 글자로
+function dailyNext(book, cur, max, unit) {
+  const total = book.total_units;
+  if (cur >= total) return "";
+  const lv = bookLeaves(book);
+  const from = cur + 1;
+  let to = Math.min(total, cur + max);
+  if (lv && unit === "top") {
+    const top0 = lv[from - 1].top;
+    const lastTop = Math.min(bookTopCount(book) - 1, top0 + max - 1);
+    const idx = lv.map((l, n) => (l.top === lastTop ? n + 1 : 0)).filter(Boolean);
+    to = idx[idx.length - 1];
+  }
+  return from === to ? unitName(book, from) : `${unitName(book, from)} ~ ${unitName(book, to)}`;
+}
+const bookTopCount = (book) => (book.structure && Array.isArray(book.structure.items) ? book.structure.items.length : 0);
+// 배정 창·범위 변경 창에 들어가는 입력 칸. getBook/getCur 는 입력이 바뀔 때마다 다시 읽습니다.
+function mountDaily(hostId, form, getBook, getCur, vals = {}) {
+  const host = $("#" + hostId);
+  const st = { lo: vals.daily_min ?? "", hi: vals.daily_max ?? "", unit: vals.daily_unit || "leaf" };
+  const paint = () => {
+    const book = getBook();
+    const tree = !!(book && bookLeaves(book));
+    const word = book ? dailyWord(book, { daily_unit: st.unit }) : "단원";
+    host.innerHTML = `<div class="dr-box">
+      <div class="dr-t"><b>하루 진도 범위</b><span class="muted">(선택)</span></div>
+      <div class="dr-sub muted">한 번 수업에 나갈 양이에요. 나중에 수업을 추천할 때 이 범위를 기준으로 삼아요.</div>
+      <div class="dr-row"><span>한 수업에</span>${stepHtml("daily_min", st.lo)}<span>~</span>${stepHtml("daily_max", st.hi)}
+        ${tree ? `<select name="daily_unit" aria-label="단위"><option value="leaf" ${st.unit === "leaf" ? "selected" : ""}>소단원</option><option value="top" ${st.unit === "top" ? "selected" : ""}>대단원</option></select>` : `<span class="dr-w">${esc(word)}</span>`}</div>
+      <div class="dr-hint" id="${hostId}-hint"></div></div>`;
+    hint();
+  };
+  const stepHtml = (nm, v) => `<span class="dr-st"><button type="button" data-st="${nm}" data-d="-1" aria-label="줄이기">−</button><input type="number" name="${nm}" min="1" max="50" inputmode="numeric" value="${esc(v)}"><button type="button" data-st="${nm}" data-d="1" aria-label="늘리기">＋</button></span>`;
+  const hint = () => {
+    const el = $("#" + hostId + "-hint");
+    const book = getBook();
+    if (!el || !book) return;
+    const lo = Number(st.lo) || 0, hi = Number(st.hi) || lo;
+    if (!lo) { el.textContent = "비워 두면 최근 수업 평균으로 추천해요."; return; }
+    const cur = Number(getCur()) || 0;
+    const t = dailyNext(book, cur, Math.max(hi, lo), st.unit);
+    el.innerHTML = t ? `이렇게 추천해요 · 현재 진도가 <b>${esc(cur > 0 ? unitName(book, cur) : "시작 전")}</b>이면 다음 수업은 <b>${esc(t)}</b> (${esc(dailyAmt(lo === hi ? lo : lo + "~" + hi, dailyWord(book, { daily_unit: st.unit })))})` : "이 교재는 모두 끝났어요.";
+  };
+  host.addEventListener("input", (e) => {
+    const el = e.target;
+    if (el.name === "daily_min") st.lo = el.value;
+    else if (el.name === "daily_max") st.hi = el.value;
+    else if (el.name === "daily_unit") { st.unit = el.value; paint(); return; }
+    hint();
+  });
+  host.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-st]");
+    if (!b) return;
+    const key = b.dataset.st === "daily_min" ? "lo" : "hi";
+    const base = Number(st[key]) || (key === "hi" && Number(st.lo)) || 0;
+    st[key] = String(Math.max(1, Math.min(50, base + Number(b.dataset.d))));
+    if (Number(st.lo) && Number(st.hi) && Number(st.hi) < Number(st.lo)) { if (key === "lo") st.hi = st.lo; else st.lo = st.hi; }
+    paint();
+  });
+  const bs = form.elements.textbook_id;
+  if (bs) bs.addEventListener("change", () => { st.unit = "leaf"; paint(); });
+  const cu = form.elements.current_unit;
+  if (cu) form.addEventListener("input", (e) => { if (e.target.name === "current_unit") hint(); });
+  if (cu) form.addEventListener("change", (e) => { if (e.target.name === "current_unit") hint(); });
+  paint();
+}
+// 입력값 읽기: 둘 다 비면 범위 없음(null), 하나만 있으면 같은 값
+function readDaily(form) {
+  const num = (nm) => { const el = form.elements[nm]; const v = el && el.value !== "" ? Number(el.value) : null; return v; };
+  let lo = num("daily_min"), hi = num("daily_max");
+  const un = form.elements.daily_unit ? form.elements.daily_unit.value : "leaf";
+  if (lo == null && hi == null) return { daily_min: null, daily_max: null, daily_unit: "leaf" };
+  if (lo == null) lo = hi;
+  if (hi == null) hi = lo;
+  if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo < 1 || hi > 50) throw new Error("하루 진도 범위는 1~50 사이 정수로 입력하세요.");
+  if (hi < lo) throw new Error("하루 진도 범위의 최대가 최소보다 작을 수 없어요.");
+  return { daily_min: lo, daily_max: hi, daily_unit: un === "top" ? "top" : "leaf" };
+}
+const dailyErr = (e) => (/daily_(min|max|unit)/i.test((e && e.message) || "") ? new Error("하루 진도 범위를 저장하려면 최신 schema.sql 을 Supabase 에서 먼저 실행하세요.") : e);
+
 const nextOptions = () => [["", "(정하지 않음)"], ...state.textbooks.map((b) => [b.id, b.title])];
 function assignBook(s) {
   const assigned = new Set(bookProgressFor(s.id).map((x) => x.book.id));
@@ -3500,6 +3590,7 @@ function assignBook(s) {
       { name: "current_unit", label: "현재 진도 (이미 나간 단원 수)", type: "number", min: 0, default: 0 },
       { name: "next_textbook_id", label: "다음 교재 (선택 · 이 교재를 끝낸 뒤 이어서 할 교재)", type: "select", options: nextOptions() },
       { name: "as-days", type: "slot" },
+      { name: "as-rng", type: "slot" },
     ],
     onSubmit: async (d) => {
       const row = { student_id: s.id, textbook_id: d.textbook_id, current_unit: d.current_unit || 0 };
@@ -3508,6 +3599,8 @@ function assignBook(s) {
         if (d.next_textbook_id === d.textbook_id) throw new Error("다음 교재는 지금 배정하는 교재와 달라야 해요.");
         row.next_textbook_id = d.next_textbook_id;
       }
+      const dr = readDaily($("#dlg-form"));
+      if (dr.daily_min != null) Object.assign(row, dr);
       let noNext = false;
       try {
         try { await run(db.from("progress").insert(row)); }
@@ -3517,13 +3610,34 @@ function assignBook(s) {
           const { next_textbook_id: _n, ...rest } = row;
           await run(db.from("progress").insert(rest));
         }
-      } catch (e) { throw weekdaysErr(e); }
+      } catch (e) { throw dailyErr(weekdaysErr(e)); }
       await refresh();
       toast(noNext ? "배정했어요. 다음 교재는 DB에 컬럼이 없어 저장되지 않았어요 (schema.sql 실행 필요)" : "교재를 배정했습니다");
     },
   });
   bindUnitCtls($("#dlg-form"), ["current_unit"], { zero: true });
   mountDayPicker("as-days", sel, classDays);
+  mountDaily("as-rng", $("#dlg-form"), () => state.textbooks.find((b) => b.id === $("#dlg-form").elements.textbook_id.value), () => $("#dlg-form").elements.current_unit.value);
+}
+
+function changeDaily(s, p, book) {
+  openForm({
+    title: `하루 진도 범위 · ${book.title}`,
+    fields: [{ name: "cd-rng", type: "slot" }],
+    deleteLabel: "범위 없애기",
+    deleteConfirm: "하루 진도 범위를 없앨까요? 이 교재는 최근 수업 평균으로 추천돼요.",
+    onDelete: async () => {
+      try { await run(db.from("progress").update({ daily_min: null, daily_max: null, daily_unit: "leaf" }).eq("id", p.id)); } catch (e) { throw dailyErr(e); }
+      await refresh(); toast("하루 진도 범위를 없앴어요");
+    },
+    onSubmit: async () => {
+      const dr = readDaily($("#dlg-form"));
+      try { await run(db.from("progress").update(dr).eq("id", p.id)); } catch (e) { throw dailyErr(e); }
+      await refresh();
+      toast(dr.daily_min == null ? "하루 진도 범위를 없앴어요" : "하루 진도 범위를 저장했습니다");
+    },
+  });
+  mountDaily("cd-rng", $("#dlg-form"), () => book, () => p.current_unit, p);
 }
 
 function changeNext(s, p, book) {
@@ -4817,6 +4931,7 @@ function bindEvents() {
         if (act.dataset.act === "inc") await setProgress(pid, p.current_unit + 1);
         else if (act.dataset.act === "dec") await setProgress(pid, p.current_unit - 1);
         else if (act.dataset.act === "days") { changeDays(s, p, book); return; }
+        else if (act.dataset.act === "range") { changeDaily(s, p, book); return; }
         else if (act.dataset.act === "next") { changeNext(s, p, book); return; }
         else if (act.dataset.act === "set") {
           if (bookLeaves(book)) {

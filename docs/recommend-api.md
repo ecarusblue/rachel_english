@@ -80,7 +80,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
    recent_lessons 에 같은 날짜 기록이 있는 날은 그 학생에게 추천하지 않습니다.
 3. 수업일마다 그날 요일에 맞는 교재만 고릅니다: books[].weekdays 가 비어 있거나 그 요일을 포함하는 교재.
 4. 교재별로, 그 교재가 나가는 수업일끼리만 이어서 단원 범위를 정합니다.
-   - 한 수업 분량 n = avg_units_per_lesson(없으면 2)을 반올림. 첫 날은 current_unit+1 부터 n개, 다음 날은 직전 to_unit+1 부터.
+   - 한 수업 분량: books[].daily_min~daily_max 가 있으면 그 범위 안에서 정합니다(선생님이 정한 하루 진도 범위, 단위는 daily_unit: 'leaf'=소단원·단원, 'top'=1레벨). 없으면 n = avg_units_per_lesson(없으면 2)을 반올림. 첫 날은 current_unit+1 부터 n개, 다음 날은 직전 to_unit+1 부터.
    - 최근 시험 percent 가 70 미만이거나 숙제가 '일부'/'미제출'이 반복되면 분량을 줄이고(최소 1) 첫 날 복습을 권합니다. 매우 좋으면 1단원 늘릴 수 있습니다.
    - from_unit 은 1 이상, to_unit 은 from_unit 이상이며 total_units 를 넘기지 않습니다. total_units 를 채우면 그 뒤 날짜는 추천하지 않습니다.
    - 번호는 누적 번호로 계산하고, rationale 에는 structure 가 있으면 이름("Unit 2 › Part B")으로 풀어 씁니다.
@@ -100,6 +100,8 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 (`[{"textbook_id","from_unit","to_unit","topic"}]`, 없으면 `null`)에 들어 있습니다. 교재별 진도를 볼 때는 둘 다 확인하세요.
 
 ## 교재별 수업 요일
+`books[].daily_min` / `daily_max` 는 선생님이 교재 배정 때 정한 **하루(한 번의 수업) 진도 범위**입니다(없으면 null). 이 범위를 넘기지 마세요. (최신 `schema.sql` 을 다시 실행해야 컬럼이 생깁니다.)
+
 `books[].weekdays` 는 그 교재를 쓰는 수업 요일 배열입니다(0=일 … 6=토, 예: `[1,3]` = 월·수). **빈 배열이면 모든 수업**에서 쓰는 교재입니다.
 추천할 날짜의 요일에 맞는 교재만 추천하세요(서버도 요일이 맞지 않는 항목은 거절합니다). 학생의 수업 요일은 `class_weekdays`(시간표)입니다. (최신 `schema.sql` 을 다시 실행해야 `weekdays` 컬럼이 생깁니다.)
 

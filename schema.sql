@@ -45,6 +45,11 @@ create table if not exists public.progress (
 alter table public.progress add column if not exists weekdays smallint[] not null default '{}';
 -- 이 교재를 끝낸 뒤 이어서 할 교재 (표시·추천 참고용)
 alter table public.progress add column if not exists next_textbook_id uuid references public.textbooks(id) on delete set null;
+-- 하루(한 번의 수업) 진도 범위: 수업 추천(Claude 예약 작업)의 기준값. 둘 다 비어 있으면 최근 수업 평균으로 추천
+--   daily_unit: 'leaf' = 소단원(또는 일반 단원) 개수, 'top' = 1레벨(대단원) 개수 (소단원이 있는 교재에서만 의미 있음)
+alter table public.progress add column if not exists daily_min smallint check (daily_min between 1 and 50);
+alter table public.progress add column if not exists daily_max smallint check (daily_max between 1 and 50);
+alter table public.progress add column if not exists daily_unit text not null default 'leaf' check (daily_unit in ('leaf', 'top'));
 
 -- 수업 기록: 출결 + 숙제 + 메모
 create table if not exists public.lessons (
@@ -309,6 +314,9 @@ begin
             'structure', t.structure,
             'total_units', t.total_units,
             'weekdays', p.weekdays,
+            'daily_min', p.daily_min,
+            'daily_max', p.daily_max,
+            'daily_unit', p.daily_unit,
             'current_unit', p.current_unit,
             'remaining_units', greatest(t.total_units - p.current_unit, 0),
             'next_textbook', (select jsonb_build_object('textbook_id', nt.id, 'title', nt.title)
