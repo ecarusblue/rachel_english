@@ -3747,7 +3747,7 @@ function assignBook(s) {
   });
   bindUnitCtls($("#dlg-form"), ["current_unit"], { zero: true });
   mountDayPicker("as-days", sel, classDays);
-  mountDaily("as-rng", $("#dlg-form"), () => state.textbooks.find((b) => b.id === $("#dlg-form").elements.textbook_id.value), () => $("#dlg-form").elements.current_unit.value);
+  mountDaily("as-rng", $("#dlg-form"), () => state.textbooks.find((b) => b.id === $("#dlg-form").elements.textbook_id.value), () => $("#dlg-form").elements.current_unit.value, { daily_min: 1, daily_max: 1 });
 }
 
 function changeDaily(s, p, book) {
