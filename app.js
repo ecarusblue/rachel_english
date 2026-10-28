@@ -1306,9 +1306,19 @@ function renderOverview() {
     .join("");
 
   if (state.schedule.draft) return renderScheduleEdit();
+  // 오늘 수업이 있는 재원생 수(시간표 기준, 중복 없이)
+  const todayWd = new Date().getDay();
+  const todaySet = new Set();
+  state.schedule.slots.filter((x) => x.weekday === todayWd).forEach((x) => (x.student_ids || []).forEach((id) => todaySet.add(id)));
+  const todayN = students.filter((s) => todaySet.has(s.id)).length;
+  const sumCards = `<div class="ov-sum" role="group" aria-label="오늘 요약">
+      <div class="card ov-card hot"><span>오늘 수업</span><b>${todayN}<small>명</small></b></div>
+      <div class="card ov-card${stale ? " warn" : ""}"><span>30일간 기록이 없는 학생</span><b>${stale}<small>명</small></b></div>
+      <div class="card ov-card${state.makeupNeed ? " warn" : ""}"><span>처리할 결석</span><b>${state.makeupNeed || 0}<small>건</small></b></div>
+    </div>`;
   main.innerHTML = `
-    <div class="page-head"><h2>전체 현황</h2><span class="muted">재원생 ${students.length}명</span>
-      ${stale ? `<span class="badge warn">30일간 수업 기록이 없는 학생 ${stale}명</span>` : ""}</div>
+    <div class="page-head"><h2>전체 현황</h2><span class="muted">재원생 ${students.length}명</span></div>
+    ${sumCards}
     ${scheduleHtml()}
     <div class="card table-wrap">
       <table class="ov-table">
