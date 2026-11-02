@@ -1250,4 +1250,4 @@ body.rc-lock { overflow: hidden; }
 .pl-ln i.w1 { flex: 0 0 20mm; } .pl-ln i.w2 { flex: 0 0 12mm; }
 .pl-memo { margin-top: 1mm; }
 .pl-hd { padding-left: 14mm; padding-right: 14mm; }
-.pl-page .rp-foot { padding-left: 14mm; padding-right: 14mm; }
+.pl-page .rp-foot { margin-left: 14mm; margin-right: 14mm; }
