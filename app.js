@@ -2792,11 +2792,9 @@ function planPrintHtml(s, recs) {
         <div class="pl-bk">${esc(b ? b.title : "")}</div>
         <div class="pl-rg">${esc(range)}</div>
         ${hasPr ? `<div class="pl-pg">지금까지 ${bookLeaves(b) ? esc(curNum(b, pr.current_unit)) : esc(b.unit_label) + " " + pr.current_unit + " / " + b.total_units}</div>` : ""}
-        ${r.rationale ? `<div class="pl-pt">${esc(r.rationale)}</div>` : ""}
         <div class="pl-wr"><div class="pl-wr-t">수업 후 기록</div>
           <div class="pl-ln"><span>실제 진도</span><i class="w1"></i><span>~</span><i class="w2"></i></div>
-          <div class="pl-ln"><span>선생님 코멘트</span><i></i></div>
-          <div class="pl-ln"><i></i></div></div>
+          <div class="pl-ln"><span>선생님 코멘트</span><i></i></div></div>
       </div>`;
   };
   // 같은 수업일의 교재는 한 그룹(날짜 칸 한 번)으로 묶습니다.
