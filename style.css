@@ -1267,3 +1267,21 @@ body.rc-lock { overflow: hidden; }
 .dp-wr .pl-ln i { height: 4mm; }
 .dp-page .pl-memo { margin-top: 3mm; }
 @media print { .print-rc #main > :not(#rc-print-area) { display: none !important; } }
+
+/* 수업 추천 날짜별 표: 폭이 좁으면 추천 한 건씩 카드로 */
+@media (max-width: 800px) {
+  .table-wrap:has(> .rc-dt) { background: none; border: 0; padding: 0; box-shadow: none; overflow: visible; }
+  .rc-dt, .table-wrap table.rc-dt { min-width: 0; display: block; }
+  .rc-dt thead { display: none; }
+  .rc-dt tbody { display: grid; gap: .7rem; }
+  .rc-dt tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .35rem .8rem; border: 1px solid var(--border); border-radius: var(--radius); padding: .8rem .9rem; background: var(--surface); }
+  .rc-dt td { display: block; border: 0; padding: 0; min-width: 0; text-align: left; }
+  .rc-dt td.d-st { grid-column: 1; grid-row: 1; font-size: 1.02rem; }
+  .rc-dt td.d-dt { grid-column: 2; grid-row: 1; text-align: right; font-size: .88rem; }
+  .rc-dt td.d-bk { grid-column: 1 / -1; grid-row: 2; font-weight: 600; }
+  .rc-dt td.d-why { grid-column: 1 / -1; grid-row: 3; max-width: none; font-size: .88rem; color: var(--muted); }
+  .rc-dt td.d-act { grid-column: 1 / -1; grid-row: 4; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: .6rem; }
+  .rc-dt td.d-act .book-actions { margin-top: 0 !important; display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; flex: 1; min-width: 12rem; }
+  .rc-dt td.d-act .book-actions > .btn { grid-column: auto !important; order: 0 !important; width: 100%; }
+  .rc-dt td.d-act .btn { min-height: 40px; }
+}

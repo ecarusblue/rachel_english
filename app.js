@@ -3221,14 +3221,14 @@ function renderAllRecs() {
     const cls = r.status === "거절" ? "bad" : r.status === "제안" ? "warn" : "";
     const has = r.status === "거절" ? null : recLessonOn(r.student_id, r);
     return `<tr data-rid="${esc(r.id)}" class="${has ? "rec-has-row" : ""}">
-      <td><strong>${esc(name(r.student_id))}</strong></td>
-      <td>${esc(b ? b.title + rangeText(b, r) : r.from_unit + "–" + r.to_unit + "단원")}${pr && b ? `<div class="muted" style="font-size:.8rem">현재 ${esc(curLabel(b, pr.current_unit))}</div>` : ""}</td>
-      <td style="white-space:nowrap">${r.target_date ? fmtDate(r.target_date) : "-"}${has ? `<div style="margin-top:.3rem">${lessonChip(has)}</div>` : ""}</td>
-      <td class="memo-cell">${esc(r.rationale || "")}</td>
-      <td style="white-space:nowrap"><span class="badge ${cls}">${esc(r.status)}</span>
+      <td class="d-st"><strong>${esc(name(r.student_id))}</strong></td>
+      <td class="d-bk">${esc(b ? b.title + rangeText(b, r) : r.from_unit + "–" + r.to_unit + "단원")}${pr && b ? `<div class="muted" style="font-size:.8rem">현재 ${esc(curLabel(b, pr.current_unit))}</div>` : ""}</td>
+      <td class="d-dt" style="white-space:nowrap">${r.target_date ? fmtDate(r.target_date) : "-"}${has ? `<div style="margin-top:.3rem">${lessonChip(has)}</div>` : ""}</td>
+      <td class="memo-cell d-why">${esc(r.rationale || "")}</td>
+      <td class="d-act" style="white-space:nowrap"><span class="badge ${cls}">${esc(r.status)}</span>
         ${r.status === "제안" ? `<div class="book-actions" style="margin-top:.4rem">${has ? `<button class="btn small" type="button" disabled>기록 있음</button>` : `<button class="btn small primary" data-rec-use="${esc(r.id)}" type="button">반영</button>`}<button class="btn small danger" data-rec-no="${esc(r.id)}" type="button">거절</button></div>` : ""}</td></tr>`;
   };
-  const table = (rows) => `<div class="card table-wrap"><table>
+  const table = (rows) => `<div class="card table-wrap"><table class="rc-dt">
     <thead><tr><th>학생</th><th>추천 교재 · 범위</th><th>수업 예정일</th><th>근거</th><th>상태</th></tr></thead>
     <tbody>${rows.map(row).join("")}</tbody></table></div>`;
   const ui = state.recsUi;
