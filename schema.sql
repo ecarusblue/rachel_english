@@ -361,7 +361,8 @@ begin
             'daily_unit', p.daily_unit,
             'current_unit', p.current_unit,
             'remaining_units', greatest(t.total_units - p.current_unit, 0),
-            'next_textbook', (select jsonb_build_object('textbook_id', nt.id, 'title', nt.title)
+            'next_textbook', (select jsonb_build_object('textbook_id', nt.id, 'title', nt.title, 'unit_label', nt.unit_label,
+                                                        'structure', nt.structure, 'total_units', nt.total_units)
                                 from public.textbooks nt where nt.id = p.next_textbook_id),
             'lessons_done', (
               select count(*) from public.lesson_book_rows l
@@ -449,11 +450,13 @@ begin
        where q.alias = v_item->>'alias' and q.active;
       if v_student is null then raise exception 'unknown student alias'; end if;
 
+      -- 학생에게 배정된 교재이거나, 배정된 교재의 '다음 교재'(next_textbook)이면 추천할 수 있음
       select t.* into v_book
         from public.textbooks t
-        join public.progress p on p.textbook_id = t.id and p.student_id = v_student
-       where t.id = (v_item->>'textbook_id')::uuid and t.owner = v_owner;
-      if not found then raise exception 'textbook is not assigned to the student'; end if;
+       where t.id = (v_item->>'textbook_id')::uuid and t.owner = v_owner
+         and exists (select 1 from public.progress p
+                      where p.student_id = v_student and (p.textbook_id = t.id or p.next_textbook_id = t.id));
+      if not found then raise exception 'textbook is not assigned to the student (nor its next textbook)'; end if;
 
       v_from := (v_item->>'from_unit')::numeric;
       v_to   := (v_item->>'to_unit')::numeric;

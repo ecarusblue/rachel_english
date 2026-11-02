@@ -2964,6 +2964,8 @@ function manualRecForm(s) {
   draw();
 }
 
+/* 다음 교재 추천은 교재 진도 탭에서 배정한 뒤에 수업 기록으로 반영할 수 있어요 */
+const notAssigned = (st, rec) => !state.progress.some((x) => x.student_id === st.id && x.textbook_id === rec.textbook_id);
 function renderRecsTab(s) {
   const allForStudent = state.detail.recs || [];
   const recs = filterRecs(allForStudent);
@@ -3022,6 +3024,7 @@ function renderRecsTab(s) {
   $("#tab-body").querySelectorAll("[data-rec-use]").forEach((b) => {
     b.onclick = async () => {
       const rec = recs.find((r) => r.id === b.dataset.recUse);
+      if (notAssigned(s, rec)) return toast("먼저 교재 진도 탭에서 이 교재를 배정해 주세요");
       if (await recDateHasLesson(s, rec)) return;
       lessonForm(s, null, rec);
     };
@@ -3240,6 +3243,7 @@ function renderAllRecs() {
       const s = state.students.find((x) => x.id === rec.student_id);
       if (!s) return toast("학생 정보를 찾을 수 없습니다");
       try { await loadDetail(s.id); } catch (e) { return fail(e); }
+      if (notAssigned(s, rec)) return toast("먼저 교재 진도 탭에서 이 교재를 배정해 주세요");
       if (await recDateHasLesson(s, rec)) return;
       lessonForm(s, null, state.detail.recs.find((r) => r.id === rec.id) || rec);
     };
