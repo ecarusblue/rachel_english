@@ -2492,7 +2492,7 @@ function openEvalPreview(html, onPrint, returnTo, label = "평가서 미리보�
   ov.setAttribute("aria-modal", "true");
   ov.setAttribute("aria-label", label);
   ov.innerHTML = `<div class="ev-ov-bar"><strong>${esc(label)}</strong><span class="muted" id="ev-ov-note">A4 기준</span><span class="spacer"></span>
-      ${opts.orient ? `<div class="seg" role="group" aria-label="용지 방향">${opts.orient.options.map(([v, t]) => `<button type="button" class="seg-b ${v === opts.orient.value ? "on" : ""}" data-orient="${v}" aria-pressed="${v === opts.orient.value}">${t}</button>`).join("")}</div>` : ""}
+      ${opts.orient ? `<div class="seg" role="group" aria-label="${esc(opts.orient.label || "용지 방향")}">${opts.orient.options.map(([v, t]) => `<button type="button" class="seg-b ${v === opts.orient.value ? "on" : ""}" data-orient="${v}" aria-pressed="${v === opts.orient.value}">${t}</button>`).join("")}</div>` : ""}
       ${opts.share && canSharePdf() ? `<button class="btn" type="button" id="ev-ov-share" disabled>공유 준비 중…</button>` : ""}
       <button class="btn primary" type="button" id="ev-ov-print">인쇄 / PDF 저장</button>
       <button class="btn" type="button" id="ev-ov-close">닫기</button></div>
@@ -2779,9 +2779,9 @@ function paginateSchedLand(sheet) {
 }
 const paginateEvalPreview = (sheet) => paginatePreview(sheet, { page: ".rp-page", body: ".rp-body", items: ":scope > *", cont: "rp-cont" });
 
-function planPrintHtml(s, recs) {
-  const rg = filterRange(state.recFilter);
-  const title = planTitle(state.recFilter);
+function planPrintHtml(s, recs, f = state.recFilter) {
+  const rg = filterRange(f);
+  const title = planTitle(f);
   const list = recs.filter((r) => r.status !== "거절").sort((a, b) => recDate(a).localeCompare(recDate(b)));
   const book = (r) => {
     const b = state.textbooks.find((x) => x.id === r.textbook_id);
@@ -3052,6 +3052,70 @@ function renderRecsTab(s) {
   });
 }
 
+/* ---------- 수업 추천 화면: 날짜별·학생별 인쇄 미리보기 ---------- */
+const printRc = (html) => {
+  let area = $("#rc-print-area");
+  if (!area) { area = document.createElement("div"); area.id = "rc-print-area"; area.className = "eval-print"; $("#main").appendChild(area); }
+  area.innerHTML = html;
+  document.body.classList.add("print-rc");
+  try { window.print(); } finally { document.body.classList.remove("print-rc"); }
+};
+function thisWeekRecs() {
+  const wk = periodRange("thisWeek");
+  const activeIds = new Set(state.students.filter((s) => s.active).map((s) => s.id));
+  return state.allRecs.filter((r) => activeIds.has(r.student_id) && recDate(r) >= wk.start && recDate(r) <= wk.end);
+}
+// 인쇄할 추천: 아직 '제안'이고 그날 수업 기록이 없는 것
+const printableOn = (recs, date) => recs.filter((r) => r.status === "제안" && recDate(r) === date && !recLessonOn(r.student_id, r));
+function dateRecsPrintHtml(date, recs) {
+  const d = parseD(date);
+  const byStu = new Map();
+  printableOn(recs, date).forEach((r) => { if (!byStu.has(r.student_id)) byStu.set(r.student_id, []); byStu.get(r.student_id).push(r); });
+  const rows = [...byStu.entries()].map(([id, items]) => ({ st: state.students.find((x) => x.id === id), items })).filter((x) => x.st)
+    .sort((a, b) => a.st.name.localeCompare(b.st.name, "ko"));
+  const nBooks = rows.reduce((n, x) => n + x.items.length, 0);
+  const bk = (st) => (r) => {
+    const b = state.textbooks.find((x) => x.id === r.textbook_id);
+    const pr = b ? state.progress.find((x) => x.student_id === st.id && x.textbook_id === b.id) : null;
+    return `<div class="dp-bk"><div class="dp-t">${esc(b ? b.title : "(교재 없음)")}</div><div class="dp-rg">${esc(b ? rangeText(b, r).trim() : `${r.from_unit}–${r.to_unit}단원`)}</div>
+      <div class="dp-cu">${pr && b ? `현재 ${esc(curLabel(b, pr.current_unit))}` : ""}</div>
+      <div class="dp-wr"><div class="pl-ln"><span>실제 진도</span><i></i></div><div class="pl-ln"><span>코멘트</span><i></i></div></div></div>`;
+  };
+  return `<div class="rp-page pl-page dp-page">
+    <div class="pl-hd"><div class="pl-br pv-row">${LOGO_SVG}<span>${esc(ACADEMY_NAME).toUpperCase()}</span></div><h1>${d.getMonth() + 1}월 ${d.getDate()}일 (${DAY_NAME[d.getDay()]}) 수업 추천</h1>
+      <div class="pl-who"><span><b>${rows.length}명 · 교재 ${nBooks}개</b></span><span>출력일 ${shortDate(todayStr())}</span></div></div>
+    <div class="pl-bd">
+      ${rows.length ? `<div class="dp-cols"><span>학생</span><span>교재</span><span>추천 범위</span><span>현재 진도</span><span>수업 후 기록</span></div>` : `<p class="pl-empty">이 날 인쇄할 추천이 없습니다.</p>`}
+      ${rows.map((x) => `<div class="dp-st"><div class="dp-nm"><b>${esc(x.st.name)}</b><small>${esc(x.st.grade || "")}</small></div><div class="dp-bks">${x.items.map(bk(x.st)).join("")}</div></div>`).join("")}
+      ${rows.length ? `<div class="pl-ln pl-memo"><span>메모</span><i></i></div>` : ""}
+    </div>
+    <div class="rp-foot"><span>${esc(ACADEMY_NAME)}</span><span>선생님용 · 추천은 제안입니다</span></div>
+  </div>`;
+}
+function openRecDatePreview(returnTo, date) {
+  const recs = thisWeekRecs();
+  const dates = [...new Set(recs.filter((r) => printableOn([r], recDate(r)).length).map(recDate))].sort();
+  if (!dates.length) { toast("이번 주에 인쇄할 추천이 없습니다"); return; }
+  if (!date || !dates.includes(date)) date = dates.find((d) => d >= todayStr()) || dates[0];
+  const html = dateRecsPrintHtml(date, recs);
+  openEvalPreview(html, () => printRc(html), returnTo, "수업 추천 미리보기", {
+    onRender: (sheet) => paginatePreview(sheet, { page: ".pl-page", body: ".pl-bd", items: ":scope > .dp-st, :scope > .pl-memo", cont: "pl-page pl-cont dp-page" }),
+    orient: { label: "날짜 고르기", value: date, options: dates.map((d) => [d, `${Number(d.slice(8))}일 ${DAY_NAME[parseD(d).getDay()]}`]), onChange: (v) => openRecDatePreview(returnTo, v) },
+  });
+}
+function openRecStudentPreview(returnTo, sid, period = "thisWeek") {
+  const st = state.students.find((x) => x.id === sid);
+  if (!st) return;
+  const f = { range: period };
+  const rg = filterRange(f);
+  const recs = state.allRecs.filter((r) => r.student_id === st.id && recDate(r) >= rg.start && recDate(r) <= rg.end);
+  const html = planPrintHtml(st, recs, f);
+  openEvalPreview(html, () => printRc(html), returnTo, `수업 안내 미리보기 · ${st.name}`, {
+    onRender: paginatePlanPreview,
+    orient: { label: "기간 고르기", value: period, options: [["thisWeek", "이번 주"], ["nextWeek", "다음 주"], ["thisMonth", "이번 달"]], onChange: (v) => openRecStudentPreview(returnTo, sid, v) },
+  });
+}
+
 /* ---------- 수업 추천 (전체 학생) ---------- */
 async function loadAllRecs() {
   state.allRecs = await run(db.from("recommendations").select("*").order("created_at", { ascending: false }).limit(500));
@@ -3135,7 +3199,7 @@ function recsByStudentHtml(recs) {
     ${mobile}
     <nav class="rc-list" aria-label="학생 선택">${list}<p class="muted rc-hint">숫자는 확인할 추천 수예요. 휴원·퇴원 학생은 보이지 않아요.</p></nav>
     <section class="rc-detail" aria-live="polite">
-      <div class="rc-dh"><b class="rc-name">${esc(st.name)}</b><span class="muted">${esc(st.grade || "")}</span>${nextBadge}</div>
+      <div class="rc-dh"><b class="rc-name">${esc(st.name)}</b><span class="muted">${esc(st.grade || "")}</span>${nextBadge}<span class="spacer"></span><button class="btn small" type="button" id="rc-print-stu">인쇄 미리보기</button></div>
       ${dates.length ? dates.map(grp).join("") : `<div class="empty" style="padding:1rem 0">확인할 추천을 모두 처리했어요.</div>`}
       ${decided.length ? `<div class="rc-sub">처리한 추천</div><div class="rc-recs">${decided.map(recCard).join("")}</div>` : ""}
       <div class="rc-sub">최근 수업</div>${hist || `<div class="muted" style="font-size:.88rem">최근 30일 수업 기록이 없어요.</div>`}
@@ -3170,7 +3234,7 @@ function renderAllRecs() {
   const ui = state.recsUi;
   try { const m = localStorage.getItem(RECS_MODE_KEY); if (m === "date" || m === "student") ui.mode = m; } catch { /* 저장 실패는 무시 */ }
   const seg = `<div class="rc-seg" role="group" aria-label="보기 방식"><button type="button" data-rcmode="student" class="${ui.mode === "student" ? "on" : ""}" aria-pressed="${ui.mode === "student"}">학생별</button><button type="button" data-rcmode="date" class="${ui.mode === "date" ? "on" : ""}" aria-pressed="${ui.mode === "date"}">날짜별</button></div>`;
-  const head = `<div class="page-head"><h2>수업 추천</h2><span class="muted">이번 주 ${shortDate(wk.start)} ~ ${shortDate(wk.end)} · 학생별 다음 수업 진도 추천</span><span class="spacer"></span>${seg}</div>`;
+  const head = `<div class="page-head"><h2>수업 추천</h2><span class="muted">이번 주 ${shortDate(wk.start)} ~ ${shortDate(wk.end)} · 학생별 다음 수업 진도 추천</span><span class="spacer"></span>${ui.mode === "date" ? `<button type="button" class="btn" id="rc-print-date">인쇄 미리보기</button>` : ""}${seg}</div>`;
   if (ui.mode === "student") {
     $("#main").innerHTML = head + recsByStudentHtml(recs);
   } else {
@@ -3223,6 +3287,8 @@ function renderAllRecs() {
     }));
   }
   document.body.classList.remove("rc-lock");
+  const pd = $("#rc-print-date"); if (pd) pd.onclick = () => openRecDatePreview(pd, null);
+  const ps = $("#rc-print-stu"); if (ps) ps.onclick = () => openRecStudentPreview(ps, state.recsUi.sid);
   const ob = $("#rc-open-stu");
   if (ob) ob.onclick = () => selectStudent(state.recsUi.sid);
   $("#main").querySelectorAll("[data-rcsid]").forEach((b) => {
