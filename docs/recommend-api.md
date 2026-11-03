@@ -50,6 +50,8 @@ curl -H "Authorization: Bearer $TOKEN" https://.../api/progress
   }]}}
 ```
 `next_textbook` 은 선생님이 정해 둔 "이 교재를 끝낸 뒤 이어서 할 교재"이며, 정하지 않았으면 `null` 입니다. 현재 교재가 끝나면 이어서 이 교재의 1단원부터 추천할 수 있습니다(아직 배정 전이어도 `/api/recommendations` 가 이 교재 id 를 받습니다). 없으면 현재 교재에서 추천을 마칩니다.
+
+선생님이 **교재 완료**로 표시한 교재는 `books` 에 나오지 않습니다(그 교재의 다음 교재도 마찬가지). 완료한 교재에 대한 추천은 `/api/recommendations` 에서 거절됩니다. 완료한 뒤 다음 교재를 이어서 배정했다면 그 교재는 평소처럼 `books` 에 나옵니다.
 재원 중인 학생만 나옵니다. 가명은 등록 순서로 정해지며 학생이 삭제되지 않는 한 유지됩니다.
 
 ### POST /api/recommendations

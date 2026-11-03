@@ -45,6 +45,8 @@ create table if not exists public.progress (
 alter table public.progress add column if not exists weekdays smallint[] not null default '{}';
 -- 이 교재를 끝낸 뒤 이어서 할 교재 (표시·추천 참고용)
 alter table public.progress add column if not exists next_textbook_id uuid references public.textbooks(id) on delete set null;
+-- 교재 완료 시각: 값이 있으면 '완료한 교재'. 진도·수업 기록은 그대로 두고 수업 추천(API)에서만 제외됨. 다시 진행하면 null 로 되돌림
+alter table public.progress add column if not exists completed_at timestamptz;
 -- 하루(한 번의 수업) 진도 범위: 수업 추천(Claude 예약 작업)의 기준값. 새로 시작하는 교재(수업 기록 없음)에만 쓰고,
 --   진행 중인 교재는 최근 수업 평균으로 추천. 0.5 단위(0.5 ~ 50). 예: 1.5 = 두 수업에 3단원, 0.5 = 한 단원을 두 수업에 나눠서
 --   daily_unit: 'leaf' = 소단원(또는 일반 단원) 개수, 'top' = 1레벨(대단원) 개수 (소단원이 있는 교재에서만 의미 있음)
@@ -383,7 +385,7 @@ begin
                  order by l.lesson_date desc, l.created_at desc limit 8) x)
           ) order by t.title)
           from public.progress p join public.textbooks t on t.id = p.textbook_id
-         where p.student_id = st.id and p.owner = v_owner), '[]'::jsonb),
+         where p.student_id = st.id and p.owner = v_owner and p.completed_at is null), '[]'::jsonb),
         'recent_lessons', coalesce((
           select jsonb_agg(r order by r->>'date' desc) from (
             select jsonb_build_object('date', l.lesson_date, 'attendance', l.attendance,
@@ -455,8 +457,9 @@ begin
         from public.textbooks t
        where t.id = (v_item->>'textbook_id')::uuid and t.owner = v_owner
          and exists (select 1 from public.progress p
-                      where p.student_id = v_student and (p.textbook_id = t.id or p.next_textbook_id = t.id));
-      if not found then raise exception 'textbook is not assigned to the student (nor its next textbook)'; end if;
+                      where p.student_id = v_student and p.completed_at is null
+                        and (p.textbook_id = t.id or p.next_textbook_id = t.id));
+      if not found then raise exception 'textbook is not assigned to the student (nor its next textbook), or it is completed'; end if;
 
       v_from := (v_item->>'from_unit')::numeric;
       v_to   := (v_item->>'to_unit')::numeric;

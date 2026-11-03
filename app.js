@@ -682,9 +682,10 @@ function renderSidebar() {
     : `<li class="muted" style="padding:.5em .7em;font-size:.85rem">학생을 추가하세요.</li>`;
 }
 
-function bookProgressFor(studentId) {
+/* 진행 중인 교재(완료하지 않은 것). done=true 면 완료한 교재, "all" 이면 전부 */
+function bookProgressFor(studentId, which = "active") {
   return state.progress
-    .filter((p) => p.student_id === studentId)
+    .filter((p) => p.student_id === studentId && (which === "all" || (which === "done") === !!p.completed_at))
     .map((p) => ({ p, book: state.textbooks.find((b) => b.id === p.textbook_id) }))
     .filter((x) => x.book);
 }
@@ -1354,9 +1355,69 @@ function nextLine(p, book) {
   const done = book.total_units > 0 && p.current_unit >= book.total_units;
   return `<div class="next-book${done ? " done" : ""}">${done ? "교재를 끝냈어요 · 다음 교재" : "다음 교재"} <b>${esc(nb.title)}</b></div>`;
 }
+/* 완료한 교재 섹션 */
+function doneBooksHtml(s, doneItems) {
+  if (!doneItems.length) return "";
+  const open = state.doneOpen !== false;
+  const cards = doneItems
+    .slice()
+    .sort((a, b) => String(b.p.completed_at).localeCompare(String(a.p.completed_at)))
+    .map(({ p, book }) => {
+      const ls = state.detail.lessons.filter((l) => l.attendance !== "결석" && lessonBooks(l).some((b) => b.textbook_id === book.id));
+      const dates = ls.map((l) => l.lesson_date).sort();
+      const early = book.total_units > 0 && p.current_unit < book.total_units;
+      const doneDay = (p.completed_at || "").slice(0, 10);
+      const md = (d) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : "");
+      return `<div class="dn-card" data-pid="${esc(p.id)}">
+        <span class="dn-tag ${early ? "early" : ""}">${early ? "중간 종료" : "완료"} ${md(doneDay)}</span>
+        <b>${esc(book.title)}</b>
+        <div class="muted dn-meta">${esc(curShort(book, p.current_unit))} / ${book.total_units} · 수업 ${ls.length}회${dates.length ? `<br>시작 ${md(dates[0])} → ${early ? "종료" : "완료"} ${md(doneDay)}` : ""}</div>
+        <div class="book-actions"><button class="btn small" data-act="tolessons">수업 기록 보기</button><button class="btn small" data-act="reopen">다시 진행</button></div>
+      </div>`;
+    })
+    .join("");
+  return `<section class="dn-sec"><div class="dn-head"><h3>완료한 교재</h3><span class="dn-cnt">${doneItems.length}권</span><button class="btn small" type="button" data-act="donefold">${open ? "접기" : "펼치기"}</button></div>${open ? `<div class="grid">${cards}</div>` : ""}</section>`;
+}
+
+/* 교재 완료: 완료 상태로 바꿔 진행 중 목록·수업 추천에서 빼고, 정해 둔 다음 교재가 있으면 이어서 배정 */
+function completeBook(s, p, book) {
+  const nb = p.next_textbook_id ? state.textbooks.find((b) => b.id === p.next_textbook_id) : null;
+  const nbRow = nb ? state.progress.find((x) => x.student_id === s.id && x.textbook_id === nb.id) : null;
+  const canAssign = !!nb && !nbRow;
+  const early = book.total_units > 0 && p.current_unit < book.total_units;
+  openForm({
+    title: `교재 완료 · ${book.title}`,
+    fields: [
+      { name: "cb-info", type: "slot" },
+      ...(canAssign ? [{ name: "assign_next", label: `다음 교재 '${nb.title}' 이어서 배정하기 (요일은 지금 교재와 같게 시작)`, type: "checkbox", default: true }] : []),
+    ],
+    submitLabel: "교재 완료",
+    onSubmit: async (d) => {
+      try { await run(db.from("progress").update({ completed_at: new Date().toISOString() }).eq("id", p.id)); }
+      catch (e) { throw new Error(/completed_at/i.test(e.message || "") ? "DB에 completed_at 컬럼이 없어요. 최신 schema.sql 을 Supabase 에서 한 번 실행해 주세요." : e.message); }
+      let assigned = false;
+      if (canAssign && d.assign_next) {
+        const row = { student_id: s.id, textbook_id: nb.id, current_unit: 0 };
+        const wd = dayList(p);
+        if (wd.length) row.weekdays = wd;
+        try { await run(db.from("progress").insert(row)); assigned = true; }
+        catch (e) { toast("교재는 완료했지만 다음 교재 배정에 실패했어요. 교재 진도에서 직접 배정해 주세요"); }
+      }
+      await refresh();
+      toast(`${book.title}을 완료했습니다${assigned ? ` · ${nb.title}를 배정했어요` : ""}`);
+    },
+  });
+  const info = $("#cb-info");
+  if (info) {
+    info.innerHTML = `<p style="margin:0 0 .6rem;line-height:1.7">수업 기록과 마지막 진도(${esc(curShort(book, p.current_unit))} / ${book.total_units})는 그대로 남고, <b>수업 추천에서는 제외</b>됩니다. 완료한 교재 목록에서 언제든 다시 진행할 수 있어요.</p>${early ? `<p class="muted" style="margin:0 0 .6rem;font-size:.88rem">아직 마지막 단원까지 끝나지 않았어요. '중간 종료'로 표시됩니다.</p>` : ""}${nb && nbRow ? `<p class="muted" style="margin:0 0 .6rem;font-size:.88rem">다음 교재 '${esc(nb.title)}'는 이미 배정되어 있어요.</p>` : ""}`;
+  }
+}
+
 function renderProgressTab(s) {
   const items = bookProgressFor(s.id);
-  const assignedIds = new Set(items.map((x) => x.book.id));
+  const doneItems = bookProgressFor(s.id, "done");
+  const doneHtml = doneBooksHtml(s, doneItems);
+  const assignedIds = new Set(bookProgressFor(s.id, "all").map((x) => x.book.id));
   const available = state.textbooks.filter((b) => !assignedIds.has(b.id));
   const nextLesson = state.detail.lessons.find((l) => l.next_plan);
   const classDays = studentClassDays(s.id);
@@ -1389,10 +1450,11 @@ function renderProgressTab(s) {
         ${dailyRow(book, p)}
         ${recNote(book, p, state.detail.lessons)}
         ${nextLine(p, book)}
-        <div class="stat"><strong>${esc(curShort(book, p.current_unit))} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong></div>
+        <div class="stat"><strong>${esc(curShort(book, p.current_unit))} <span class="muted" style="font-size:.9rem;font-weight:400">/ ${book.total_units}</span></strong>${book.total_units > 0 && p.current_unit >= book.total_units ? `<span class="done-chip">마지막 단원까지 끝남</span>` : ""}</div>
         ${recent ? `<div style="font-size:.85rem;margin-top:.5rem">최근 수업 <span class="muted">${fmtDate(recent.lesson_date)}</span> ·${esc(rangeText(book, recentEnt) || " 범위 미입력")}</div>` : ""}
         <div class="muted" style="font-size:.8rem;margin-top:.4rem">진도 갱신 ${fmtDate((p.updated_at || "").slice(0, 10))}</div>
         <div class="book-actions">
+          <button class="btn small ${book.total_units > 0 && p.current_unit >= book.total_units ? "primary" : ""}" data-act="complete">교재 완료</button>
           <button class="btn small" data-act="days">요일 변경</button>
           <button class="btn small" data-act="range">${p.daily_min ? "하루 추천 진도 범위 변경" : "하루 추천 진도 범위 정하기"}</button>
           <button class="btn small" data-act="next">다음 교재</button>
@@ -1407,7 +1469,8 @@ function renderProgressTab(s) {
       ${items.length ? `<span class="seg" role="group" aria-label="보기 방식"><button type="button" data-pv="card" aria-pressed="${!week}">카드</button><button type="button" data-pv="week" aria-pressed="${week}">요일별</button></span>` : ""}
       ${state.textbooks.length ? "" : `<span class="muted">먼저 왼쪽 아래 <strong>교재 관리</strong>에서 교재를 만드세요.</span>`}
       <span class="spacer"></span>${classDays.length ? `<span class="muted">시간표 수업 요일: ${classDays.map((d) => DAY_NAME[d]).join(" · ")}</span>` : ""}</div>
-    ${!items.length ? `<div class="card empty">배정된 교재가 없습니다.</div>` : week ? weekHtml : `<div class="grid">${cards}</div>`}`;
+    ${!items.length ? `<div class="card empty">${doneItems.length ? "진행 중인 교재가 없습니다. 아래 완료한 교재에서 다시 진행할 수 있어요." : "배정된 교재가 없습니다."}</div>` : week ? weekHtml : `<div class="grid">${cards}</div>`}
+    ${doneHtml}`;
   $("#tab-body").querySelectorAll("[data-pv]").forEach((b) => { b.onclick = () => { state.progView = b.dataset.pv; renderProgressTab(s); }; });
 }
 
@@ -2874,7 +2937,7 @@ function editRecsForm(s, ids) {
 
 /* 수업 추천 직접 입력: '제안' 상태로 저장(직접 수정 표시 포함 → 예약 작업이 덮어쓰지 않음) */
 function manualRecForm(s) {
-  const prog = state.progress.filter((p) => p.student_id === s.id);
+  const prog = state.progress.filter((p) => p.student_id === s.id && !p.completed_at);
   let books = prog.map((p) => state.textbooks.find((b) => b.id === p.textbook_id)).filter(Boolean);
   if (!books.length) books = state.textbooks.slice();
   if (!books.length) { toast("먼저 교재를 등록하세요"); return; }
@@ -2965,7 +3028,7 @@ function manualRecForm(s) {
 }
 
 /* 다음 교재 추천은 교재 진도 탭에서 배정한 뒤에 수업 기록으로 반영할 수 있어요 */
-const notAssigned = (st, rec) => !state.progress.some((x) => x.student_id === st.id && x.textbook_id === rec.textbook_id);
+const notAssigned = (st, rec) => !state.progress.some((x) => x.student_id === st.id && x.textbook_id === rec.textbook_id && !x.completed_at);
 function renderRecsTab(s) {
   const allForStudent = state.detail.recs || [];
   const recs = filterRecs(allForStudent);
@@ -3774,7 +3837,7 @@ const dailyErr = (e) => (/daily_(min|max|unit)/i.test((e && e.message) || "") ? 
 
 const nextOptions = () => [["", "(정하지 않음)"], ...state.textbooks.map((b) => [b.id, b.title])];
 function assignBook(s) {
-  const assigned = new Set(bookProgressFor(s.id).map((x) => x.book.id));
+  const assigned = new Set(bookProgressFor(s.id, "all").map((x) => x.book.id));
   const options = state.textbooks.filter((b) => !assigned.has(b.id)).map((b) => [b.id, `${b.title} (${bookLeaves(b) ? b.total_units + "단원" : b.total_units + " " + b.unit_label})`]);
   const sel = new Set();
   const classDays = studentClassDays(s.id);
@@ -3859,7 +3922,7 @@ function changeDays(s, p, book) {
     title: `수업 요일 · ${book.title}`,
     fields: [{ name: "cd-days", type: "slot" }],
     deleteLabel: "배정 해제",
-    deleteConfirm: `'${book.title}' 배정을 해제할까요? 진도 기록이 사라집니다.`,
+    deleteConfirm: `'${book.title}' 배정을 해제할까요? 수업 기록은 그대로 남고, 현재 진도·요일·다음 교재 설정은 초기화됩니다.`,
     onDelete: async () => { await run(db.from("progress").delete().eq("id", p.id)); await refresh(); toast("배정을 해제했습니다"); },
     onSubmit: async () => {
       try { await run(db.from("progress").update({ weekdays: SCH_ORDER.filter((x) => sel.has(x)) }).eq("id", p.id)); } catch (e) { throw weekdaysErr(e); }
@@ -5135,6 +5198,7 @@ function bindEvents() {
 
     const act = e.target.closest("[data-act]");
     if (act) {
+      if (act.dataset.act === "donefold") { state.doneOpen = state.doneOpen === false; renderProgressTab(s); return; }
       const pid = act.closest("[data-pid]").dataset.pid;
       const p = state.progress.find((x) => x.id === pid);
       const book = state.textbooks.find((b) => b.id === p.textbook_id);
@@ -5142,8 +5206,16 @@ function bindEvents() {
         if (act.dataset.act === "days") { changeDays(s, p, book); return; }
         else if (act.dataset.act === "range") { changeDaily(s, p, book); return; }
         else if (act.dataset.act === "next") { changeNext(s, p, book); return; }
+        else if (act.dataset.act === "complete") { completeBook(s, p, book); return; }
+        else if (act.dataset.act === "tolessons") { state.tab = "lessons"; renderStudent(); return; }
+        else if (act.dataset.act === "reopen") {
+          try { await run(db.from("progress").update({ completed_at: null }).eq("id", pid)); }
+          catch (e) { throw new Error(/completed_at/i.test(e.message || "") ? "DB에 completed_at 컬럼이 없어요. 최신 schema.sql 을 실행해 주세요." : e.message); }
+          await refresh();
+          toast(`${book.title}을 다시 진행합니다`);
+        }
         else if (act.dataset.act === "unassign") {
-          if (!confirm("이 교재 배정을 해제할까요? 진도 기록이 사라집니다.")) return;
+          if (!confirm("이 교재 배정을 해제할까요? 수업 기록은 그대로 남고, 현재 진도·요일·다음 교재 설정은 초기화됩니다.")) return;
           await run(db.from("progress").delete().eq("id", pid));
           await refresh();
         }
