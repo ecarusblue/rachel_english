@@ -3185,6 +3185,7 @@ async function loadAllRecs() {
 }
 
 const RECS_MODE_KEY = "rachel_recs_mode";
+const RECS_SORT_KEY = "rachel_recs_sort";
 function recsByStudentHtml(recs) {
   const act = state.students.filter((x) => x.active);
   const rows = act.map((st) => {
@@ -3291,10 +3292,34 @@ function renderAllRecs() {
       <td class="d-act" style="white-space:nowrap"><span class="badge ${cls}">${esc(r.status)}</span>
         ${r.status === "제안" ? `<div class="book-actions" style="margin-top:.4rem">${has ? `<button class="btn small" type="button" disabled>기록 있음</button>` : `<button class="btn small primary" data-rec-use="${esc(r.id)}" type="button">반영</button>`}<button class="btn small danger" data-rec-no="${esc(r.id)}" type="button">거절</button></div>` : ""}</td></tr>`;
   };
-  const table = (rows) => `<div class="card table-wrap"><table class="rc-dt">
+  const table = (rows, groupBy = null) => {
+    let body = "";
+    if (groupBy) {
+      const key = (r) => (groupBy === "student" ? r.student_id : recDate(r));
+      const label = (r) => (groupBy === "student" ? name(r.student_id) : `${shortDate(recDate(r))} (${DAY_NAME[parseD(recDate(r)).getDay()]})`);
+      let last = null;
+      rows.forEach((r, i) => {
+        if (key(r) !== last) {
+          last = key(r);
+          const n = rows.filter((x) => key(x) === last).length;
+          body += `<tr class="rc-gh"><td colspan="5"><strong>${esc(label(r))}</strong> <span class="muted">${n}건</span></td></tr>`;
+        }
+        body += row(r);
+      });
+    } else body = rows.map(row).join("");
+    return `<div class="card table-wrap"><table class="rc-dt">
     <thead><tr><th>학생</th><th>추천 교재 · 범위</th><th>수업 예정일</th><th>근거</th><th>상태</th></tr></thead>
-    <tbody>${rows.map(row).join("")}</tbody></table></div>`;
+    <tbody>${body}</tbody></table></div>`;
+  };
   const ui = state.recsUi;
+  try { const m = localStorage.getItem(RECS_SORT_KEY); if (m === "date" || m === "student") ui.sort = m; } catch { /* 저장 실패는 무시 */ }
+  const sortKey = ui.sort === "student" ? "student" : "date";
+  const byName = (a, b) => name(a.student_id).localeCompare(name(b.student_id), "ko");
+  const byDate = (a, b) => String(recDate(a)).localeCompare(String(recDate(b)));
+  const sorted = (list) => list.slice().sort(sortKey === "student" ? (a, b) => byName(a, b) || byDate(a, b) : (a, b) => byDate(a, b) || byName(a, b));
+  const noLesson = sorted(pending.filter((r) => !recLessonOn(r.student_id, r)));
+  const hasLesson = sorted(pending.filter((r) => recLessonOn(r.student_id, r)));
+  const hasOpen = ui.hasOpen !== false;
   try { const m = localStorage.getItem(RECS_MODE_KEY); if (m === "date" || m === "student") ui.mode = m; } catch { /* 저장 실패는 무시 */ }
   const seg = `<div class="rc-seg" role="group" aria-label="보기 방식"><button type="button" data-rcmode="student" class="${ui.mode === "student" ? "on" : ""}" aria-pressed="${ui.mode === "student"}">학생별</button><button type="button" data-rcmode="date" class="${ui.mode === "date" ? "on" : ""}" aria-pressed="${ui.mode === "date"}">날짜별</button></div>`;
   const head = `<div class="page-head"><h2>수업 추천</h2><span class="muted">이번 주 ${shortDate(wk.start)} ~ ${shortDate(wk.end)} · 학생별 다음 수업 진도 추천</span><span class="spacer"></span>${ui.mode === "date" ? `<button type="button" class="btn" id="rc-print-date">인쇄 미리보기</button>` : ""}${seg}</div>`;
@@ -3303,7 +3328,12 @@ function renderAllRecs() {
   } else {
     $("#main").innerHTML = `
     ${head}
-    ${pending.length ? `${table(pending)}` : `<div class="card empty">이번 주에 확인할 새 추천이 없습니다. 다른 주의 추천은 학생 화면의 수업 추천 탭에서 기간을 바꿔 볼 수 있습니다.</div>`}
+    <div class="rc-sort"><span class="muted">정렬</span><div class="rc-seg" role="group" aria-label="정렬"><button type="button" data-rcsort="date" class="${sortKey === "date" ? "on" : ""}" aria-pressed="${sortKey === "date"}">날짜순</button><button type="button" data-rcsort="student" class="${sortKey === "student" ? "on" : ""}" aria-pressed="${sortKey === "student"}">학생순</button></div></div>
+    ${pending.length ? `
+      <div class="rc-sec-h"><h3>수업 기록 없음</h3><span class="rc-cnt todo">반영 대기 ${noLesson.length}</span><span class="muted">아직 수업 기록이 없는 추천입니다. 수업 후 "반영"을 누르세요.</span></div>
+      ${noLesson.length ? table(noLesson, sortKey) : `<div class="card empty">수업 기록이 없는 추천이 없습니다.</div>`}
+      ${hasLesson.length ? `<div class="rc-sec-h"><h3>수업 기록 있음</h3><span class="rc-cnt has">기록 완료 ${hasLesson.length}</span><span class="muted">이미 수업 기록이 있는 날의 추천입니다.</span><button type="button" class="btn small" id="rc-has-fold" style="margin-left:auto">${hasOpen ? "접기" : "펼치기"}</button></div>${hasOpen ? table(hasLesson, sortKey) : ""}` : ""}`
+      : `<div class="card empty">이번 주에 확인할 새 추천이 없습니다. 다른 주의 추천은 학생 화면의 수업 추천 탭에서 기간을 바꿔 볼 수 있습니다.</div>`}
     ${done.length ? `<h3 style="margin-top:1.2rem">최근 처리한 추천</h3>${table(done)}` : ""}
     <p class="muted" style="font-size:.85rem;margin-top:.8rem">"반영"을 누르면 그 학생의 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록돼요. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`;
   }
@@ -3314,6 +3344,15 @@ function renderAllRecs() {
       renderAllRecs();
     };
   });
+  $("#main").querySelectorAll("[data-rcsort]").forEach((b) => {
+    b.onclick = () => {
+      ui.sort = b.dataset.rcsort;
+      try { localStorage.setItem(RECS_SORT_KEY, ui.sort); } catch { /* 저장 실패는 무시 */ }
+      renderAllRecs();
+    };
+  });
+  const hf = $("#rc-has-fold");
+  if (hf) hf.onclick = () => { ui.hasOpen = ui.hasOpen === false; renderAllRecs(); };
   const rcRows = [...$("#main").querySelectorAll(".rc-list .rc-li")].map((e) => e.dataset.rcsid);
   $("#main").querySelectorAll("[data-rcstep]").forEach((b) => {
     b.onclick = () => {

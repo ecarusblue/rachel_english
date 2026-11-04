@@ -1299,3 +1299,19 @@ body.rc-lock { overflow: hidden; }
 .dn-tag { justify-self: start; font-size: .72rem; font-weight: 700; padding: .1rem .55rem; border-radius: 999px; background: #dcf1e3; color: var(--good); }
 .dn-tag.early { background: #f4ead9; color: #7a5a1e; }
 @media (prefers-color-scheme: dark) { .done-chip, .dn-cnt, .dn-tag { background: #1b3a2a; color: #7fdca0; } .dn-tag.early { background: #33291a; color: #e6c58a; } }
+
+/* 수업 추천 날짜별: 수업 기록 없음/있음 구역 · 정렬 */
+.rc-sort { display: flex; align-items: center; gap: .6rem; margin: .2rem 0 .4rem; }
+.rc-sec-h { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin: 1.2rem 0 .5rem; }
+.rc-sec-h h3 { margin: 0; }
+.rc-sec-h .muted { font-size: .85rem; }
+.rc-cnt { font-size: .75rem; font-weight: 700; padding: .1rem .6rem; border-radius: 999px; }
+.rc-cnt.todo { background: #f6e8cf; color: #8a5a14; }
+.rc-cnt.has { background: #dcf1e3; color: var(--good); }
+.rc-dt tr.rc-gh td { background: var(--accent-soft); color: var(--accent); font-size: .95rem; padding: .45rem .85rem; }
+.rc-dt tr.rc-gh .muted { font-weight: 400; font-size: .8rem; }
+@media (prefers-color-scheme: dark) { .rc-cnt.todo { background: #33291a; color: #e6c58a; } .rc-cnt.has { background: #1b3a2a; color: #7fdca0; } }
+@media (max-width: 800px) {
+  .rc-dt tr.rc-gh { display: block; border: 0; background: none; padding: .2rem .1rem 0; }
+  .rc-dt tr.rc-gh td { border-radius: 8px; }
+}
