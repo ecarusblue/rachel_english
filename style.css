@@ -1308,16 +1308,17 @@ body.rc-lock { overflow: hidden; }
 .rc-cnt { font-size: .75rem; font-weight: 700; padding: .1rem .6rem; border-radius: 999px; }
 .rc-cnt.todo { background: #f6e8cf; color: #8a5a14; }
 .rc-cnt.has { background: #dcf1e3; color: var(--good); }
-.rc-dt tr.rc-gh td { background: var(--accent-soft); color: var(--accent); font-size: .95rem; padding: .45rem .85rem; }
-.rc-dt tr.rc-gh .muted { font-weight: 400; font-size: .8rem; }
+.rc-dt tr.rcd-head td { background: var(--accent-soft); color: var(--accent); font-size: .95rem; padding: .45rem .85rem; }
+.rc-dt tr.rcd-head .muted { font-weight: 400; font-size: .8rem; }
 @media (prefers-color-scheme: dark) { .rc-cnt.todo { background: #33291a; color: #e6c58a; } .rc-cnt.has { background: #1b3a2a; color: #7fdca0; } }
 @media (max-width: 800px) {
-  .rc-dt tr.rc-gh { display: block; border: 0; background: none; padding: .2rem .1rem 0; }
-  .rc-dt tr.rc-gh td { border-radius: 8px; }
+  .rc-dt tr.rcd-head { display: block; border: 0; background: none; padding: .2rem .1rem 0; }
+  .rc-dt tr.rcd-head td { border-radius: 8px; }
 }
 
 /* 수업 추천 날짜별: 같은 학생·같은 날 묶음 */
-.rc-dt tr.rc-grp > td { padding: .75rem .85rem; }
+.rc-dt tr.rc-bundle > td { padding: .75rem .85rem; white-space: normal; }
+.rc-dt tr.rcd-head > td { white-space: normal; }
 .rcg-top { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
 .rcg-top b { font-size: 1rem; }
 .rcg-cnt { font-size: .75rem; font-weight: 700; padding: .1rem .6rem; border-radius: 999px; background: #f6e8cf; color: #8a5a14; }
@@ -1327,8 +1328,8 @@ body.rc-lock { overflow: hidden; }
 .rcg-why { font-size: .85rem; line-height: 1.6; }
 @media (prefers-color-scheme: dark) { .rcg-cnt { background: #33291a; color: #e6c58a; } }
 @media (max-width: 800px) {
-  .rc-dt tr.rc-grp { display: block; padding: .8rem .9rem; }
-  .rc-dt tr.rc-grp > td { display: block; padding: 0; }
+  .rc-dt tr.rc-bundle { display: block; padding: .8rem .9rem; }
+  .rc-dt tr.rc-bundle > td { display: block; padding: 0; }
   .rcg-top .book-actions { margin: .5rem 0 0 !important; width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
   .rcg-top .book-actions > .btn { grid-column: auto !important; order: 0 !important; width: 100%; min-height: 40px; }
   .rcg-bk { grid-template-columns: 1fr; gap: .3rem; }

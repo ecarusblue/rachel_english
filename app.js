@@ -3307,7 +3307,7 @@ function renderAllRecs() {
           last = key(r);
           const grp = rows.filter((x) => key(x) === last);
           const nStu = new Set(grp.map((x) => x.student_id)).size;
-          body += `<tr class="rc-gh"><td colspan="5"><strong>${esc(label(r))}</strong> <span class="muted">${groupBy === "student" ? (grade(r.student_id) ? grade(r.student_id) + " · " : "") : nStu + "명 · "}추천 ${grp.length}건</span></td></tr>`;
+          body += `<tr class="rcd-head"><td colspan="5"><strong>${esc(label(r))}</strong> <span class="muted">${groupBy === "student" ? (grade(r.student_id) ? grade(r.student_id) + " · " : "") : nStu + "명 · "}추천 ${grp.length}건</span></td></tr>`;
         }
         // 같은 학생 + 같은 수업일의 추천이 여러 개면 한 묶음
         let j = i;
@@ -3318,7 +3318,7 @@ function renderAllRecs() {
           const has = recLessonOn(r.student_id, r);
           const ids = cluster.map((x) => x.id).join(",");
           const head = groupBy === "student" ? `<b>${esc(label2(r))}</b>` : `<b>${esc(name(r.student_id))}</b>${grade(r.student_id) ? ` <small class="muted">${esc(grade(r.student_id))}</small>` : ""}`;
-          body += `<tr class="rc-grp" data-rid="${esc(cluster[0].id)}"><td colspan="5"><div class="rcg-top">${head}<span class="rcg-cnt">교재 ${cluster.length}개</span>${has ? `<span class="rcg-chip">${lessonChip(has)}</span>` : `<div class="book-actions"><button class="btn small primary" data-rec-use="${esc(cluster[0].id)}" type="button">모두 반영</button><button class="btn small danger" data-rec-no="${esc(ids)}" type="button">모두 거절</button></div>`}</div>
+          body += `<tr class="rc-bundle" data-rid="${esc(cluster[0].id)}"><td colspan="5"><div class="rcg-top">${head}<span class="rcg-cnt">교재 ${cluster.length}개</span>${has ? `<span class="rcg-chip">${lessonChip(has)}</span>` : `<div class="book-actions"><button class="btn small primary" data-rec-use="${esc(cluster[0].id)}" type="button">모두 반영</button><button class="btn small danger" data-rec-no="${esc(ids)}" type="button">모두 거절</button></div>`}</div>
             <div class="rcg-list">${cluster.map((x, n) => {
               const b = state.textbooks.find((t) => t.id === x.textbook_id);
               const pr = b ? state.progress.find((p) => p.student_id === x.student_id && p.textbook_id === b.id) : null;
