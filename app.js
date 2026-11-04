@@ -3328,7 +3328,7 @@ function renderAllRecs() {
       }
     } else body = rows.map(row).join("");
     return `<div class="card table-wrap"><table class="rc-dt">
-    <thead><tr><th>학생</th><th>추천 교재 · 범위</th><th>수업 예정일</th><th>근거</th><th>상태</th></tr></thead>
+    ${groupBy ? "" : `<thead><tr><th>학생</th><th>추천 교재 · 범위</th><th>수업 예정일</th><th>근거</th><th>상태</th></tr></thead>`}
     <tbody>${body}</tbody></table></div>`;
   };
   const ui = state.recsUi;
