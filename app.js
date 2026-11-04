@@ -3278,7 +3278,6 @@ function renderAllRecs() {
   const recs = state.allRecs.filter((r) => activeIds.has(r.student_id) && recDate(r) >= wk.start && recDate(r) <= wk.end);
   const name = (id) => (state.students.find((s) => s.id === id) || {}).name || "(삭제된 학생)";
   const pending = recs.filter((r) => r.status === "제안");
-  const done = recs.filter((r) => r.status !== "제안").slice(0, 30);
   const row = (r) => {
     const b = state.textbooks.find((x) => x.id === r.textbook_id);
     const pr = b ? state.progress.find((x) => x.student_id === r.student_id && x.textbook_id === b.id) : null;
@@ -3351,11 +3350,10 @@ function renderAllRecs() {
     ${head}
     <div class="rc-sort"><span class="muted">정렬</span><div class="rc-seg" role="group" aria-label="정렬"><button type="button" data-rcsort="date" class="${sortKey === "date" ? "on" : ""}" aria-pressed="${sortKey === "date"}">날짜순</button><button type="button" data-rcsort="student" class="${sortKey === "student" ? "on" : ""}" aria-pressed="${sortKey === "student"}">학생순</button></div></div>
     ${pending.length ? `
-      <div class="rc-sec-h"><h3>수업 기록 없음</h3><span class="rc-cnt todo">반영 대기 ${noLesson.length}</span><span class="muted">아직 수업 기록이 없는 추천입니다. 수업 후 "반영"을 누르세요.</span></div>
+      <div class="rc-div"><b>수업 기록 없음</b><span class="n">${noLesson.length}건</span></div>
       ${noLesson.length ? table(noLesson, sortKey) : `<div class="card empty">수업 기록이 없는 추천이 없습니다.</div>`}
-      ${hasLesson.length ? `<div class="rc-sec-h"><h3>수업 기록 있음</h3><span class="rc-cnt has">기록 완료 ${hasLesson.length}</span><span class="muted">이미 수업 기록이 있는 날의 추천입니다.</span><button type="button" class="btn small" id="rc-has-fold" style="margin-left:auto">${hasOpen ? "접기" : "펼치기"}</button></div>${hasOpen ? table(hasLesson, sortKey) : ""}` : ""}`
+      ${hasLesson.length ? `<div class="rc-div has"><b>수업 기록 있음</b><span class="n">${hasLesson.length}건</span><button type="button" class="btn small" id="rc-has-fold" style="margin-left:auto">${hasOpen ? "접기" : "펼치기"}</button></div>${hasOpen ? table(hasLesson, sortKey) : ""}` : ""}`
       : `<div class="card empty">이번 주에 확인할 새 추천이 없습니다. 다른 주의 추천은 학생 화면의 수업 추천 탭에서 기간을 바꿔 볼 수 있습니다.</div>`}
-    ${done.length ? `<h3 style="margin-top:1.2rem">최근 처리한 추천</h3>${table(done)}` : ""}
     <p class="muted" style="font-size:.85rem;margin-top:.8rem">"반영"을 누르면 그 학생의 수업 기록 창이 추천 교재·단원으로 채워집니다. 그대로 저장하면 "채택", 고쳐서 저장하면 "수정"으로 기록돼요. 진도표는 수업 기록을 저장할 때만 바뀝니다.</p>`;
   }
   $("#main").querySelectorAll("[data-rcmode]").forEach((b) => {
