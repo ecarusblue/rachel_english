@@ -3185,7 +3185,6 @@ async function loadAllRecs() {
 }
 
 const RECS_MODE_KEY = "rachel_recs_mode";
-const RECS_SORT_KEY = "rachel_recs_sort";
 function recsByStudentHtml(recs) {
   const act = state.students.filter((x) => x.active);
   const rows = act.map((st) => {
@@ -3332,8 +3331,7 @@ function renderAllRecs() {
     <tbody>${body}</tbody></table></div>`;
   };
   const ui = state.recsUi;
-  try { const m = localStorage.getItem(RECS_SORT_KEY); if (m === "date" || m === "student") ui.sort = m; } catch { /* 저장 실패는 무시 */ }
-  const sortKey = ui.sort === "student" ? "student" : "date";
+  const sortKey = "date"; // 날짜별 화면은 날짜순(날짜 → 학생 이름순)만 사용
   const byName = (a, b) => name(a.student_id).localeCompare(name(b.student_id), "ko");
   const byDate = (a, b) => String(recDate(a)).localeCompare(String(recDate(b)));
   const sorted = (list) => list.slice().sort(sortKey === "student" ? (a, b) => byName(a, b) || byDate(a, b) : (a, b) => byDate(a, b) || byName(a, b));
@@ -3348,7 +3346,6 @@ function renderAllRecs() {
   } else {
     $("#main").innerHTML = `
     ${head}
-    <div class="rc-sort"><span class="muted">정렬</span><div class="rc-seg" role="group" aria-label="정렬"><button type="button" data-rcsort="date" class="${sortKey === "date" ? "on" : ""}" aria-pressed="${sortKey === "date"}">날짜순</button><button type="button" data-rcsort="student" class="${sortKey === "student" ? "on" : ""}" aria-pressed="${sortKey === "student"}">학생순</button></div></div>
     ${pending.length ? `
       <div class="rc-div"><b>수업 기록 없음</b><span class="n">${noLesson.length}건</span></div>
       ${noLesson.length ? table(noLesson, sortKey) : `<div class="card empty">수업 기록이 없는 추천이 없습니다.</div>`}
@@ -3360,13 +3357,6 @@ function renderAllRecs() {
     b.onclick = () => {
       ui.mode = b.dataset.rcmode;
       try { localStorage.setItem(RECS_MODE_KEY, ui.mode); } catch { /* 저장 실패는 무시 */ }
-      renderAllRecs();
-    };
-  });
-  $("#main").querySelectorAll("[data-rcsort]").forEach((b) => {
-    b.onclick = () => {
-      ui.sort = b.dataset.rcsort;
-      try { localStorage.setItem(RECS_SORT_KEY, ui.sort); } catch { /* 저장 실패는 무시 */ }
       renderAllRecs();
     };
   });
