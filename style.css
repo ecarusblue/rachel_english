@@ -1315,3 +1315,22 @@ body.rc-lock { overflow: hidden; }
   .rc-dt tr.rc-gh { display: block; border: 0; background: none; padding: .2rem .1rem 0; }
   .rc-dt tr.rc-gh td { border-radius: 8px; }
 }
+
+/* 수업 추천 날짜별: 같은 학생·같은 날 묶음 */
+.rc-dt tr.rc-grp > td { padding: .75rem .85rem; }
+.rcg-top { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.rcg-top b { font-size: 1rem; }
+.rcg-cnt { font-size: .75rem; font-weight: 700; padding: .1rem .6rem; border-radius: 999px; background: #f6e8cf; color: #8a5a14; }
+.rcg-top .book-actions { margin: 0 0 0 auto !important; display: flex; gap: .4rem; }
+.rcg-list { display: grid; gap: .5rem; margin-top: .6rem; }
+.rcg-bk { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) auto; gap: .7rem; align-items: start; padding: .55rem .7rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.rcg-why { font-size: .85rem; line-height: 1.6; }
+@media (prefers-color-scheme: dark) { .rcg-cnt { background: #33291a; color: #e6c58a; } }
+@media (max-width: 800px) {
+  .rc-dt tr.rc-grp { display: block; padding: .8rem .9rem; }
+  .rc-dt tr.rc-grp > td { display: block; padding: 0; }
+  .rcg-top .book-actions { margin: .5rem 0 0 !important; width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+  .rcg-top .book-actions > .btn { grid-column: auto !important; order: 0 !important; width: 100%; min-height: 40px; }
+  .rcg-bk { grid-template-columns: 1fr; gap: .3rem; }
+  .rcg-bk > .btn { justify-self: start; }
+}

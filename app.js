@@ -3296,16 +3296,37 @@ function renderAllRecs() {
     let body = "";
     if (groupBy) {
       const key = (r) => (groupBy === "student" ? r.student_id : recDate(r));
-      const label = (r) => (groupBy === "student" ? name(r.student_id) : `${shortDate(recDate(r))} (${DAY_NAME[parseD(recDate(r)).getDay()]})`);
+      const label2 = (r) => `${shortDate(recDate(r))} (${DAY_NAME[parseD(recDate(r)).getDay()]})`;
+      const label = (r) => (groupBy === "student" ? name(r.student_id) : label2(r));
+      const titleOf = (r) => ((state.textbooks.find((x) => x.id === r.textbook_id) || {}).title) || "";
+      const grade = (id) => (state.students.find((x) => x.id === id) || {}).grade || "";
       let last = null;
-      rows.forEach((r, i) => {
+      for (let i = 0; i < rows.length; ) {
+        const r = rows[i];
         if (key(r) !== last) {
           last = key(r);
-          const n = rows.filter((x) => key(x) === last).length;
-          body += `<tr class="rc-gh"><td colspan="5"><strong>${esc(label(r))}</strong> <span class="muted">${n}건</span></td></tr>`;
+          const grp = rows.filter((x) => key(x) === last);
+          const nStu = new Set(grp.map((x) => x.student_id)).size;
+          body += `<tr class="rc-gh"><td colspan="5"><strong>${esc(label(r))}</strong> <span class="muted">${groupBy === "student" ? (grade(r.student_id) ? grade(r.student_id) + " · " : "") : nStu + "명 · "}추천 ${grp.length}건</span></td></tr>`;
         }
-        body += row(r);
-      });
+        // 같은 학생 + 같은 수업일의 추천이 여러 개면 한 묶음
+        let j = i;
+        while (j < rows.length && rows[j].student_id === r.student_id && recDate(rows[j]) === recDate(r)) j++;
+        const cluster = rows.slice(i, j).sort((a, b) => titleOf(a).localeCompare(titleOf(b), "ko"));
+        if (cluster.length < 2) body += row(r);
+        else {
+          const has = recLessonOn(r.student_id, r);
+          const ids = cluster.map((x) => x.id).join(",");
+          const head = groupBy === "student" ? `<b>${esc(label2(r))}</b>` : `<b>${esc(name(r.student_id))}</b>${grade(r.student_id) ? ` <small class="muted">${esc(grade(r.student_id))}</small>` : ""}`;
+          body += `<tr class="rc-grp" data-rid="${esc(cluster[0].id)}"><td colspan="5"><div class="rcg-top">${head}<span class="rcg-cnt">교재 ${cluster.length}개</span>${has ? `<span class="rcg-chip">${lessonChip(has)}</span>` : `<div class="book-actions"><button class="btn small primary" data-rec-use="${esc(cluster[0].id)}" type="button">모두 반영</button><button class="btn small danger" data-rec-no="${esc(ids)}" type="button">모두 거절</button></div>`}</div>
+            <div class="rcg-list">${cluster.map((x, n) => {
+              const b = state.textbooks.find((t) => t.id === x.textbook_id);
+              const pr = b ? state.progress.find((p) => p.student_id === x.student_id && p.textbook_id === b.id) : null;
+              return `<div class="rcg-bk" data-rid="${esc(x.id)}"><div><b>${esc(b ? b.title : "")}</b><br>${esc(b ? rangeText(b, x).trim() : x.from_unit + "–" + x.to_unit + "단원")}${pr && b ? `<div class="muted" style="font-size:.8rem">현재 ${esc(curLabel(b, pr.current_unit))}</div>` : ""}</div><div class="rcg-why muted">${esc(x.rationale || "")}</div>${has ? "" : `<button class="btn small danger" data-rec-no="${esc(x.id)}" type="button">거절</button>`}</div>`;
+            }).join("")}</div></td></tr>`;
+        }
+        i = j;
+      }
     } else body = rows.map(row).join("");
     return `<div class="card table-wrap"><table class="rc-dt">
     <thead><tr><th>학생</th><th>추천 교재 · 범위</th><th>수업 예정일</th><th>근거</th><th>상태</th></tr></thead>
