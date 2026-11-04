@@ -3313,16 +3313,16 @@ function renderAllRecs() {
         let j = i;
         while (j < rows.length && rows[j].student_id === r.student_id && recDate(rows[j]) === recDate(r)) j++;
         const cluster = rows.slice(i, j).sort((a, b) => titleOf(a).localeCompare(titleOf(b), "ko"));
-        if (cluster.length < 2) body += row(r);
-        else {
+        {
+          const one = cluster.length === 1;
           const has = recLessonOn(r.student_id, r);
           const ids = cluster.map((x) => x.id).join(",");
           const head = groupBy === "student" ? `<b>${esc(label2(r))}</b>` : `<b>${esc(name(r.student_id))}</b>${grade(r.student_id) ? ` <small class="muted">${esc(grade(r.student_id))}</small>` : ""}`;
-          body += `<tr class="rc-bundle" data-rid="${esc(cluster[0].id)}"><td colspan="5"><div class="rcg-top">${head}<span class="rcg-cnt">교재 ${cluster.length}개</span>${has ? `<span class="rcg-chip">${lessonChip(has)}</span>` : `<div class="book-actions"><button class="btn small primary" data-rec-use="${esc(cluster[0].id)}" type="button">모두 반영</button><button class="btn small danger" data-rec-no="${esc(ids)}" type="button">모두 거절</button></div>`}</div>
+          body += `<tr class="rc-bundle" data-rid="${esc(cluster[0].id)}"><td colspan="5"><div class="rcg-top">${head}<span class="rcg-cnt${has ? " has" : ""}">교재 ${cluster.length}개</span>${has ? `<span class="rcg-chip">${lessonChip(has)}</span>` : `<div class="book-actions"><button class="btn small primary" data-rec-use="${esc(cluster[0].id)}" type="button">${one ? "반영" : "모두 반영"}</button><button class="btn small danger" data-rec-no="${esc(ids)}" type="button">${one ? "거절" : "모두 거절"}</button></div>`}</div>
             <div class="rcg-list">${cluster.map((x, n) => {
               const b = state.textbooks.find((t) => t.id === x.textbook_id);
               const pr = b ? state.progress.find((p) => p.student_id === x.student_id && p.textbook_id === b.id) : null;
-              return `<div class="rcg-bk" data-rid="${esc(x.id)}"><div><b>${esc(b ? b.title : "")}</b><br>${esc(b ? rangeText(b, x).trim() : x.from_unit + "–" + x.to_unit + "단원")}${pr && b ? `<div class="muted" style="font-size:.8rem">현재 ${esc(curLabel(b, pr.current_unit))}</div>` : ""}</div><div class="rcg-why muted">${esc(x.rationale || "")}</div>${has ? "" : `<button class="btn small danger" data-rec-no="${esc(x.id)}" type="button">거절</button>`}</div>`;
+              return `<div class="rcg-bk" data-rid="${esc(x.id)}"><div><b>${esc(b ? b.title : "")}</b><br>${esc(b ? rangeText(b, x).trim() : x.from_unit + "–" + x.to_unit + "단원")}${pr && b ? `<div class="muted" style="font-size:.8rem">현재 ${esc(curLabel(b, pr.current_unit))}</div>` : ""}</div><div class="rcg-why muted">${esc(x.rationale || "")}</div>${has || one ? "" : `<button class="btn small danger" data-rec-no="${esc(x.id)}" type="button">거절</button>`}</div>`;
             }).join("")}</div></td></tr>`;
         }
         i = j;

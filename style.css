@@ -1335,3 +1335,5 @@ body.rc-lock { overflow: hidden; }
   .rcg-bk { grid-template-columns: 1fr; gap: .3rem; }
   .rcg-bk > .btn { justify-self: start; }
 }
+.rcg-cnt.has { background: #dcf1e3; color: var(--good); }
+@media (prefers-color-scheme: dark) { .rcg-cnt.has { background: #1b3a2a; color: #7fdca0; } }
