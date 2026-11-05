@@ -1350,3 +1350,7 @@ body.rc-lock { overflow: hidden; }
 
 .mk-monthbar.top { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin: .6rem 0 .8rem; }
 .mk-monthbar b.mk-warn { color: #b45309; }
+
+.mk-c4 .btn[disabled] { opacity: .45; cursor: not-allowed; }
+.mk-lock { display: block; font-size: .75rem; margin-top: .15rem; text-align: right; }
+@media (max-width: 800px) { .mk-lock { text-align: left; } }

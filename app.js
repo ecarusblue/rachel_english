@@ -333,6 +333,7 @@ function renderMakeup() {
 
   // 보강 예정·완료/제외 목록은 보강달력에 표시된 월 기준으로만 보여 줌
   const inView = (r) => (r.status === "완료" ? r.done_date || r.planned_date : r.planned_date || r.done_date || r.created_at || "").slice(0, 7) === viewMonth;
+  const makeupMonthOf = (r) => (r.status === "완료" ? r.done_date || r.planned_date : r.planned_date || r.done_date || r.created_at || "").slice(0, 7);
   const plannedView = planned.filter(inView);
   const finishedView = finished.filter(inView);
   const monthBar = `<div class="mk-monthbar top"><button class="btn small" type="button" data-mcnav="-1" aria-label="이전 달">‹</button><b>${Number(viewMonth.slice(5))}월</b><button class="btn small" type="button" data-mcnav="1" aria-label="다음 달">›</button>${viewMonth !== month ? `<button class="btn small" type="button" data-mcnav="0">이번 달</button>` : ""}<span class="muted">요약·목록·보강 달력이 모두 이 월 기준이에요${needOther ? ` · 다른 달에 처리 안 된 결석 <b class="mk-warn">${needOther}건</b>` : ""}</span></div>`;
@@ -396,7 +397,7 @@ function renderMakeup() {
             <div class="mk-c1">${r.status === "완료" ? shortDate(r.done_date || r.planned_date) : `<span class="muted">${a ? shortDate(a.lesson_date) : ""}</span>`}</div>
             <div class="mk-c2">${absInfo(a)}${r.memo ? `<div class="muted">${esc(r.memo)}</div>` : ""}</div>
             <div class="mk-c3">${r.status === "완료" ? `<span class="badge done">보강 완료</span> <span class="mk-chip ${r.kind === "추가" ? "extra" : ""}">${r.kind}</span>` : `<span class="badge">보강 안 함</span>`}</div>
-            <div class="mk-c4">${r.status === "제외" ? `<button class="btn small" type="button" data-mk="undo" data-id="${esc(r.id)}">되돌리기</button>` : ""}</div>
+            <div class="mk-c4">${r.status === "제외" ? (inView && makeupMonthOf(r) < month ? `<button class="btn small" type="button" disabled title="지난 달 기록은 되돌릴 수 없어요">되돌리기</button><span class="mk-lock muted">지난 달 기록이에요</span>` : `<button class="btn small" type="button" data-mk="undo" data-id="${esc(r.id)}">되돌리기</button>`) : ""}</div>
           </div>`;
         }).join("")
           : `<div class="empty">${Number(viewMonth.slice(5))}월에 완료하거나 제외한 보강이 없어요.</div>`;
@@ -467,7 +468,8 @@ function makeupCalHtml() {
       }).join("") : `<div class="muted" style="padding:.5rem 0">이 날은 등록된 보강이 없어요.</div>`}</div>`;
   }
   return `<section class="mc" aria-label="보강 달력"><div class="mc-head"><h3>보강 달력</h3>
-      <b class="mc-title">${Y}년 ${M}월</b><span class="spacer"></span>
+      <button class="btn small" type="button" data-mcnav="-1" aria-label="이전 달">◀</button><b class="mc-title">${Y}년 ${M}월</b><button class="btn small" type="button" data-mcnav="1" aria-label="다음 달">▶</button>
+      <button class="btn small" type="button" data-mcnav="0">오늘</button><span class="spacer"></span>
       <span class="mc-leg"><i class="mc-dot plan"></i>예정(기본)<i class="mc-dot extra"></i>예정(추가)<i class="mc-dot done"></i>완료</span></div>
     <div class="mc-grid" role="group">${"월화수목금토일".split("").map((n, i) => `<div class="mc-dow ${i >= 5 ? "we" : ""}">${n}</div>`).join("")}${cells}</div>
     <div class="muted mc-sum">${M}월 보강 ${items.length}건 · 예정 ${planned.length} · 완료 ${doneN}${extraN ? ` · 추가 ${extraN}` : ""} — 날짜를 누르면 그날 보강이 열려요.</div>${panel}</section>`;
@@ -494,6 +496,9 @@ async function makeupAction(act, id) {
       await run(db.from("makeups").delete().eq("id", id));
       await reload("취소했어요");
     } else if (act === "undo") {
+      const ur = mk.rows.find((x) => x.id === id);
+      const urm = ur ? (ur.planned_date || ur.done_date || ur.created_at || "").slice(0, 7) : "";
+      if (urm && urm < todayStr().slice(0, 7)) { toast("지난 달 기록은 되돌릴 수 없어요"); return; }
       await run(db.from("makeups").delete().eq("id", id));
       await reload("'보강 필요'로 되돌렸어요");
     } else if (act === "rec") {
