@@ -397,7 +397,7 @@ function renderMakeup() {
             <div class="mk-c1">${r.status === "완료" ? shortDate(r.done_date || r.planned_date) : `<span class="muted">${a ? shortDate(a.lesson_date) : ""}</span>`}</div>
             <div class="mk-c2">${absInfo(a)}${r.memo ? `<div class="muted">${esc(r.memo)}</div>` : ""}</div>
             <div class="mk-c3">${r.status === "완료" ? `<span class="badge done">보강 완료</span> <span class="mk-chip ${r.kind === "추가" ? "extra" : ""}">${r.kind}</span>` : `<span class="badge">보강 안 함</span>`}</div>
-            <div class="mk-c4">${r.status === "제외" ? (inView && makeupMonthOf(r) < month ? `<button class="btn small" type="button" disabled title="지난 달 기록은 되돌릴 수 없어요">되돌리기</button><span class="mk-lock muted">지난 달 기록이에요</span>` : `<button class="btn small" type="button" data-mk="undo" data-id="${esc(r.id)}">되돌리기</button>`) : ""}</div>
+            <div class="mk-c4">${r.status === "제외" ? (makeupMonthOf(r) < month ? `<button class="btn small" type="button" disabled title="지난 달 기록은 되돌릴 수 없어요">되돌리기</button><span class="mk-lock muted">지난 달 기록이에요</span>` : `<button class="btn small" type="button" data-mk="undo" data-id="${esc(r.id)}">되돌리기</button>`) : ""}</div>
           </div>`;
         }).join("")
           : `<div class="empty">${Number(viewMonth.slice(5))}월에 완료하거나 제외한 보강이 없어요.</div>`;
