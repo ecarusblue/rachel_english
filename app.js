@@ -327,13 +327,20 @@ function renderMakeup() {
   const extra = monthRows.length - base;
   const finished = mk.rows.filter((r) => r.status !== "planned" && (r.status === "완료" || r.status === "제외")).sort((a, b) => (b.done_date || b.created_at || "").localeCompare(a.done_date || a.created_at || "")).slice(0, 60);
 
+  // 보강 예정·완료/제외 목록은 보강달력에 표시된 월 기준으로만 보여 줌
+  const viewMonth = mk.calMonth || month;
+  const inView = (r) => (r.status === "완료" ? r.done_date || r.planned_date : r.planned_date || r.done_date || r.created_at || "").slice(0, 7) === viewMonth;
+  const plannedView = planned.filter(inView);
+  const finishedView = finished.filter(inView);
+  const monthBar = `<div class="mk-monthbar"><button class="btn small" type="button" data-mcnav="-1" aria-label="이전 달">‹</button><b>${Number(viewMonth.slice(5))}월</b><button class="btn small" type="button" data-mcnav="1" aria-label="다음 달">›</button>${viewMonth !== month ? `<button class="btn small" type="button" data-mcnav="0">이번 달</button>` : ""}<span class="muted">보강달력과 같은 월 기준</span></div>`;
+
   const tab = mk.tab || "need";
   const cards = `<div class="mk-sum">
     <div class="mk-card warm"><span class="muted">보강 필요</span><div><b>${needStudents.size}명</b>${old ? `<small class="mk-warn">${old}건은 7일이 지났어요</small>` : ""}</div></div>
     <div class="mk-card"><span class="muted">이번 주 보강 예정</span><div><b>${weekPlan.length}건</b>${nextP ? `<small class="muted">${shortDate(nextP.planned_date)}${nextP.planned_start ? " " + hhmm(nextP.planned_start) : ""}</small>` : ""}</div></div>
     <div class="mk-card plain"><span class="muted">${Number(month.slice(5))}월 보강 (완료+예정)</span><div><b>${monthRows.length}건</b><small class="muted">기본 ${base} · 추가 ${extra}</small></div></div>
   </div>`;
-  const tabs = `<div class="tabs mk-tabs" role="tablist">${[["need", "보강 필요", need.length], ["plan", "보강 예정", planned.length], ["done", "완료·제외", finished.length]]
+  const tabs = `<div class="tabs mk-tabs" role="tablist">${[["need", "보강 필요", need.length], ["plan", "보강 예정", plannedView.length], ["done", "완료·제외", finishedView.length]]
     .map(([k, t, n]) => `<button class="tab ${tab === k ? "active" : ""}" role="tab" data-mktab="${k}">${t} <span class="mk-n">${n}</span></button>`).join("")}</div>`;
 
   const nameCell = (sid) => { const s = state.students.find((x) => x.id === sid); return `<strong>${esc(studentName(sid))}</strong> <span class="muted">${esc((s && s.grade) || "")}</span>`; };
@@ -360,9 +367,9 @@ function renderMakeup() {
         }).join("")
       : `<div class="empty">보강이 필요한 결석이 없어요.<div class="muted" style="margin-top:.3rem">수업 기록에서 출결을 "결석"으로 저장하면 여기에 올라와요.</div></div>`;
   } else if (tab === "plan") {
-    list = planned.length
-      ? `<div class="mk-hd"><span>학생</span><span>보강 일정</span><span>결석한 수업</span><span>구분</span><span class="r">처리</span></div>` +
-        planned.map((r) => {
+    list = plannedView.length
+      ? monthBar + `<div class="mk-hd"><span>학생</span><span>보강 일정</span><span>결석한 수업</span><span>구분</span><span class="r">처리</span></div>` +
+        plannedView.map((r) => {
           const a = mk.absences.find((x) => x.id === r.absent_lesson_id);
           const t = r.planned_start ? `${hhmm(r.planned_start)}${r.planned_end ? "–" + hhmm(r.planned_end) : ""}` : "";
           return `<div class="mk-row">
@@ -375,11 +382,11 @@ function renderMakeup() {
               <button class="btn small primary" type="button" data-mk="rec" data-id="${esc(r.id)}">보강 수업 기록</button></div>
           </div>`;
         }).join("")
-      : `<div class="empty">잡아 둔 보강이 없어요.</div>`;
+      : monthBar + `<div class="empty">${Number(viewMonth.slice(5))}월에 잡아 둔 보강이 없어요.</div>`;
   } else {
-    list = finished.length
-      ? `<div class="mk-hd"><span>학생</span><span>날짜</span><span>결석한 수업</span><span>구분</span><span class="r">처리</span></div>` +
-        finished.map((r) => {
+    list = finishedView.length
+      ? monthBar + `<div class="mk-hd"><span>학생</span><span>날짜</span><span>결석한 수업</span><span>구분</span><span class="r">처리</span></div>` +
+        finishedView.map((r) => {
           const a = mk.absences.find((x) => x.id === r.absent_lesson_id);
           return `<div class="mk-row">
             <div class="mk-c0">${nameCell(r.student_id)}</div>
@@ -389,7 +396,7 @@ function renderMakeup() {
             <div class="mk-c4">${r.status === "제외" ? `<button class="btn small" type="button" data-mk="undo" data-id="${esc(r.id)}">되돌리기</button>` : ""}</div>
           </div>`;
         }).join("")
-      : `<div class="empty">완료하거나 제외한 보강이 아직 없어요.</div>`;
+      : monthBar + `<div class="empty">${Number(viewMonth.slice(5))}월에 완료하거나 제외한 보강이 없어요.</div>`;
   }
 
   main.innerHTML = head + cards + tabs + `<div class="card mk-list">${list}</div>

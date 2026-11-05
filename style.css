@@ -1343,3 +1343,7 @@ body.rc-lock { overflow: hidden; }
 .rc-div.has::before { background: var(--good); }
 .rc-div b { font-size: 1.02rem; }
 .rc-div .n { font-size: .8rem; font-weight: 700; color: var(--muted); }
+
+.mk-monthbar { display: flex; align-items: center; gap: .5rem; padding: .6rem .85rem; border-bottom: 1px solid var(--border); }
+.mk-monthbar b { min-width: 3rem; text-align: center; font-size: 1rem; }
+.mk-monthbar .muted { font-size: .82rem; margin-left: auto; }
