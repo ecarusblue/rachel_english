@@ -315,30 +315,33 @@ function renderMakeup() {
       <p class="muted">Supabase SQL Editor에서 최신 <code>schema.sql</code>의 "결석·보강" 부분을 실행한 뒤 이 화면을 새로고침하세요.</p></div>`;
     return;
   }
-  const need = pendingAbsences();
+  if (!mk.calMonth) mk.calMonth = month;
+  const viewMonth = mk.calMonth; // 월 필터: 요약·세 탭·보강 달력이 모두 이 월 기준
+  const needAll = pendingAbsences();
+  const need = needAll.filter((a) => (a.lesson_date || "").slice(0, 7) === viewMonth);
+  const needOther = needAll.length - need.length;
   const needStudents = new Set(need.map((a) => a.student_id));
   const old = need.filter((a) => daysBetween(a.lesson_date) >= 7).length;
   const planned = mk.rows.filter((r) => r.status === "예정").sort((a, b) => (a.planned_date || "").localeCompare(b.planned_date || "") || (a.planned_start || "").localeCompare(b.planned_start || ""));
   const wk = periodRange("thisWeek");
   const weekPlan = planned.filter((r) => r.planned_date && r.planned_date >= wk.start && r.planned_date <= wk.end);
   const nextP = weekPlan[0];
-  const monthRows = mk.rows.filter((r) => r.status !== "제외" && makeupMonth(r) === month);
+  const monthRows = mk.rows.filter((r) => r.status !== "제외" && makeupMonth(r) === viewMonth);
   const base = monthRows.filter((r) => r.kind === "기본").length;
   const extra = monthRows.length - base;
   const finished = mk.rows.filter((r) => r.status !== "planned" && (r.status === "완료" || r.status === "제외")).sort((a, b) => (b.done_date || b.created_at || "").localeCompare(a.done_date || a.created_at || "")).slice(0, 60);
 
   // 보강 예정·완료/제외 목록은 보강달력에 표시된 월 기준으로만 보여 줌
-  const viewMonth = mk.calMonth || month;
   const inView = (r) => (r.status === "완료" ? r.done_date || r.planned_date : r.planned_date || r.done_date || r.created_at || "").slice(0, 7) === viewMonth;
   const plannedView = planned.filter(inView);
   const finishedView = finished.filter(inView);
-  const monthBar = `<div class="mk-monthbar"><button class="btn small" type="button" data-mcnav="-1" aria-label="이전 달">‹</button><b>${Number(viewMonth.slice(5))}월</b><button class="btn small" type="button" data-mcnav="1" aria-label="다음 달">›</button>${viewMonth !== month ? `<button class="btn small" type="button" data-mcnav="0">이번 달</button>` : ""}<span class="muted">보강달력과 같은 월 기준</span></div>`;
+  const monthBar = `<div class="mk-monthbar top"><button class="btn small" type="button" data-mcnav="-1" aria-label="이전 달">‹</button><b>${Number(viewMonth.slice(5))}월</b><button class="btn small" type="button" data-mcnav="1" aria-label="다음 달">›</button>${viewMonth !== month ? `<button class="btn small" type="button" data-mcnav="0">이번 달</button>` : ""}<span class="muted">요약·목록·보강 달력이 모두 이 월 기준이에요${needOther ? ` · 다른 달에 처리 안 된 결석 <b class="mk-warn">${needOther}건</b>` : ""}</span></div>`;
 
   const tab = mk.tab || "need";
   const cards = `<div class="mk-sum">
     <div class="mk-card warm"><span class="muted">보강 필요</span><div><b>${needStudents.size}명</b>${old ? `<small class="mk-warn">${old}건은 7일이 지났어요</small>` : ""}</div></div>
-    <div class="mk-card"><span class="muted">이번 주 보강 예정</span><div><b>${weekPlan.length}건</b>${nextP ? `<small class="muted">${shortDate(nextP.planned_date)}${nextP.planned_start ? " " + hhmm(nextP.planned_start) : ""}</small>` : ""}</div></div>
-    <div class="mk-card plain"><span class="muted">${Number(month.slice(5))}월 보강 (완료+예정)</span><div><b>${monthRows.length}건</b><small class="muted">기본 ${base} · 추가 ${extra}</small></div></div>
+    <div class="mk-card"><span class="muted">${viewMonth === month ? "이번 주 보강 예정" : Number(viewMonth.slice(5)) + "월 보강 예정"}</span><div><b>${viewMonth === month ? weekPlan.length : plannedView.length}건</b>${viewMonth === month && nextP ? `<small class="muted">${shortDate(nextP.planned_date)}${nextP.planned_start ? " " + hhmm(nextP.planned_start) : ""}</small>` : ""}</div></div>
+    <div class="mk-card plain"><span class="muted">${Number(viewMonth.slice(5))}월 보강 (완료+예정)</span><div><b>${monthRows.length}건</b><small class="muted">기본 ${base} · 추가 ${extra}</small></div></div>
   </div>`;
   const tabs = `<div class="tabs mk-tabs" role="tablist">${[["need", "보강 필요", need.length], ["plan", "보강 예정", plannedView.length], ["done", "완료·제외", finishedView.length]]
     .map(([k, t, n]) => `<button class="tab ${tab === k ? "active" : ""}" role="tab" data-mktab="${k}">${t} <span class="mk-n">${n}</span></button>`).join("")}</div>`;
@@ -365,10 +368,10 @@ function renderMakeup() {
               <button class="btn small ${used < q ? "primary" : "mk-outline"}" type="button" data-mk="plan" data-id="${esc(a.id)}">${used < q ? "보강 잡기" : "추가 보강 잡기"}</button></div>
           </div>`;
         }).join("")
-      : `<div class="empty">보강이 필요한 결석이 없어요.<div class="muted" style="margin-top:.3rem">수업 기록에서 출결을 "결석"으로 저장하면 여기에 올라와요.</div></div>`;
+      : `<div class="empty">${Number(viewMonth.slice(5))}월에 보강이 필요한 결석이 없어요.<div class="muted" style="margin-top:.3rem">수업 기록에서 출결을 "결석"으로 저장하면 여기에 올라와요.</div></div>`;
   } else if (tab === "plan") {
     list = plannedView.length
-      ? monthBar + `<div class="mk-hd"><span>학생</span><span>보강 일정</span><span>결석한 수업</span><span>구분</span><span class="r">처리</span></div>` +
+      ? `<div class="mk-hd"><span>학생</span><span>보강 일정</span><span>결석한 수업</span><span>구분</span><span class="r">처리</span></div>` +
         plannedView.map((r) => {
           const a = mk.absences.find((x) => x.id === r.absent_lesson_id);
           const t = r.planned_start ? `${hhmm(r.planned_start)}${r.planned_end ? "–" + hhmm(r.planned_end) : ""}` : "";
@@ -382,10 +385,10 @@ function renderMakeup() {
               <button class="btn small primary" type="button" data-mk="rec" data-id="${esc(r.id)}">보강 수업 기록</button></div>
           </div>`;
         }).join("")
-      : monthBar + `<div class="empty">${Number(viewMonth.slice(5))}월에 잡아 둔 보강이 없어요.</div>`;
+          : `<div class="empty">${Number(viewMonth.slice(5))}월에 잡아 둔 보강이 없어요.</div>`;
   } else {
     list = finishedView.length
-      ? monthBar + `<div class="mk-hd"><span>학생</span><span>날짜</span><span>결석한 수업</span><span>구분</span><span class="r">처리</span></div>` +
+      ? `<div class="mk-hd"><span>학생</span><span>날짜</span><span>결석한 수업</span><span>구분</span><span class="r">처리</span></div>` +
         finishedView.map((r) => {
           const a = mk.absences.find((x) => x.id === r.absent_lesson_id);
           return `<div class="mk-row">
@@ -396,10 +399,10 @@ function renderMakeup() {
             <div class="mk-c4">${r.status === "제외" ? `<button class="btn small" type="button" data-mk="undo" data-id="${esc(r.id)}">되돌리기</button>` : ""}</div>
           </div>`;
         }).join("")
-      : monthBar + `<div class="empty">${Number(viewMonth.slice(5))}월에 완료하거나 제외한 보강이 없어요.</div>`;
+          : `<div class="empty">${Number(viewMonth.slice(5))}월에 완료하거나 제외한 보강이 없어요.</div>`;
   }
 
-  main.innerHTML = head + cards + tabs + `<div class="card mk-list">${list}</div>
+  main.innerHTML = head + monthBar + cards + tabs + `<div class="card mk-list">${list}</div>
     ${makeupCalHtml()}
     <div class="mk-note"><b>기본 횟수를 넘겨도 막지 않아요.</b> 월 기본 횟수를 다 쓴 뒤의 보강은 "추가 보강"으로 표시만 해서 언제든 잡을 수 있어요. 기본 횟수는 학생마다 따로 정하고, 특정 달만 바꿀 수도 있어요.
       <br>결석은 수업 기록에서 출결을 "결석"으로 저장하면 이 목록에 올라오고, 보강 수업을 기록하면 자동으로 완료돼요. 결석한 지 ${MK_WINDOW_DAYS}일이 지난 건은 목록에 올리지 않아요.</div>`;
@@ -464,8 +467,7 @@ function makeupCalHtml() {
       }).join("") : `<div class="muted" style="padding:.5rem 0">이 날은 등록된 보강이 없어요.</div>`}</div>`;
   }
   return `<section class="mc" aria-label="보강 달력"><div class="mc-head"><h3>보강 달력</h3>
-      <button class="btn small" type="button" data-mcnav="-1" aria-label="이전 달">◀</button><b class="mc-title">${Y}년 ${M}월</b><button class="btn small" type="button" data-mcnav="1" aria-label="다음 달">▶</button>
-      <button class="btn small" type="button" data-mcnav="0">오늘</button><span class="spacer"></span>
+      <b class="mc-title">${Y}년 ${M}월</b><span class="spacer"></span>
       <span class="mc-leg"><i class="mc-dot plan"></i>예정(기본)<i class="mc-dot extra"></i>예정(추가)<i class="mc-dot done"></i>완료</span></div>
     <div class="mc-grid" role="group">${"월화수목금토일".split("").map((n, i) => `<div class="mc-dow ${i >= 5 ? "we" : ""}">${n}</div>`).join("")}${cells}</div>
     <div class="muted mc-sum">${M}월 보강 ${items.length}건 · 예정 ${planned.length} · 완료 ${doneN}${extraN ? ` · 추가 ${extraN}` : ""} — 날짜를 누르면 그날 보강이 열려요.</div>${panel}</section>`;

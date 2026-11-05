@@ -1347,3 +1347,6 @@ body.rc-lock { overflow: hidden; }
 .mk-monthbar { display: flex; align-items: center; gap: .5rem; padding: .6rem .85rem; border-bottom: 1px solid var(--border); }
 .mk-monthbar b { min-width: 3rem; text-align: center; font-size: 1rem; }
 .mk-monthbar .muted { font-size: .82rem; margin-left: auto; }
+
+.mk-monthbar.top { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin: .6rem 0 .8rem; }
+.mk-monthbar b.mk-warn { color: #b45309; }
