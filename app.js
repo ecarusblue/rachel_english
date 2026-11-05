@@ -30,6 +30,7 @@ const state = {
   makeup: { rows: [], quotas: [], absences: [], missing: false, tab: "need", calMonth: null, calSel: null },   // 결석·보강
   makeupNeed: 0,
   recsUi: { mode: "student", sid: null },   // 수업 추천 화면: 학생별/날짜별
+  wa: { month: null, sid: null, rows: [], missing: false },   // 라이팅 분석 (월별)
   wr: { sid: null, rows: [], missing: false, loading: false, openId: null },   // 라이팅 첨삭 (학생 화면의 라이팅 탭)
 };
 
@@ -238,6 +239,7 @@ async function refresh() {
 async function refreshInner() {
   await loadCore();
   if (state.view === "recs") { try { await loadAllRecs(); } catch { /* 이전 목록 유지 */ } }
+  if (state.view === "wa") { try { await loadWaData(); } catch { /* 이전 목록 유지 */ } }
   if (state.view === "student" && state.studentId) {
     if (!state.students.some((s) => s.id === state.studentId)) {
       state.view = "overview";
@@ -671,6 +673,7 @@ function render() {
   else if (state.view === "kinds") renderKinds();
   else if (state.view === "backup") renderBackup();
   else if (state.view === "makeup") renderMakeup();
+  else if (state.view === "wa") renderWritingAnalysis();
   else renderOverview();
 }
 
@@ -680,6 +683,7 @@ function renderSidebar() {
   $("#nav-makeup-n").hidden = !state.makeupNeed; // 숫자 대신 점으로만 표시
   $("#nav-evals").classList.toggle("active", state.view === "evals");
   $("#nav-recs").classList.toggle("active", state.view === "recs");
+  $("#nav-wa").classList.toggle("active", state.view === "wa");
   $("#btn-kinds").classList.toggle("active", state.view === "kinds");
   const bkb = $("#btn-backup"); if (bkb) bkb.classList.toggle("active", state.view === "backup");
   const list = state.students.filter((s) => s.active || state.showInactive);
@@ -4877,9 +4881,12 @@ function renderWritingTab(s) {
   const w = state.wr;
   const body = $("#tab-body");
   if (w.sid !== s.id) {
+    const po = w.pendingOpen;
+    w.pendingOpen = null;
     w.openId = null;
     body.innerHTML = `<div class="card empty">불러오는 중…</div>`;
     loadWritings(s).then(() => {
+      if (po) w.openId = po;
       if (state.view === "student" && state.studentId === s.id && state.tab === "writing") renderWritingTab(s);
     });
     return;
@@ -5143,6 +5150,132 @@ async function selectStudent(id) {
   $("#main").focus();
 }
 
+
+/* ---------- 라이팅 분석 (월별 학생 조회) ---------- */
+const WA_TYPES = { grammar: "문법", spelling: "철자", vocabulary: "어휘", punctuation: "문장부호", capitalization: "대문자", word_order: "어순", expression: "표현" };
+function waShift(m, n) {
+  const [y, mo] = m.split("-").map(Number);
+  const d = new Date(y, mo - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function waLabel(m) {
+  const [y, mo] = m.split("-");
+  return (y === todayStr().slice(0, 4) ? "" : `${y}년 `) + `${Number(mo)}월`;
+}
+async function loadWaData() {
+  const wa = state.wa;
+  if (!wa.month) wa.month = todayStr().slice(0, 7);
+  const start = waShift(wa.month, -1) + "-01";
+  const end = waShift(wa.month, 1) + "-01";
+  try {
+    wa.rows = await run(db.from("writings").select("id,student_id,written_on,title,result").gte("written_on", start).lt("written_on", end).order("written_on", { ascending: true }).limit(2000));
+    wa.missing = false;
+  } catch {
+    wa.rows = [];
+    wa.missing = true;
+  }
+}
+function waTop(map, n) {
+  return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
+}
+function renderWritingAnalysis() {
+  const main = $("#main");
+  const wa = state.wa;
+  if (!wa.month) wa.month = todayStr().slice(0, 7);
+  const m = wa.month, prevM = waShift(m, -1), nowM = todayStr().slice(0, 7);
+  const head = `<div class="page-head"><h2>라이팅 분석</h2><span class="muted">학생이 쓴 영어 글의 첨삭 결과를 월별로 모아 봐요</span></div>`;
+  if (wa.missing) {
+    main.innerHTML = head + `<div class="card empty">라이팅 첨삭 저장소를 찾지 못했어요. Supabase SQL Editor 에서 최신 <code>schema.sql</code> 을 실행했는지 확인해 주세요.</div>`;
+    return;
+  }
+  const inMonth = (r, mm) => (r.written_on || "").slice(0, 7) === mm;
+  const list = state.students.filter((s) => s.active || state.showInactive);
+  const info = list.map((s) => {
+    const rs = wa.rows.filter((r) => r.student_id === s.id && inMonth(r, m));
+    const done = rs.filter((r) => wrAvg(r) != null);
+    return { s, rs, done, pend: rs.length - done.length, avg: done.length ? avg(done.map(wrAvg)) : null };
+  }).sort((a, b) => (b.rs.length > 0) - (a.rs.length > 0) || b.rs.length - a.rs.length || studentName(a.s.id).localeCompare(studentName(b.s.id), "ko"));
+  const withW = info.filter((i) => i.rs.length);
+  const totalW = withW.reduce((n, i) => n + i.rs.length, 0);
+  const totalP = info.reduce((n, i) => n + i.pend, 0);
+  if (!info.some((i) => i.s.id === wa.sid)) wa.sid = (withW[0] || info[0] || {}).s ? (withW[0] || info[0]).s.id : null;
+  const monthBar = `<div class="mk-monthbar top"><button class="btn small" type="button" data-wanav="-1" aria-label="이전 달">‹</button><b>${waLabel(m)}</b><button class="btn small" type="button" data-wanav="1" aria-label="다음 달">›</button>${m !== nowM ? `<button class="btn small" type="button" data-wanav="0">이번 달</button>` : ""}<span class="muted">${totalW ? `첨삭한 글 ${totalW - totalP}편 · 학생 ${withW.length}명${totalP ? ` · 첨삭 대기 ${totalP}편` : ""}` : "이 달에 저장된 글이 없어요"}</span></div>`;
+
+  const slist = info.length
+    ? info.map((i) => `<button type="button" class="wa-si ${i.s.id === wa.sid ? "on" : ""} ${i.rs.length ? "" : "zero"} ${i.pend && !i.done.length ? "pend" : ""}" data-wasid="${esc(i.s.id)}">
+        <span><b>${esc(studentName(i.s.id))}</b><small>${esc(i.s.grade || "")}</small></span>
+        <span class="wa-n">${i.rs.length ? (i.done.length ? `${i.rs.length}편` : `${i.rs.length}편 · 대기`) : "없음"}</span>
+        ${i.avg != null ? `<span class="wa-bar"><i style="width:${Math.round((i.avg / 5) * 100)}%"></i></span>` : ""}</button>`).join("")
+    : `<div class="empty">학생이 없어요.</div>`;
+
+  const it = info.find((i) => i.s.id === wa.sid);
+  let det = `<div class="card empty">왼쪽에서 학생을 골라 주세요.</div>`;
+  if (it) {
+    const name = esc(studentName(it.s.id));
+    if (!it.rs.length) {
+      const pc = wa.rows.filter((r) => r.student_id === it.s.id && inMonth(r, prevM)).length;
+      det = `<div class="card"><div class="wa-dh"><h3>${name}</h3><span class="muted">${esc(it.s.grade || "")} · ${waLabel(m)}</span></div>
+        <div class="empty">${waLabel(m)}에는 첨삭한 라이팅이 없어요.${pc ? `<br>${waLabel(prevM)}에는 ${pc}편이 있어요. <button class="btn small" type="button" data-wanav="-1">${waLabel(prevM)} 보기</button>` : ""}</div></div>`;
+    } else {
+      const prevDone = wa.rows.filter((r) => r.student_id === it.s.id && inMonth(r, prevM) && wrAvg(r) != null);
+      const areaAvg = (rows, k) => { const v = rows.map((r) => r.result.scores[k]).filter(Number.isFinite); return v.length ? avg(v) : null; };
+      const areas = WR_SCORES.map(([k, t]) => ({ k, t, c: areaAvg(it.done, k), p: areaAvg(prevDone, k) }));
+      const tiles = areas.map((a) => {
+        let dl = "";
+        if (a.c != null && a.p != null) {
+          const d = Math.round((a.c - a.p) * 10) / 10;
+          dl = `<span class="wa-dl ${d > 0 ? "up" : d < 0 ? "dn" : "eq"}">${d > 0 ? "+" : d < 0 ? "−" : ""}${d === 0 ? "0" : Math.abs(d).toFixed(1)}</span>`;
+        }
+        return `<div class="wa-tile"><div class="muted">${a.t}</div><b>${a.c != null ? a.c.toFixed(1) : "-"}<small> /5</small></b>${dl}</div>`;
+      }).join("");
+      const cmp = areas.map((a) => `<div class="wa-cr"><span>${a.t}</span><div class="wa-cb"><i style="width:${a.c != null ? Math.round((a.c / 5) * 100) : 0}%"></i>${prevDone.length ? `<i class="p" style="width:${a.p != null ? Math.round((a.p / 5) * 100) : 0}%"></i>` : ""}</div><b>${a.c != null ? a.c.toFixed(1) : "-"}</b></div>`).join("");
+      const errs = new Map(), ex = new Map(), good = new Map(), imp = new Map();
+      it.done.forEach((r) => {
+        (r.result.sentences || []).forEach((st) => (st.notes || []).forEach((n) => {
+          const t = n.type || "expression";
+          errs.set(t, (errs.get(t) || 0) + 1);
+          if (!ex.has(t) && n.wrong && n.right) ex.set(t, `${n.wrong} → ${n.right}`);
+        }));
+        [...new Set(r.result.strengths || [])].forEach((x) => good.set(x, (good.get(x) || 0) + 1));
+        [...new Set(r.result.improvements || [])].forEach((x) => imp.set(x, (imp.get(x) || 0) + 1));
+      });
+      const errTop = waTop(errs, 6), errMax = errTop.length ? errTop[0][1] : 1;
+      const errHtml = errTop.length
+        ? errTop.map(([t, c]) => `<div class="wa-er"><span>${esc(WA_TYPES[t] || t)}</span><div class="wa-eb"><i style="width:${Math.round((c / errMax) * 100)}%"></i></div><b>${c}</b>${ex.get(t) ? `<div class="wa-ex muted">${esc(ex.get(t))}</div>` : ""}</div>`).join("")
+        : `<div class="muted" style="padding:.4rem 0">이 달 글에는 교정 항목이 없어요.</div>`;
+      const ul = (mp) => { const t = waTop(mp, 4); return t.length ? `<ul>${t.map(([x, c]) => `<li>${esc(x)}${c > 1 ? ` <span class="muted">(${c}편)</span>` : ""}</li>`).join("")}</ul>` : `<div class="muted" style="padding:.4rem 0">기록이 없어요.</div>`; };
+      const recs = it.rs.map((r) => {
+        const a = wrAvg(r);
+        return `<div class="wa-wi"><span class="muted">${shortDate(r.written_on)}</span><span class="wa-t"><b>${esc(r.title || "제목 없음")}</b><span class="muted">${a != null ? esc((r.result.summary || "").slice(0, 80)) : "원문만 저장됐고 아직 첨삭 전이에요."}</span></span>${a != null ? `<b>${a.toFixed(1)}</b>` : `<span class="wa-pend">첨삭 대기</span>`}<button class="btn small" type="button" data-waopen="${esc(r.id)}">${a != null ? "첨삭 보기" : "보기"}</button></div>`;
+      }).join("");
+      det = `<div class="card"><div class="wa-dh"><h3>${name}</h3><span class="muted">${esc(it.s.grade || "")} · ${waLabel(m)} 라이팅 ${it.rs.length}편${it.done.length ? ` · 평균 ${it.avg.toFixed(1)}점 / 5점` : ""}${it.pend ? ` · 첨삭 대기 ${it.pend}편` : ""}</span></div>
+          ${it.done.length ? `<div class="wa-tiles">${tiles}</div><p class="muted wa-fn">증감은 ${waLabel(prevM)} 평균과 비교한 값이에요. ${waLabel(prevM)} 글이 없으면 표시하지 않아요.</p>` : `<p class="muted wa-fn">아직 첨삭이 끝난 글이 없어서 점수와 교정 통계는 나오지 않아요.</p>`}</div>
+        ${it.done.length ? `<div class="wa-pair">
+          <div class="card"><h3>영역별 점수${prevDone.length ? ` · ${waLabel(prevM)}과 비교` : ""}</h3><div class="wa-cmp">${cmp}</div>${prevDone.length ? `<div class="wa-lg"><span><i></i>${waLabel(m)}</span><span><i class="p"></i>${waLabel(prevM)}</span></div>` : ""}</div>
+          <div class="card"><h3>자주 나온 교정 유형</h3><div class="wa-err">${errHtml}</div><p class="muted wa-fn">이 달 모든 글의 문장별 교정에서 유형별 횟수를 센 거예요.</p></div></div>
+        <div class="wa-two"><div class="card wa-g"><h3>잘하는 점</h3>${ul(good)}</div><div class="card wa-w"><h3>보완할 점</h3>${ul(imp)}</div></div>` : ""}
+        <div class="card"><h3>이달의 첨삭 기록 ${it.rs.length}편</h3><div class="wa-wl">${recs}</div></div>`;
+    }
+  }
+  main.innerHTML = head + monthBar + `<div class="wa-split"><div class="wa-sl"><div class="wa-sh"><span>학생 ${info.length}명</span><span>글 수</span></div>${slist}</div><div class="wa-det">${det}</div></div>`;
+
+  main.querySelectorAll("[data-wanav]").forEach((b) => (b.onclick = async () => {
+    const n = Number(b.dataset.wanav);
+    wa.month = n === 0 ? todayStr().slice(0, 7) : waShift(wa.month, n);
+    await loadWaData();
+    renderWritingAnalysis();
+  }));
+  main.querySelectorAll("[data-wasid]").forEach((b) => (b.onclick = () => { wa.sid = b.dataset.wasid; renderWritingAnalysis(); }));
+  main.querySelectorAll("[data-waopen]").forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.waopen;
+    await selectStudent(wa.sid);
+    state.tab = "writing";
+    state.wr.sid = null;
+    state.wr.pendingOpen = id;
+    render();
+  }));
+}
+
 function bindEvents() {
   const appEl = $("#app-view");
   const setMenu = (open) => {
@@ -5187,6 +5320,12 @@ function bindEvents() {
     } catch (e) {
       return fail(e);
     }
+    render();
+  };
+  $("#nav-wa").onclick = async () => {
+    state.view = "wa";
+    state.studentId = null;
+    await loadWaData();
     render();
   };
   $("#student-list").onclick = (e) => {

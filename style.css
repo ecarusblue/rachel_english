@@ -1354,3 +1354,57 @@ body.rc-lock { overflow: hidden; }
 .mk-c4 .btn[disabled] { opacity: .45; cursor: not-allowed; }
 .mk-lock { display: block; font-size: .75rem; margin-top: .15rem; text-align: right; }
 @media (max-width: 800px) { .mk-lock { text-align: left; } }
+
+/* 라이팅 분석 */
+.wa-split { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: .8rem; align-items: start; }
+.wa-sl { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.wa-sh { display: flex; justify-content: space-between; padding: .5rem .8rem; font-size: .82rem; color: var(--muted); border-bottom: 1px solid var(--border); }
+.wa-si { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .15rem .5rem; align-items: center; width: 100%; text-align: left; font: inherit; color: var(--text); background: transparent; border: 0; border-top: 1px solid var(--border); padding: .6rem .8rem; cursor: pointer; }
+.wa-sh + .wa-si { border-top: 0; }
+.wa-si small { color: var(--muted); margin-left: .3rem; font-size: .78rem; }
+.wa-si.on { background: var(--accent-soft); box-shadow: inset 4px 0 0 var(--accent); }
+.wa-si.zero { opacity: .55; }
+.wa-n { font-size: .78rem; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 99px; padding: .05rem .5rem; }
+.wa-si.zero .wa-n { background: transparent; color: var(--muted); }
+.wa-si.pend .wa-n { background: var(--warn-soft); color: var(--warn); }
+.wa-bar { grid-column: 1 / 3; height: 5px; border-radius: 99px; background: var(--accent-soft); overflow: hidden; }
+.wa-bar i { display: block; height: 100%; background: var(--accent); }
+.wa-si.on .wa-bar { background: rgba(255,255,255,.5); }
+.wa-det { display: grid; gap: .8rem; min-width: 0; }
+.wa-dh { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
+.wa-dh h3 { margin: 0; font-size: 1.1rem; }
+.wa-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: .5rem; margin-top: .7rem; }
+.wa-tile { border: 1px solid var(--border); border-radius: 10px; padding: .5rem .7rem; }
+.wa-tile b { font-size: 1.3rem; }
+.wa-tile small { font-size: .75rem; color: var(--muted); font-weight: 400; }
+.wa-dl { font-size: .78rem; font-weight: 700; margin-left: .4rem; }
+.wa-dl.up { color: var(--good); } .wa-dl.dn { color: var(--bad); } .wa-dl.eq { color: var(--muted); }
+.wa-fn { font-size: .8rem; margin: .5rem 0 0; }
+.wa-pair, .wa-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: .8rem; }
+.wa-cmp { display: grid; gap: .55rem; margin-top: .7rem; }
+.wa-cr { display: grid; grid-template-columns: 3rem minmax(0, 1fr) 2.4rem; gap: .5rem; align-items: center; font-size: .85rem; }
+.wa-cb { display: grid; gap: 3px; }
+.wa-cb i { display: block; height: 8px; border-radius: 99px; background: var(--accent); }
+.wa-cb i.p { background: var(--border); }
+.wa-cr b { text-align: right; }
+.wa-lg { display: flex; gap: .8rem; font-size: .78rem; color: var(--muted); margin-top: .5rem; }
+.wa-lg i { display: inline-block; width: 10px; height: 8px; border-radius: 99px; margin-right: .3rem; background: var(--accent); }
+.wa-lg i.p { background: var(--border); }
+.wa-err { display: grid; gap: .45rem; margin-top: .7rem; }
+.wa-er { display: grid; grid-template-columns: 4rem minmax(0, 1fr) 1.8rem; gap: .5rem; align-items: center; font-size: .85rem; }
+.wa-eb { height: 10px; border-radius: 99px; background: var(--accent-soft); overflow: hidden; }
+.wa-eb i { display: block; height: 100%; background: var(--warn); }
+.wa-er b { text-align: right; }
+.wa-ex { grid-column: 2 / 4; font-size: .78rem; margin-top: -.2rem; }
+.wa-two ul { margin: .5rem 0 0; padding-left: 1.1rem; line-height: 1.8; font-size: .88rem; }
+.wa-g h3 { color: var(--good); } .wa-w h3 { color: var(--warn); }
+.wa-wl { margin-top: .4rem; }
+.wa-wi { display: grid; grid-template-columns: 3.6rem minmax(0, 1fr) auto auto; gap: .6rem; align-items: center; padding: .6rem 0; border-top: 1px solid var(--border); font-size: .88rem; }
+.wa-wi:first-child { border-top: 0; }
+.wa-t span { display: block; font-size: .8rem; line-height: 1.5; }
+.wa-pend { font-size: .76rem; font-weight: 700; border-radius: 99px; padding: .1rem .55rem; background: var(--warn-soft); color: var(--warn); }
+@media (max-width: 800px) {
+  .wa-split { grid-template-columns: 1fr; }
+  .wa-wi { grid-template-columns: 3.4rem minmax(0, 1fr) auto; }
+  .wa-wi .btn { grid-column: 2 / 4; justify-self: start; }
+}
