@@ -5512,7 +5512,7 @@ function ldChrome() {
 function renderLessonDay() {
   const main = $("#main");
   const ld = state.ld;
-  const head = `<div class="page-head"><h2>수업기록</h2><span class="muted">날짜를 고르면 그날 수업한 학생의 기록을 한 번에 입력해요</span></div>`;
+  const head = `<div class="page-head"><h2>수업 기록</h2><span class="muted">날짜를 고르면 그날 수업한 학생의 기록을 한 번에 입력해요</span></div>`;
   const h = ldChromeHtml();
   const vis = ld.order.map((id) => ld.cards[id]).filter((c) => c && ldVisible(c));
   main.innerHTML = head + `<div id="ld-dbar">${h.dbar}</div><div id="ld-chips">${h.chips}</div><div id="ld-banner">${h.draftBanner}</div>
