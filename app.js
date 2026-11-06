@@ -5330,9 +5330,9 @@ async function loadLdData(keep) {
   const order = [];
   const times = {};
   state.schedule.slots.filter((x) => x.weekday === wd).sort((a, b) => a.slot_order - b.slot_order || String(a.start_time || "").localeCompare(String(b.start_time || ""))).forEach((sl) => {
-    (sl.student_ids || []).forEach((id) => { if (state.students.some((s) => s.id === id) && !order.includes(id)) { order.push(id); times[id] = hhmm(sl.start_time); } });
+    (sl.student_ids || []).forEach((id) => { if (state.students.some((s) => s.id === id && s.active) && !order.includes(id)) { order.push(id); times[id] = hhmm(sl.start_time); } });
   });
-  lessons.forEach((l) => { if (!order.includes(l.student_id) && state.students.some((s) => s.id === l.student_id)) order.push(l.student_id); });
+  lessons.forEach((l) => { if (!order.includes(l.student_id) && state.students.some((s) => s.id === l.student_id && s.active)) order.push(l.student_id); });
   const scheduled = order.length;
   (keep ? [...keep.keys()] : []).forEach((id) => { if (!order.includes(id)) order.push(id); });
   const extras = (ld.extras || []).filter((id) => !order.includes(id));
@@ -5349,7 +5349,7 @@ function ldApplyDraft() {
   const ld = state.ld;
   if (!ld.draft) return;
   const dc = ld.draft.data.cards || {};
-  (ld.draft.data.extras || []).forEach((id) => { if (!ld.order.includes(id) && state.students.some((s) => s.id === id)) { ld.order.push(id); ld.extras.push(id); ld.cards[id] = ldMakeCard(id, ld.data); } });
+  (ld.draft.data.extras || []).forEach((id) => { if (!ld.order.includes(id) && state.students.some((s) => s.id === id && s.active)) { ld.order.push(id); ld.extras.push(id); ld.cards[id] = ldMakeCard(id, ld.data); } });
   Object.keys(dc).forEach((sid) => {
     const c = ld.cards[sid];
     if (!c || c.dirty) return;
