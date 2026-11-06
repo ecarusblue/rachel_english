@@ -30,6 +30,7 @@ const state = {
   makeup: { rows: [], quotas: [], absences: [], missing: false, tab: "need", calMonth: null, calSel: null },   // 결석·보강
   makeupNeed: 0,
   recsUi: { mode: "student", sid: null },   // 수업 추천 화면: 학생별/날짜별
+  ld: { date: null, order: [], cards: {}, times: {}, scheduled: 0, extras: [], filter: "all", data: null, draft: null, draftPending: false, draftAt: null, draftMissing: false, draftErr: false, saving: false, timer: null },   // 수업기록 (날짜별 입력)
   wa: { month: null, sid: null, rows: [], missing: false },   // 라이팅 분석 (월별)
   wr: { sid: null, rows: [], missing: false, loading: false, openId: null },   // 라이팅 첨삭 (학생 화면의 라이팅 탭)
 };
@@ -674,6 +675,7 @@ function render() {
   else if (state.view === "backup") renderBackup();
   else if (state.view === "makeup") renderMakeup();
   else if (state.view === "wa") renderWritingAnalysis();
+  else if (state.view === "ld") { renderLessonDay(); ldBind(); }
   else renderOverview();
 }
 
@@ -684,6 +686,7 @@ function renderSidebar() {
   $("#nav-evals").classList.toggle("active", state.view === "evals");
   $("#nav-recs").classList.toggle("active", state.view === "recs");
   $("#nav-wa").classList.toggle("active", state.view === "wa");
+  $("#nav-ld").classList.toggle("active", state.view === "ld");
   $("#btn-kinds").classList.toggle("active", state.view === "kinds");
   const bkb = $("#btn-backup"); if (bkb) bkb.classList.toggle("active", state.view === "backup");
   const list = state.students.filter((s) => s.active || state.showInactive);
@@ -5276,6 +5279,401 @@ function renderWritingAnalysis() {
   }));
 }
 
+/* ---------- 수업기록 (날짜별 한 번에 입력) ---------- */
+const LD_ATT = ["출석", "지각", "결석", "보강"];
+const ldBook = (id) => state.textbooks.find((b) => b.id === id);
+const ldProg = (sid, bid) => state.progress.find((p) => p.student_id === sid && p.textbook_id === bid);
+const ldAutoFrom = (sid, bid) => { const bk = ldBook(bid), pr = ldProg(sid, bid); return bk && pr && pr.current_unit < bk.total_units ? pr.current_unit + 1 : null; };
+const ldWd = (date) => { const d = new Date(`${date}T00:00:00`); return Number.isNaN(d.getTime()) ? null : d.getDay(); };
+const ldDayItems = (sid, wd, mk) => { const all = bookProgressFor(sid); return mk ? all : all.filter((x) => !dayList(x.p).length || (wd != null && dayList(x.p).includes(wd))); };
+function ldDefaultBlocks(sid, wd) {
+  const items = ldDayItems(sid, wd, false);
+  let ids = items.filter((x) => dayList(x.p).includes(wd)).map((x) => x.book.id);
+  if (!ids.length && items.length) ids = [items[0].book.id];
+  return ids.map((id) => ({ textbook_id: id, from_unit: ldAutoFrom(sid, id), to_unit: null, topic: "" }));
+}
+function ldMakeCard(sid, data) {
+  const les = data.lessons.filter((l) => l.student_id === sid);
+  const c = { sid, lessonId: null, extraLessons: Math.max(0, les.length - 1), att: "", blocks: [], topicOnly: "", homework: "", homework_note: "", teacher_comment: "", memo: "", tests: [], delTests: [], recMap: {}, recIds: [], dirty: false, fromDraft: false, collapsed: false, pick: false, pickQ: "" };
+  const l = les[0];
+  if (l) {
+    c.lessonId = l.id; c.att = l.attendance; c.homework = l.homework || ""; c.homework_note = l.homework_note || ""; c.teacher_comment = l.teacher_comment || ""; c.memo = l.memo || "";
+    c.blocks = lessonBooks(l).map((b) => ({ textbook_id: b.textbook_id, from_unit: b.from_unit ?? null, to_unit: b.to_unit ?? null, topic: b.topic || "" }));
+    if (!c.blocks.length && l.topic) c.topicOnly = l.topic;
+  } else {
+    const recs = data.recs.filter((r) => r.student_id === sid && r.textbook_id);
+    if (recs.length) {
+      c.blocks = recs.map((r) => ({ textbook_id: r.textbook_id, from_unit: r.from_unit, to_unit: r.to_unit, topic: "" }));
+      recs.forEach((r) => { c.recMap[r.textbook_id] = r; c.recIds.push(r.id); });
+    } else c.blocks = ldDefaultBlocks(sid, ldWd(data.date));
+  }
+  c.tests = data.tests.filter((t) => t.student_id === sid).map((t) => ({ id: t.id, kind: t.kind, title: t.title || "", score: Number(t.score), max: Number(t.max_score) }));
+  return c;
+}
+async function loadLdData(keep) {
+  const ld = state.ld;
+  if (!ld.date) ld.date = todayStr();
+  const d = ld.date;
+  const [lessons, tests, recs] = await Promise.all([
+    run(db.from("lessons").select("*").eq("lesson_date", d).order("created_at")),
+    run(db.from("tests").select("*").eq("test_date", d).order("created_at")),
+    run(db.from("recommendations").select("*").eq("target_date", d).eq("status", "제안")).catch(() => []),
+  ]);
+  let draft = null;
+  try {
+    const rows = await run(db.from("lesson_drafts").select("*").eq("lesson_date", d));
+    draft = rows[0] || null;
+    ld.draftMissing = false;
+  } catch { ld.draftMissing = true; }
+  const data = { date: d, lessons, tests, recs };
+  const wd = ldWd(d);
+  const order = [];
+  const times = {};
+  state.schedule.slots.filter((x) => x.weekday === wd).sort((a, b) => a.slot_order - b.slot_order || String(a.start_time || "").localeCompare(String(b.start_time || ""))).forEach((sl) => {
+    (sl.student_ids || []).forEach((id) => { if (state.students.some((s) => s.id === id) && !order.includes(id)) { order.push(id); times[id] = hhmm(sl.start_time); } });
+  });
+  lessons.forEach((l) => { if (!order.includes(l.student_id) && state.students.some((s) => s.id === l.student_id)) order.push(l.student_id); });
+  const scheduled = order.length;
+  (keep ? [...keep.keys()] : []).forEach((id) => { if (!order.includes(id)) order.push(id); });
+  const extras = (ld.extras || []).filter((id) => !order.includes(id));
+  extras.forEach((id) => order.push(id));
+  ld.order = order; ld.times = times; ld.scheduled = scheduled; ld.data = data;
+  ld.cards = {};
+  order.forEach((sid) => { ld.cards[sid] = keep && keep.has(sid) ? keep.get(sid) : ldMakeCard(sid, data); });
+  ld.draft = draft && draft.data && draft.data.cards && Object.keys(draft.data.cards).length ? draft : null;
+  ld.draftPending = !!ld.draft && !(keep && keep.size);
+  ld.draftAt = draft ? draft.updated_at : null;
+  if (draft && !ld.draft) { try { await run(db.from("lesson_drafts").delete().eq("id", draft.id)); } catch { /* 무시 */ } }
+}
+function ldApplyDraft() {
+  const ld = state.ld;
+  if (!ld.draft) return;
+  const dc = ld.draft.data.cards || {};
+  (ld.draft.data.extras || []).forEach((id) => { if (!ld.order.includes(id) && state.students.some((s) => s.id === id)) { ld.order.push(id); ld.extras.push(id); ld.cards[id] = ldMakeCard(id, ld.data); } });
+  Object.keys(dc).forEach((sid) => {
+    const c = ld.cards[sid];
+    if (!c || c.dirty) return;
+    const d = dc[sid];
+    Object.assign(c, { att: d.att || "", blocks: d.blocks || [], topicOnly: d.topicOnly || "", homework: d.homework || "", homework_note: d.homework_note || "", teacher_comment: d.teacher_comment || "", memo: d.memo || "", tests: d.tests || [], delTests: d.delTests || [], dirty: true, fromDraft: true });
+  });
+  ld.draftPending = false;
+}
+function ldDirtyCards() { const ld = state.ld; return ld.order.map((id) => ld.cards[id]).filter((c) => c && c.dirty); }
+function ldCardDraft(c) { return { att: c.att, blocks: c.blocks, topicOnly: c.topicOnly, homework: c.homework, homework_note: c.homework_note, teacher_comment: c.teacher_comment, memo: c.memo, tests: c.tests, delTests: c.delTests }; }
+async function ldSaveDraft(manual) {
+  const ld = state.ld;
+  if (ld.draftMissing || ld.draftPending) { if (manual) toast(ld.draftMissing ? "임시저장 테이블이 없어요. 최신 schema.sql 을 Supabase 에서 실행해 주세요" : "위 안내에서 '이어서 입력'이나 '버리기'를 먼저 골라 주세요"); return; }
+  clearTimeout(ld.timer);
+  const dirty = ldDirtyCards();
+  try {
+    if (!dirty.length) {
+      await run(db.from("lesson_drafts").delete().eq("lesson_date", ld.date));
+      ld.draft = null; ld.draftAt = null;
+    } else {
+      const cards = {};
+      dirty.forEach((c) => { cards[c.sid] = ldCardDraft(c); });
+      const now = new Date().toISOString();
+      await run(db.from("lesson_drafts").upsert({ lesson_date: ld.date, data: { cards, extras: ld.extras || [] }, updated_at: now }, { onConflict: "owner,lesson_date" }));
+      ld.draftAt = now;
+    }
+    ld.draftErr = false;
+    if (manual) toast("임시저장했어요");
+  } catch (e) { console.error(e); ld.draftErr = true; if (manual) toast(`임시저장하지 못했어요 (${(e && e.message) || e})`); }
+  ldChrome();
+}
+function ldSchedule() { const ld = state.ld; clearTimeout(ld.timer); if (ld.draftMissing) return; ld.timer = setTimeout(() => ldSaveDraft(false), 2500); }
+function ldTouch(c, isLesson) {
+  c.dirty = true;
+  if (isLesson && !c.att) { c.att = "출석"; ldRepaint(c); }
+  ldSchedule(); ldChrome();
+}
+function ldStatus(c) {
+  if (c.dirty) return c.fromDraft ? ["dr", "임시저장"] : ["ed", "수정 중"];
+  if (c.lessonId) return ["sv", "저장됨"];
+  return ["td", "입력 전"];
+}
+function ldHint(c, b) {
+  const bk = ldBook(b.textbook_id);
+  if (!bk) return "";
+  const pr = ldProg(c.sid, b.textbook_id);
+  let t = pr ? `현재 진도 ${curLabel(bk, pr.current_unit)}` : "배정 안 된 교재예요 · 진도는 바뀌지 않아요";
+  if (pr && !c.lessonId && c.att !== "결석" && b.to_unit != null) t += b.to_unit > pr.current_unit ? ` → 저장하면 ${curLabel(bk, b.to_unit)}` : " · 진도는 그대로";
+  const rec = c.recMap[b.textbook_id];
+  if (rec) t += rec.from_unit === b.from_unit && rec.to_unit === b.to_unit ? " · 추천과 같음" : ` · 추천은 ${fmtN(rec.from_unit)}~${fmtN(rec.to_unit)}`;
+  return t;
+}
+function ldBlockHtml(c, b, i) {
+  const bk = ldBook(b.textbook_id);
+  if (!bk) return "";
+  const a = `data-sid="${esc(c.sid)}" data-bi="${i}"`;
+  const hasRec = !!c.recMap[b.textbook_id];
+  return `<div class="ld-ub ${hasRec ? "rec" : ""}">
+    <div class="ld-ubh"><b>${esc(bk.title)}</b><button type="button" class="btn small" data-ld="delblock" data-sid="${esc(c.sid)}" data-bi="${i}">${c.att === "보강" ? "빼기" : "오늘은 안 나감"}</button></div>
+    <div class="ld-us"><div><span class="cap">시작</span>${unitStep(bk, "from", b.from_unit, `${a} data-bk="from_unit" aria-label="시작 단원"`)}</div><div><span class="cap">끝</span>${unitStep(bk, "to", b.to_unit, `${a} data-bk="to_unit" aria-label="끝 단원"`)}</div></div>
+    <div class="ld-hint muted" data-hint="${esc(c.sid)}:${i}">${esc(ldHint(c, b))}</div>
+    <input type="text" class="ld-t" maxlength="200" placeholder="수업 내용 (선택)" value="${esc(b.topic || "")}" ${a} data-bk="topic" aria-label="수업 내용"></div>`;
+}
+function ldPickHtml(c) {
+  const mk = c.att === "보강";
+  const wd = ldWd(state.ld.date);
+  const used = new Set(c.blocks.map((b) => b.textbook_id));
+  const q = (c.pickQ || "").toLowerCase();
+  const m = (t) => !q || t.toLowerCase().includes(q);
+  const mine = ldDayItems(c.sid, wd, mk).filter((x) => m(x.book.title));
+  const mineAll = new Set(bookProgressFor(c.sid).map((x) => x.book.id));
+  const others = mk ? state.textbooks.filter((b) => !mineAll.has(b.id) && m(b.title)) : [];
+  const row = (b, sub) => `<div class="ld-pkr ${used.has(b.id) ? "dim" : ""}"><div><b>${esc(b.title)}</b><small class="muted">${esc(sub)}</small></div>${used.has(b.id) ? `<span class="muted">이미 넣음</span>` : `<button type="button" class="btn small primary" data-ld="pickadd" data-sid="${esc(c.sid)}" data-id="${esc(b.id)}">넣기</button>`}</div>`;
+  return `<div class="ld-pk"><div class="ld-pkh"><input type="search" placeholder="교재 이름 검색" value="${esc(c.pickQ || "")}" data-ldq="${esc(c.sid)}"><button type="button" class="btn small" data-ld="pick" data-sid="${esc(c.sid)}">닫기</button></div>
+    ${mine.length ? `<div class="ld-pkg">이 학생 교재</div>${mine.map((x) => row(x.book, `${dayList(x.p).length ? SCH_ORDER.filter((d) => dayList(x.p).includes(d)).map((d) => DAY_NAME[d]).join("·") : "모든 수업"} · 현재 ${curLabel(x.book, x.p.current_unit)}`)).join("")}` : ""}
+    ${others.length ? `<div class="ld-pkg">다른 교재 · 배정 안 된 교재</div>${others.map((b) => row(b, `총 ${b.total_units}${bookLeaves(b) ? " 단원" : " " + b.unit_label}`)).join("")}` : ""}
+    ${!mine.length && !others.length ? `<div class="muted" style="padding:.5rem">맞는 교재가 없어요.</div>` : ""}
+    ${mk ? "" : `<div class="muted ld-pkn">이 요일에 배정된 교재만 넣을 수 있어요. 다른 교재는 출결을 '보강'으로 바꾸세요.</div>`}</div>`;
+}
+function ldTestHtml(c, t, i) {
+  const kl = kindList();
+  const kinds = kl.map((k) => k.name);
+  if (t.kind && !kinds.includes(t.kind)) kinds.push(t.kind);
+  const a = `data-sid="${esc(c.sid)}" data-ti="${i}"`;
+  const pc = t.score != null && t.max > 0 ? Math.round((t.score / t.max) * 100) + "%" : "";
+  return `<div class="ld-ts"><select ${a} data-tk="kind" aria-label="시험 종류">${kinds.map((k) => `<option value="${esc(k)}" ${t.kind === k ? "selected" : ""}>${esc(k)}</option>`).join("")}</select>
+    <input type="text" ${a} data-tk="title" maxlength="100" placeholder="시험 이름 (예: Day 5)" value="${esc(t.title || "")}">
+    <input type="number" ${a} data-tk="score" min="0" step="any" inputmode="decimal" placeholder="점수" value="${t.score == null || Number.isNaN(t.score) ? "" : esc(t.score)}"><span>/</span>
+    <input type="number" ${a} data-tk="max" min="1" step="any" inputmode="decimal" placeholder="만점" value="${t.max == null || Number.isNaN(t.max) ? "" : esc(t.max)}">
+    <span class="ld-pc" data-pc="${esc(c.sid)}:${i}">${pc}</span><button type="button" class="btn small" data-ld="deltest" data-sid="${esc(c.sid)}" data-ti="${i}" aria-label="시험 지우기">✕</button></div>`;
+}
+function ldCardHtml(c) {
+  const s = state.students.find((x) => x.id === c.sid);
+  const ld = state.ld;
+  const [cls, label] = ldStatus(c);
+  const abs = c.att === "결석";
+  const sid = esc(c.sid);
+  const tm = ld.times[c.sid] || "";
+  const head = `<div class="ld-sh">${tm ? `<span class="muted ld-tm">${esc(tm)}</span>` : ""}<b>${esc(s ? s.name : "(삭제된 학생)")}</b><small class="muted">${esc((s && s.grade) || "")}</small><span class="ld-pill ${cls}">${label}</span>${abs ? `<span class="ld-pill ab">결석</span>` : ""}${c.extraLessons ? `<span class="muted ld-more">이날 기록 ${c.extraLessons}건 더 있어요 · 학생 화면에서 보기</span>` : ""}<span class="ld-sp"></span><button type="button" class="btn small" data-ld="fold" data-sid="${sid}">${c.collapsed ? "펼치기" : "접기"}</button></div>`;
+  const cardCls = `ld-st ${abs ? "abs" : cls}`;
+  if (c.collapsed) {
+    const sum = c.blocks.map((b) => { const bk = ldBook(b.textbook_id); return bk ? `${bk.title} ${b.from_unit != null ? fmtN(b.from_unit) : "?"}${b.to_unit != null ? "~" + fmtN(b.to_unit) : ""}` : ""; }).filter(Boolean).join(" · ");
+    return `<div class="${cardCls}" data-card="${sid}">${head}<div class="ld-sum muted"><span>${esc(c.att || "출결 미입력")}</span>${sum ? `<span>${esc(sum)}</span>` : ""}${c.tests.length ? `<span>시험 ${c.tests.length}</span>` : ""}</div></div>`;
+  }
+  const seg = `<div class="ld-seg" role="group" aria-label="출결">${LD_ATT.map((a) => `<button type="button" class="${c.att === a ? "on " + (a === "결석" ? "abs" : a === "지각" ? "late" : "") : ""}" data-ld="att" data-sid="${sid}" data-v="${a}" aria-pressed="${c.att === a}">${a}</button>`).join("")}</div>`;
+  const f = (k) => `data-sid="${sid}" data-f="${k}"`;
+  if (abs) {
+    return `<div class="${cardCls}" data-card="${sid}">${head}<div class="ld-body one"><div class="ld-col"><span class="ld-lab">수업</span>${seg}<input type="text" class="ld-t" maxlength="300" placeholder="결석 사유 (선택)" value="${esc(c.memo)}" ${f("memo")}><span class="muted ld-fn">저장하면 '보강 필요'에 올라가요</span></div>
+      <div class="ld-col"><span class="ld-lab">선생님 코멘트</span><textarea ${f("teacher_comment")} maxlength="5000" placeholder="(선택)">${esc(c.teacher_comment)}</textarea></div></div></div>`;
+  }
+  const blocks = c.blocks.map((b, i) => ldBlockHtml(c, b, i)).join("");
+  const hw = `<div class="ld-two"><select ${f("homework")} aria-label="숙제"><option value="">숙제 -</option>${["완료", "일부", "미제출"].map((x) => `<option ${c.homework === x ? "selected" : ""}>${x}</option>`).join("")}</select><input type="text" maxlength="200" placeholder="숙제 내용 (예: 단어 Day 5 쓰기)" value="${esc(c.homework_note)}" ${f("homework_note")}></div>`;
+  return `<div class="${cardCls}" data-card="${sid}">${head}<div class="ld-body"><div class="ld-col"><span class="ld-lab">수업</span>${seg}
+      ${blocks}${c.topicOnly ? `<div class="muted ld-fn">교재 없이 적은 내용: ${esc(c.topicOnly)}</div>` : ""}
+      ${c.pick ? ldPickHtml(c) : `<button type="button" class="ld-add" data-ld="pick" data-sid="${sid}">+ 교재</button>`}
+      <span class="ld-lab">숙제</span>${hw}<input type="text" class="ld-t" maxlength="300" placeholder="수업 메모 (선택)" value="${esc(c.memo)}" ${f("memo")}></div>
+    <div class="ld-col"><span class="ld-lab">선생님 코멘트</span><textarea ${f("teacher_comment")} maxlength="5000" placeholder="오늘 수업 코멘트">${esc(c.teacher_comment)}</textarea>
+      <span class="ld-lab">시험</span><div class="ld-tests">${c.tests.map((t, i) => ldTestHtml(c, t, i)).join("")}<button type="button" class="ld-add" data-ld="addtest" data-sid="${sid}">+ 시험 추가</button></div></div></div></div>`;
+}
+function ldRepaint(c) {
+  const el = document.querySelector(`[data-card="${CSS.escape(c.sid)}"]`);
+  if (!el) return;
+  const ae = document.activeElement;
+  const keep = ae && el.contains(ae) && ae.dataset ? { f: ae.dataset.f, bi: ae.dataset.bi, bk: ae.dataset.bk, ti: ae.dataset.ti, tk: ae.dataset.tk, ss: ae.selectionStart } : null;
+  const tmp = document.createElement("div");
+  tmp.innerHTML = ldCardHtml(c);
+  el.replaceWith(tmp.firstElementChild);
+  if (keep) {
+    const sel = `[data-card="${CSS.escape(c.sid)}"] ` + (keep.f ? `[data-f="${keep.f}"]` : keep.bk ? `[data-bi="${keep.bi}"][data-bk="${keep.bk}"]` : keep.tk ? `[data-ti="${keep.ti}"][data-tk="${keep.tk}"]` : "");
+    const n = keep.f || keep.bk || keep.tk ? document.querySelector(sel) : null;
+    if (n) { n.focus(); try { if (keep.ss != null) n.setSelectionRange(keep.ss, keep.ss); } catch { /* number 입력 등 */ } }
+  }
+}
+function ldVisible(c) {
+  const f = state.ld.filter;
+  return f === "todo" ? !c.lessonId && !c.dirty : f === "saved" ? !!c.lessonId : true;
+}
+function ldChromeHtml() {
+  const ld = state.ld;
+  const cards = ld.order.map((id) => ld.cards[id]).filter(Boolean);
+  const nTodo = cards.filter((c) => !c.lessonId && !c.dirty).length, nSaved = cards.filter((c) => c.lessonId).length;
+  const dirty = cards.filter((c) => c.dirty).length;
+  const done = cards.filter((c) => c.lessonId || c.dirty).length;
+  const pct = cards.length ? Math.round((done / cards.length) * 100) : 0;
+  const fchip = (k, t, n) => `<button type="button" class="ld-fchip ${ld.filter === k ? "on" : ""}" data-ld="filter" data-v="${k}">${t} ${n}</button>`;
+  const rest = state.students.filter((s) => s.active && !ld.order.includes(s.id)).sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  const dbar = `<div class="ld-dbar"><button class="btn small" type="button" data-ld="nav" data-v="-1" aria-label="전날">‹</button><b class="ld-dt">${esc(shortDate(ld.date))}</b><button class="btn small" type="button" data-ld="nav" data-v="1" aria-label="다음날">›</button><button class="btn small" type="button" data-ld="nav" data-v="0">오늘</button><input type="date" id="ld-date" value="${esc(ld.date)}" aria-label="날짜 고르기"><span class="ld-sp"></span><span class="muted ld-help">시간표 기준 ${ld.scheduled}명 · 입력 ${done}명</span><div class="ld-prog" aria-hidden="true"><i style="width:${pct}%"></i></div></div>`;
+  const chips = `<div class="ld-chips">${fchip("all", "전체", cards.length)}${fchip("todo", "입력 전", nTodo)}${fchip("saved", "저장됨", nSaved)}<select id="ld-extra" aria-label="시간표에 없는 학생 추가"><option value="">+ 시간표에 없는 학생</option>${rest.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}${s.grade ? " (" + esc(s.grade) + ")" : ""}</option>`).join("")}</select><span class="ld-sp"></span><button class="btn small" type="button" data-ld="allpresent">전원 출석으로</button><button class="btn small" type="button" data-ld="fillrec">추천 단원으로 채우기</button></div>`;
+  const draftBanner = ld.draftPending ? `<div class="ld-rb"><b>임시저장된 내용이 있어요</b><span>${esc(new Date(ld.draftAt).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }))}에 ${Object.keys(ld.draft.data.cards).length}명 분량을 임시저장했어요.</span><span class="ld-sp"></span><button class="btn small" type="button" data-ld="draftdrop">버리기</button><button class="btn small primary" type="button" data-ld="draftapply">이어서 입력</button></div>` : "";
+  const t = ld.draftAt ? new Date(ld.draftAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) : "";
+  const dstat = ld.draftMissing ? `<span class="muted ld-ds">임시저장은 최신 schema.sql 실행 후 쓸 수 있어요</span>` : ld.draftErr ? `<span class="ld-ds err">임시저장에 실패했어요</span>` : ld.draftPending ? `<span class="muted ld-ds">임시저장은 위 안내를 고른 뒤 시작돼요</span>` : dirty ? `<span class="ld-ds">${t ? `임시저장됨 ${t} · 자동` : "곧 자동으로 임시저장돼요"}</span>` : "";
+  const foot = `<div class="ld-save"><span><b>${dirty}명</b>${dirty ? "의 변경이 저장 대기 중이에요" : " 변경 없음"}</span>${dstat}<span class="ld-sp"></span><button class="btn" type="button" data-ld="draftsave" ${dirty ? "" : "disabled"}>임시저장</button><button class="btn primary" type="button" data-ld="saveall" ${dirty && !ld.saving ? "" : "disabled"}>${ld.saving ? "저장 중…" : `전체 저장${dirty ? ` (${dirty}명)` : ""}`}</button></div>`;
+  return { dbar, chips, draftBanner, foot };
+}
+function ldChrome() {
+  const h = ldChromeHtml();
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerHTML = v; };
+  set("ld-dbar", h.dbar); set("ld-chips", h.chips); set("ld-banner", h.draftBanner); set("ld-foot", h.foot);
+}
+function renderLessonDay() {
+  const main = $("#main");
+  const ld = state.ld;
+  const head = `<div class="page-head"><h2>수업기록</h2><span class="muted">날짜를 고르면 그날 수업한 학생의 기록을 한 번에 입력해요</span></div>`;
+  const h = ldChromeHtml();
+  const vis = ld.order.map((id) => ld.cards[id]).filter((c) => c && ldVisible(c));
+  main.innerHTML = head + `<div id="ld-dbar">${h.dbar}</div><div id="ld-chips">${h.chips}</div><div id="ld-banner">${h.draftBanner}</div>
+    <div class="ld-list" id="ld-list">${vis.length ? vis.map(ldCardHtml).join("") : `<div class="card empty">${ld.order.length ? "이 조건에 맞는 학생이 없어요." : "이 날은 시간표에 수업이 없어요. 위에서 '+ 시간표에 없는 학생'으로 학생을 더할 수 있어요."}</div>`}</div>
+    <div id="ld-foot">${h.foot}</div>`;
+}
+async function ldGo(date) {
+  const ld = state.ld;
+  if (date === ld.date) return;
+  if (ldDirtyCards().length) {
+    if (ld.draftPending) { if (!confirm("저장하지 않은 입력이 있어요. 날짜를 옮기면 사라져요. 옮길까요?")) { renderLessonDay(); return; } }
+    else await ldSaveDraft(false);
+  }
+  clearTimeout(ld.timer);
+  ld.date = date; ld.extras = []; ld.filter = "all";
+  try { await loadLdData(); } catch (e) { return fail(e); }
+  renderLessonDay();
+}
+function ldBuildRow(c) {
+  const date = state.ld.date;
+  const used = new Set();
+  const withBook = [];
+  c.blocks.forEach((b, i) => {
+    const book = ldBook(b.textbook_id);
+    if (!book) throw new Error(`교재 ${i + 1}: 교재를 찾을 수 없습니다.`);
+    if (used.has(b.textbook_id)) throw new Error(`${book.title} 교재가 두 번 들어 있습니다.`);
+    used.add(b.textbook_id);
+    if ([b.from_unit, b.to_unit].some((v) => v != null && v * 2 !== Math.round(v * 2))) throw new Error(`${book.title}: 단원 번호는 0.5 단위로 입력하세요.`);
+    if (b.from_unit != null && b.to_unit != null && b.to_unit < b.from_unit - 0.5) throw new Error(`${book.title}: 끝 단원이 시작 단원보다 앞설 수 없습니다.`);
+    if ((b.from_unit || 0) > book.total_units || (b.to_unit || 0) > book.total_units) throw new Error(`${book.title}: 전체 단원 수는 ${book.total_units}입니다.`);
+    withBook.push({ textbook_id: b.textbook_id, from_unit: b.from_unit ?? null, to_unit: b.to_unit ?? null, topic: b.topic && b.topic.trim() ? b.topic.trim().slice(0, 200) : null });
+  });
+  const abs = c.att === "결석";
+  const books = abs ? [] : withBook;
+  const primary = books[0] || { textbook_id: null, from_unit: null, to_unit: null, topic: abs ? null : c.topicOnly ? c.topicOnly.slice(0, 200) : null };
+  const row = { lesson_date: date, attendance: c.att, homework: abs ? null : c.homework || null, homework_note: abs ? null : c.homework_note.trim() || null, teacher_comment: c.teacher_comment.trim() || null, memo: c.memo.trim() || null, textbook_id: primary.textbook_id, from_unit: primary.from_unit, to_unit: primary.to_unit, topic: primary.topic };
+  row.extra_books = books.slice(1);
+  return { row, books };
+}
+async function ldSaveCard(c) {
+  const date = state.ld.date;
+  const tests = c.tests.filter((t) => t.score != null && !Number.isNaN(t.score));
+  tests.forEach((t) => { if (!(t.max > 0)) throw new Error("시험 만점을 입력하세요."); if (t.score > t.max) throw new Error("시험 점수가 만점보다 클 수 없습니다."); });
+  if (c.att) {
+    const { row, books } = ldBuildRow(c);
+    let lid = c.lessonId;
+    if (lid) await run(db.from("lessons").update(row).eq("id", lid));
+    else {
+      try { const ins = await run(db.from("lessons").insert({ ...row, student_id: c.sid }).select("id").single()); lid = ins && ins.id; }
+      catch (e) { if (/extra_books/i.test((e && e.message) || "")) throw new Error("교재를 여러 개 저장하려면 최신 schema.sql 을 Supabase 에서 먼저 실행하세요."); throw e; }
+      if (lid && c.att === "보강") await completeMakeupFor(c.sid, lid, date, null);
+      if (lid && c.att !== "결석") {
+        for (const r of state.ld.data.recs.filter((x) => x.student_id === c.sid && c.recIds.includes(x.id))) {
+          const b = books.find((x) => x.textbook_id === r.textbook_id);
+          if (!b) continue;
+          const same = b.from_unit === r.from_unit && b.to_unit === r.to_unit;
+          await run(db.from("recommendations").update({ status: same ? "채택" : "수정", applied_lesson_id: lid, decided_at: new Date().toISOString() }).eq("id", r.id));
+        }
+        for (const b of books) {
+          const pr = ldProg(c.sid, b.textbook_id);
+          if (pr && b.to_unit != null && b.to_unit > pr.current_unit) await run(db.from("progress").update({ current_unit: b.to_unit, updated_at: new Date().toISOString() }).eq("id", pr.id));
+        }
+      }
+    }
+  }
+  for (const id of c.delTests) await run(db.from("tests").delete().eq("id", id));
+  for (const t of tests) {
+    const d = { test_date: date, kind: t.kind, title: t.title && t.title.trim() ? t.title.trim() : null, score: t.score, max_score: t.max };
+    if (t.id) await run(db.from("tests").update(d).eq("id", t.id));
+    else await run(db.from("tests").insert({ ...d, student_id: c.sid }));
+  }
+}
+async function ldSaveAll() {
+  const ld = state.ld;
+  const cards = ldDirtyCards();
+  if (!cards.length || ld.saving) return;
+  ld.saving = true; ldChrome();
+  clearTimeout(ld.timer);
+  const failed = new Map(), errs = [];
+  for (const c of cards) {
+    try { await ldSaveCard(c); } catch (e) { failed.set(c.sid, c); errs.push(`${studentName(c.sid)}: ${(e && e.message) || e}`); }
+  }
+  ld.saving = false;
+  try { await loadCore(); await loadLdData(failed); } catch (e) { return fail(e); }
+  ld.draftPending = false;
+  await ldSaveDraft(false);
+  renderLessonDay();
+  render_sidebar_safe();
+  if (errs.length) toast(`${cards.length - errs.length}명 저장, ${errs.length}명은 저장하지 못했어요 — ${errs[0]}`);
+  else toast(`${cards.length}명의 수업 기록을 저장했어요`);
+}
+function render_sidebar_safe() { try { renderSidebar(); } catch { /* 무시 */ } }
+function ldBind() {
+  const main = $("#main");
+  main.onclick = async (e) => {
+    const b = e.target.closest("[data-ld]");
+    if (!b) return;
+    const ld = state.ld;
+    const act = b.dataset.ld;
+    const c = ld.cards[b.dataset.sid];
+    if (act === "nav") { const v = Number(b.dataset.v); return ldGo(v === 0 ? todayStr() : addDays(ld.date, v)); }
+    if (act === "filter") { ld.filter = b.dataset.v; return renderLessonDay(); }
+    if (act === "saveall") return ldSaveAll();
+    if (act === "draftsave") return ldSaveDraft(true);
+    if (act === "draftapply") { ldApplyDraft(); renderLessonDay(); return ldSchedule(); }
+    if (act === "draftdrop") { try { await run(db.from("lesson_drafts").delete().eq("lesson_date", ld.date)); } catch { /* 무시 */ } ld.draft = null; ld.draftPending = false; ld.draftAt = null; return ldChrome(); }
+    if (act === "allpresent") { ld.order.forEach((id) => { const x = ld.cards[id]; if (x && !x.lessonId && !x.att) { x.att = "출석"; x.dirty = true; } }); renderLessonDay(); return ldSchedule(); }
+    if (act === "fillrec") {
+      let n = 0;
+      ld.order.forEach((id) => { const x = ld.cards[id]; if (!x || x.lessonId || x.att === "결석") return; x.blocks.forEach((bl) => { const r = x.recMap[bl.textbook_id]; if (r && (bl.from_unit !== r.from_unit || bl.to_unit !== r.to_unit)) { bl.from_unit = r.from_unit; bl.to_unit = r.to_unit; x.dirty = true; if (!x.att) x.att = "출석"; n++; } else if (r && bl.to_unit == null) { bl.to_unit = r.to_unit; x.dirty = true; n++; } }); });
+      renderLessonDay(); if (n) ldSchedule(); else toast("채울 추천 단원이 없어요"); return;
+    }
+    if (!c) return;
+    if (act === "fold") { c.collapsed = !c.collapsed; return ldRepaint(c); }
+    if (act === "att") {
+      const v = b.dataset.v;
+      if (v === c.att) return;
+      if (c.att === "보강" && v !== "보강") { const okIds = new Set(ldDayItems(c.sid, ldWd(ld.date), false).map((x) => x.book.id)); const off = c.blocks.filter((bl) => !okIds.has(bl.textbook_id)); if (off.length) { if (!confirm(`보강이 아니면 이 요일에 배정된 교재만 기록할 수 있어요. 다른 교재 ${off.length}개는 빠져요. 계속할까요?`)) return; c.blocks = c.blocks.filter((bl) => okIds.has(bl.textbook_id)); } }
+      c.att = v; c.pick = false; c.dirty = true; ldRepaint(c); ldSchedule(); return ldChrome();
+    }
+    if (act === "pick") { c.pick = !c.pick; c.pickQ = ""; return ldRepaint(c); }
+    if (act === "pickadd") { c.blocks.push({ textbook_id: b.dataset.id, from_unit: ldAutoFrom(c.sid, b.dataset.id), to_unit: null, topic: "" }); c.pick = false; ldTouch(c, true); return ldRepaint(c); }
+    if (act === "delblock") { c.blocks.splice(Number(b.dataset.bi), 1); ldTouch(c, true); return ldRepaint(c); }
+    if (act === "addtest") { const k = kindList()[0]; c.tests.push({ kind: k ? k.name : "단어시험", title: "", score: null, max: k ? k.max : 100 }); ldTouch(c, false); return ldRepaint(c); }
+    if (act === "deltest") { const t = c.tests.splice(Number(b.dataset.ti), 1)[0]; if (t && t.id) c.delTests.push(t.id); ldTouch(c, false); return ldRepaint(c); }
+  };
+  const onEdit = (e) => {
+    const el = e.target;
+    const ld = state.ld;
+    if (el.id === "ld-date") { if (el.value && e.type === "change") ldGo(el.value); return; }
+    if (el.id === "ld-extra") { if (el.value && e.type === "change") { ld.extras.push(el.value); ld.cards[el.value] = ldMakeCard(el.value, ld.data); ld.order.push(el.value); renderLessonDay(); } return; }
+    if (el.dataset.ldq != null) { const c = ld.cards[el.dataset.ldq]; if (c) { c.pickQ = el.value.trim(); const pk = el.closest(".ld-pk"); const tmp = document.createElement("div"); tmp.innerHTML = ldPickHtml(c); pk.replaceWith(tmp.firstElementChild); const n = document.querySelector(`[data-ldq="${CSS.escape(c.sid)}"]`); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } } return; }
+    const c = ld.cards[el.dataset.sid];
+    if (!c) return;
+    if (el.dataset.f) {
+      c[el.dataset.f] = el.value;
+      return ldTouch(c, true);
+    }
+    if (el.dataset.bk != null) {
+      const b = c.blocks[Number(el.dataset.bi)];
+      if (!b) return;
+      const k = el.dataset.bk;
+      if (k === "topic") b.topic = el.value;
+      else { const v = el.value === "" ? null : Number(el.value); b[k] = Number.isFinite(v) ? v : null; const h = document.querySelector(`[data-hint="${CSS.escape(c.sid)}:${el.dataset.bi}"]`); if (h) h.textContent = ldHint(c, b); }
+      return ldTouch(c, true);
+    }
+    if (el.dataset.tk != null) {
+      const i = Number(el.dataset.ti);
+      const t = c.tests[i];
+      if (!t) return;
+      const k = el.dataset.tk;
+      if (k === "kind") { t.kind = el.value; const kd = kindList().find((x) => x.name === el.value); if (kd && (t.max == null || Number.isNaN(t.max) || !t.id)) t.max = kd.max; ldTouch(c, false); return ldRepaint(c); }
+      if (k === "title") t.title = el.value;
+      else { const v = el.value === "" ? null : Number(el.value); t[k] = Number.isFinite(v) ? v : null; const pc = document.querySelector(`[data-pc="${CSS.escape(c.sid)}:${i}"]`); if (pc) pc.textContent = t.score != null && t.max > 0 ? Math.round((t.score / t.max) * 100) + "%" : ""; }
+      return ldTouch(c, false);
+    }
+  };
+  main.oninput = onEdit;
+  main.onchange = onEdit;
+}
+
 function bindEvents() {
   const appEl = $("#app-view");
   const setMenu = (open) => {
@@ -5320,6 +5718,14 @@ function bindEvents() {
     } catch (e) {
       return fail(e);
     }
+    render();
+  };
+  $("#nav-ld").onclick = async () => {
+    state.view = "ld";
+    state.studentId = null;
+    state.ld.extras = [];
+    state.ld.filter = "all";
+    try { await loadLdData(); } catch (e) { return fail(e); }
     render();
   };
   $("#nav-wa").onclick = async () => {

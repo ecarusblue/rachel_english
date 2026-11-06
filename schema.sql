@@ -1003,3 +1003,21 @@ revoke all on function public.api_save_correction(text, uuid, jsonb, text, text)
 grant execute on function public.api_find_student(text, text) to anon, authenticated;
 grant execute on function public.api_save_writing(text, uuid, text, text, date) to anon, authenticated;
 grant execute on function public.api_save_correction(text, uuid, jsonb, text, text) to anon, authenticated;
+
+-- ============================================================
+-- 수업기록 하루 입력 화면의 임시저장 (날짜별 1건, 서버에 보관해 PC·폰에서 이어서 입력)
+--  - 정식 저장 전의 입력 내용만 담고, 진도·보강·시험에는 반영되지 않습니다.
+-- ============================================================
+create table if not exists public.lesson_drafts (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  lesson_date date not null,
+  data        jsonb not null default '{}'::jsonb check (jsonb_typeof(data) = 'object'),
+  updated_at  timestamptz not null default now(),
+  unique (owner, lesson_date)
+);
+alter table public.lesson_drafts enable row level security;
+drop policy if exists "owner_all" on public.lesson_drafts;
+create policy "owner_all" on public.lesson_drafts for all to authenticated
+  using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
+revoke all on public.lesson_drafts from anon;
