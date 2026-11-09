@@ -25,7 +25,10 @@ const state = {
   report: { range: "thisWeek", start: "", end: "", comment: "" },
   detail: { lessons: [], tests: [], logs: [], logsMissing: false, recs: [] },
   showInactive: false,
-  schedule: { slots: [], missing: false, draft: null, fsel: null },
+  schedule: { slots: [], missing: false, draft: null, fsel: null, tf: "all" },   // tf: 원장 화면의 선생님 필터(all | admin | 선생님 id)
+  me: { role: "admin", teacher_id: null, name: "", perms: {}, migrated: false },   // 로그인한 사람(원장/선생님)
+  teachers: [],          // 원장만 불러옴
+  tm: { tab: "all" },    // 선생님 관리 화면의 학생 배정 필터
   kinds: { rows: [], missing: false, counts: {} },   // 선생님이 만든 시험 종류
   makeup: { rows: [], quotas: [], absences: [], missing: false, tab: "need", calMonth: null, calSel: null },   // 결석·보강
   makeupNeed: 0,
@@ -198,6 +201,7 @@ async function loadCore() {
   state.progress = progress;
   state.recentLessons = lessons;
   state.recentTests = tests;
+  await loadTeachers();
   await loadSchedule();
   await loadKinds();
   await loadMakeups();
@@ -675,6 +679,7 @@ function render() {
   else if (state.view === "backup") renderBackup();
   else if (state.view === "makeup") renderMakeup();
   else if (state.view === "wa") renderWritingAnalysis();
+  else if (state.view === "teachers") renderTeachers();
   else if (state.view === "ld") { renderLessonDay(); ldBind(); }
   else renderOverview();
 }
@@ -686,6 +691,7 @@ function renderSidebar() {
   $("#nav-evals").classList.toggle("active", state.view === "evals");
   $("#nav-recs").classList.toggle("active", state.view === "recs");
   $("#nav-wa").classList.toggle("active", state.view === "wa");
+  const bt = $("#btn-teachers"); if (bt) bt.classList.toggle("active", state.view === "teachers");
   $("#nav-ld").classList.toggle("active", state.view === "ld");
   $("#btn-kinds").classList.toggle("active", state.view === "kinds");
   const bkb = $("#btn-backup"); if (bkb) bkb.classList.toggle("active", state.view === "backup");
@@ -968,7 +974,9 @@ function timeText(a, b) {
 }
 async function loadSchedule() {
   try {
-    state.schedule.slots = await run(db.from("schedule_slots").select("*").order("weekday").order("slot_order").limit(300));
+    state.schedule.slots = state.me.migrated
+      ? await run(db.rpc("schedule_list"))   // 선생님은 내 학생만 잘라서 받습니다
+      : await run(db.from("schedule_slots").select("*").order("weekday").order("slot_order").limit(300));
     state.schedule.missing = false;
   } catch {
     state.schedule.slots = [];
@@ -990,9 +998,14 @@ function scheduleHtml() {
   const active = activeAll;
   const today = new Date().getDay();
   // 학생별 보기: 선택한 학생은 강조, 다른 학생은 흐리게(눌러서 그 학생으로 전환)
-  const chipOf = (st) => !sel ? `<button type="button" class="sch-chip" data-sch-sid="${esc(st.id)}">${esc(st.name)}</button>`
-    : st.id === sel ? `<button type="button" class="sch-chip on" data-sch-sid="${esc(st.id)}">${esc(st.name)}</button>`
-    : `<button type="button" class="sch-chip dim" data-sch-pick="${esc(st.id)}" title="${esc(st.name)} 시간표 보기">${esc(st.name)}</button>`;
+  const tc = (st) => (state.teachers.length ? ` tcol-${teacherCol(st.teacher_id)}${tfMatch(st) ? "" : " tdim"}` : "");
+  const cntOf = (names) => names.filter(tfMatch).length;
+  const chipOf = (st) => !sel ? `<button type="button" class="sch-chip${tc(st)}" data-sch-sid="${esc(st.id)}">${esc(st.name)}</button>`
+    : st.id === sel ? `<button type="button" class="sch-chip on${tc(st)}" data-sch-sid="${esc(st.id)}">${esc(st.name)}</button>`
+    : `<button type="button" class="sch-chip dim${tc(st)}" data-sch-pick="${esc(st.id)}" title="${esc(st.name)} 시간표 보기">${esc(st.name)}</button>`;
+  const tfBar = state.teachers.length && isAdmin()
+    ? `<div class="sch-tf" role="group" aria-label="담당 선생님으로 걸러 보기"><span class="muted">담당 선생님</span>${[["all", "전체", -1], ["admin", "원장", 0], ...state.teachers.filter((t) => t.status !== "중지").map((t) => [t.id, t.name, teacherCol(t.id)])]
+        .map(([k, l, c]) => `<button type="button" class="sch-fc ${state.schedule.tf === k ? "on" : ""}" data-schtf="${esc(k)}" aria-pressed="${state.schedule.tf === k}">${c >= 0 ? `<i class="tdot tcol-${c}"></i>` : ""}${esc(l)}</button>`).join("")}</div>` : "";
   // 이번 주 보강(날짜가 정해진 것) → 시간이 맞는 칸에 표시
   const wkr = periodRange("thisWeek");
   const mkWeek = sel && !state.makeup.missing ? state.makeup.rows.filter((r) => r.student_id === sel && r.status === "예정" && r.planned_date && r.planned_date >= wkr.start && r.planned_date <= wkr.end).sort((a, b) => a.planned_date.localeCompare(b.planned_date) || (a.planned_start || "").localeCompare(b.planned_start || "")) : [];
@@ -1006,7 +1019,7 @@ function scheduleHtml() {
       ${i === 0 ? `<th class="sch-day ${d.wd === today ? "today" : ""}" rowspan="${d.slots.length}" scope="rowgroup"><b>${DAY_NAME[d.wd]}</b>${d.wd === today ? "<em>오늘</em>" : ""}</th>` : ""}
       <td class="sch-slot"><b>${esc(sl.label || "타임 " + (i + 1))}</b>${tm ? `<span>${tm}</span>` : ""}</td>
       <td class="sch-names ${mine(names) || mkIn(sl).length ? "mine" : ""}"><div class="w">${names.length || mkIn(sl).length ? names.map(chipOf).join("") + mkChips(sl) : `<span class="muted">-</span>`}</div></td>
-      <td class="sch-cnt">${names.length}명</td></tr>`;
+      <td class="sch-cnt">${cntOf(names)}명</td></tr>`;
   }).join("")).join("");
   // 넓은 화면: 요일을 열로 펼친 격자 / 좁은 화면: 위의 요일별 목록
   const rowsN = Math.max(...days.map((d) => d.slots.length));
@@ -1020,7 +1033,7 @@ function scheduleHtml() {
       if (!sl) return `<td class="off ${cls}"></td>`;
       const names = active.filter((s) => (sl.student_ids || []).includes(s.id));
       const tm = rtime ? "" : timeText(sl.start_time, sl.end_time);
-      return `<td class="${cls} ${mine(names) || mkIn(sl).length ? "mine" : ""}"><div class="sg-top"><span>${esc(tm)}</span><span>${names.length}명</span></div><div class="sg-chips">${names.length || mkIn(sl).length ? names.map(chipOf).join("") + mkChips(sl) : `<span class="muted">-</span>`}</div></td>`;
+      return `<td class="${cls} ${mine(names) || mkIn(sl).length ? "mine" : ""}"><div class="sg-top"><span>${esc(tm)}</span><span>${cntOf(names)}명</span></div><div class="sg-chips">${names.length || mkIn(sl).length ? names.map(chipOf).join("") + mkChips(sl) : `<span class="muted">-</span>`}</div></td>`;
     }).join("");
     return `<tr><th class="sg-rt" scope="row"><b>${esc(first.label || "타임 " + (i + 1))}</b>${rtime ? `<span>${rtime}</span>` : ""}</th>${cells}</tr>`;
   }).join("");
@@ -1035,7 +1048,7 @@ function scheduleHtml() {
       <div class="sch-sum"><span class="rc-av" aria-hidden="true">${esc(selSt.name.trim().slice(0, 1))}</span><div class="sch-sum-t"><b>${esc(selSt.name)}</b> <span class="muted">${esc(selSt.grade || "")}${mySlots.length ? ` · 매주 ${mySlots.length}회` : ""}</span><div class="sch-sum-s">${mySlots.length ? esc(lbl) : '<span class="muted">배정된 정규 수업이 없어요</span>'}</div></div>
       ${mkWeek.length ? `<span class="sch-sum-mk">이번 주 보강 ${mkWeek.length}건 · ${mkWeek.map((r) => `${shortDate(r.planned_date)}${r.planned_start ? " " + hhmm(r.planned_start) : ""}`).join(", ")}</span>` : ""}</div>`;
   }
-  return `<section class="sch">${head}${fbar}
+  return `<section class="sch">${head}${tfBar}${fbar}
     <div class="card sch-card sch-wide"><table class="sch-grid"><thead><tr><th></th>${gridHead}</tr></thead><tbody>${grid}</tbody></table></div>
     <div class="card sch-card sch-narrow"><table class="sch-table"><tbody>${rows}</tbody></table></div></section>`;
 }
@@ -1116,6 +1129,7 @@ function bindSchedule() {
   $("#main").querySelectorAll("[data-sch-pick]").forEach((b) => {
     b.onclick = () => { state.schedule.fsel = b.dataset.schPick; render(); };
   });
+  $("#main").querySelectorAll("[data-schtf]").forEach((b) => { b.onclick = () => { state.schedule.tf = b.dataset.schtf; render(); }; });
   const fs = $("#sch-fsel");
   if (fs) fs.onchange = () => { state.schedule.fsel = fs.value; render(); };
   $("#main").querySelectorAll("[data-sch-sid]").forEach((b) => {
@@ -1137,28 +1151,40 @@ function renderScheduleEdit() {
   const active = state.students.filter((s) => s.active);
   const usedDays = dr.days.map((d) => d.wd);
   const unused = SCH_ORDER.filter((w) => !usedDays.includes(w));
+  const canS = canSlotEdit();
+  const dis = canS ? "" : "disabled";
+  const pickRow = (d, si, sl, s) => {
+    const elsewhere = d.slots.map((o, oi) => (oi !== si && o.students.includes(s.id) ? o.label || "타임 " + (oi + 1) : null)).filter(Boolean);
+    return `<label><input type="checkbox" data-tg="${state.schedule.draft.days.indexOf(d)}.${si}.${esc(s.id)}" ${sl.students.includes(s.id) ? "checked" : ""}>${esc(s.name)}${elsewhere.length ? ` <span class="dim">· ${DAY_NAME[d.wd]} ${esc(elsewhere.join(", "))}</span>` : ""}</label>`;
+  };
+  const pickList = (d, si, sl) => {
+    if (!active.length) return `<p class="muted" style="margin:.4rem">재원 중인 학생이 없습니다.</p>`;
+    if (!(isAdmin() && state.teachers.length)) return active.map((s) => pickRow(d, si, sl, s)).join("");
+    const groups = [[null, "원장 학생"], ...state.teachers.map((t) => [t.id, `${t.name} 선생님 학생`])];
+    return groups.map(([tid, label]) => {
+      const mem = active.filter((s) => (s.teacher_id || null) === tid);
+      return mem.length ? `<div class="sch-pg"><i class="tdot tcol-${teacherCol(tid)}"></i>${esc(label)}</div>${mem.map((s) => pickRow(d, si, sl, s)).join("")}` : "";
+    }).join("");
+  };
   const block = (d, di) => {
     const slotHtml = d.slots.map((sl, si) => {
       const chips = sl.students.map((id) => active.find((s) => s.id === id)).filter(Boolean)
         .map((s) => `<span class="sch-ec">${esc(s.name)}<button type="button" data-rm="${di}.${si}.${esc(s.id)}" aria-label="${esc(s.name)} 빼기">×</button></span>`).join("");
       const popOpen = dr.pop && dr.pop.d === di && dr.pop.s === si;
       const pop = popOpen ? `<div class="sch-pop" role="dialog" aria-label="학생 배정"><h4>${DAY_NAME[d.wd]}요일 · ${esc(sl.label || "타임 " + (si + 1))}에 배정할 학생</h4>
-        ${active.length ? active.map((s) => {
-          const elsewhere = d.slots.map((o, oi) => (oi !== si && o.students.includes(s.id) ? o.label || "타임 " + (oi + 1) : null)).filter(Boolean);
-          return `<label><input type="checkbox" data-tg="${di}.${si}.${esc(s.id)}" ${sl.students.includes(s.id) ? "checked" : ""}>${esc(s.name)}${elsewhere.length ? ` <span class="dim">· ${DAY_NAME[d.wd]} ${esc(elsewhere.join(", "))}</span>` : ""}</label>`;
-        }).join("") : `<p class="muted" style="margin:.4rem">재원 중인 학생이 없습니다.</p>`}</div>` : "";
-      return `<div class="sch-es"><div class="sch-et"><input class="sch-lab" data-f="label" data-di="${di}" data-si="${si}" value="${esc(sl.label)}" maxlength="30" aria-label="타임 이름" placeholder="타임 ${si + 1}">
-        <div class="sch-tm"><input type="time" data-f="start" data-di="${di}" data-si="${si}" value="${esc(sl.start)}" aria-label="시작 시간"><span>~</span><input type="time" data-f="end" data-di="${di}" data-si="${si}" value="${esc(sl.end)}" aria-label="종료 시간"></div></div>
+        ${pickList(d, si, sl)}</div>` : "";
+      return `<div class="sch-es"><div class="sch-et"><input class="sch-lab" data-f="label" data-di="${di}" data-si="${si}" ${dis} value="${esc(sl.label)}" maxlength="30" aria-label="타임 이름" placeholder="타임 ${si + 1}">
+        <div class="sch-tm"><input type="time" data-f="start" data-di="${di}" data-si="${si}" ${dis} value="${esc(sl.start)}" aria-label="시작 시간"><span>~</span><input type="time" data-f="end" data-di="${di}" data-si="${si}" ${dis} value="${esc(sl.end)}" aria-label="종료 시간"></div></div>
         <div class="sch-en">${chips}<span class="sch-addwrap"><button type="button" class="sch-add" data-pop="${di}.${si}">+ 학생 추가</button>${pop}</span></div>
-        <button type="button" class="sch-del" data-delslot="${di}.${si}" title="타임 삭제" aria-label="타임 삭제">🗑</button></div>`;
+        ${canS ? `<button type="button" class="sch-del" data-delslot="${di}.${si}" title="타임 삭제" aria-label="타임 삭제">🗑</button>` : ""}</div>`;
     }).join("");
     const opts = SCH_ORDER.filter((w) => w === d.wd || unused.includes(w)).map((w) => `<option value="${w}" ${w === d.wd ? "selected" : ""}>${DAY_NAME[w]}요일</option>`).join("");
-    return `<div class="card sch-ed"><div class="sch-eh"><select data-dayset="${di}" aria-label="요일">${opts}</select><span class="muted">타임 ${d.slots.length}개</span><span class="spacer"></span>
-      <button type="button" class="btn small" data-addslot="${di}">+ 타임 추가</button><button type="button" class="btn small danger" data-delday="${di}">요일 삭제</button></div>${slotHtml}</div>`;
+    return `<div class="card sch-ed"><div class="sch-eh"><select data-dayset="${di}" aria-label="요일" ${dis}>${opts}</select><span class="muted">타임 ${d.slots.length}개</span><span class="spacer"></span>
+      ${canS ? `<button type="button" class="btn small" data-addslot="${di}">+ 타임 추가</button><button type="button" class="btn small danger" data-delday="${di}">요일 삭제</button>` : ""}</div>${slotHtml}</div>`;
   };
   main.innerHTML = `
     <div class="page-head"><h2>수업 시간표 편집</h2><span class="muted">요일·타임·시간을 자유롭게 바꾸고 학생을 배정하세요</span></div>
-    <div class="toolbar"><button class="btn small" id="sch-addday" type="button" ${unused.length ? "" : "disabled"}>+ 요일 추가</button><span class="muted" style="font-size:.85rem">필요한 요일만 추가해서 쓸 수 있어요</span></div>
+    <div class="toolbar">${canS ? `<button class="btn small" id="sch-addday" type="button" ${unused.length ? "" : "disabled"}>+ 요일 추가</button><span class="muted" style="font-size:.85rem">필요한 요일만 추가해서 쓸 수 있어요</span>` : `<span class="muted" style="font-size:.85rem">내 학생만 넣고 뺄 수 있어요. 타임 추가·시간 변경은 원장님께 요청하세요.</span>`}${!isAdmin() && canS ? `<span class="muted" style="font-size:.85rem">타임 이름·시간을 바꾸면 같은 타임의 다른 선생님 학생에게도 적용돼요.</span>` : ""}</div>
     ${dr.days.length ? dr.days.map(block).join("") : `<div class="card empty">요일이 없습니다. 위의 <strong>+ 요일 추가</strong>를 눌러 시작하세요.</div>`}
     <div class="sch-foot"><span class="muted" style="font-size:.85rem;margin-right:auto">저장하기 전까지는 화면에만 반영됩니다</span><p id="sch-err" class="error" role="alert">${esc(dr.err || "")}</p>
       <button class="btn" type="button" id="sch-cancel">취소</button><button class="btn primary" type="button" id="sch-save">저장</button></div>`;
@@ -1196,7 +1222,8 @@ function bindScheduleEdit() {
       dr.days.splice(+el.dataset.delday, 1); dr.pop = null; re();
     };
   });
-  $("#sch-addday").onclick = () => {
+  const addDayBtn = $("#sch-addday");
+  if (addDayBtn) addDayBtn.onclick = () => {
     const used = dr.days.map((d) => d.wd);
     const wd = SCH_ORDER.find((w) => !used.includes(w));
     if (wd === undefined) return;
@@ -1257,10 +1284,14 @@ async function saveSchedule() {
   btn.disabled = true;
   $("#sch-err").textContent = "";
   try {
-    if (rows.length) await run(db.from("schedule_slots").upsert(rows, { onConflict: "id" }));
-    const keep = new Set(rows.map((r) => r.id));
-    const removed = state.schedule.slots.filter((s) => !keep.has(s.id)).map((s) => s.id);
-    if (removed.length) await run(db.from("schedule_slots").delete().in("id", removed));
+    if (state.me.migrated) {
+      await run(db.rpc("schedule_save", { p_slots: rows.map(({ id, weekday, slot_order, label, start_time, end_time, student_ids }) => ({ id, weekday, slot_order, label, start_time, end_time, student_ids })) }));
+    } else {
+      if (rows.length) await run(db.from("schedule_slots").upsert(rows, { onConflict: "id" }));
+      const keep = new Set(rows.map((r) => r.id));
+      const removed = state.schedule.slots.filter((s) => !keep.has(s.id)).map((s) => s.id);
+      if (removed.length) await run(db.from("schedule_slots").delete().in("id", removed));
+    }
     await loadSchedule();
     state.schedule.draft = null;
     toast("시간표를 저장했습니다");
@@ -3542,7 +3573,7 @@ function manageTextbooks() {
     return `<ul style="list-style:none;margin:0;padding:0">${found.map((b) => {
       const u = usage(b.id);
       return `<li style="display:flex;gap:.5rem;align-items:center;padding:.45rem 0;border-bottom:1px solid var(--border)">
-        <span style="flex:1"><strong>${hl(b.title)}</strong> <span class="muted">${bookLeaves(b) ? `${b.structure.items.length}개 항목 · ${b.total_units}단원` : `${b.total_units} ${esc(b.unit_label)}`}${u ? ` · ${u}명 사용` : ""}</span></span>
+        <span style="flex:1"><strong>${hl(b.title)}</strong> <span class="muted">${bookLeaves(b) ? `${b.structure.items.length}개 항목 · ${b.total_units}단원` : `${b.total_units} ${esc(b.unit_label)}`}${u ? ` · ${u}명 사용` : ""}</span>${b.updated_by_name ? `<small class="muted tb-by">마지막 수정 ${esc(shortDate((b.updated_at || "").slice(0, 10)).replace(/\(.\)/, ""))} ${esc(b.updated_by_name)}</small>` : ""}</span>
         <button type="button" class="btn small" data-edit="${esc(b.id)}">수정</button></li>`;
     }).join("")}</ul>`;
   };
@@ -3621,6 +3652,12 @@ function editTextbook(book, presetTitle) {
         out.unit_label = d.unit_label;
         if (book && book.structure) out.structure = null;
       }
+      if (book && state.me.migrated && !isAdmin()) {
+        let total = 0;
+        try { total = await run(db.rpc("textbook_student_count", { p_id: book.id })); } catch { total = 0; }
+        const mine = new Set(state.progress.filter((p) => p.textbook_id === book.id).map((p) => p.student_id)).size;
+        if (total > mine && !confirm(`이 교재는 다른 선생님 학생을 포함해 ${total}명이 쓰고 있어요.\n저장하면 모든 선생님 화면에 바로 반영돼요. 저장할까요?`)) throw new Error("저장을 취소했어요.");
+      }
       try {
         if (book) await run(db.from("textbooks").update(out).eq("id", book.id));
         else await run(db.from("textbooks").insert(out));
@@ -3633,7 +3670,8 @@ function editTextbook(book, presetTitle) {
     },
     onDelete: book
       ? async () => {
-          await run(db.from("textbooks").delete().eq("id", book.id));
+          const gone = await run(db.from("textbooks").delete().eq("id", book.id).select("id"));
+          if (!gone || !gone.length) throw new Error("이 교재는 학생들이 쓰고 있어서 지울 수 없어요. 원장님께 요청해 주세요.");
           await refresh();
           manageTextbooks();
         }
@@ -3647,6 +3685,14 @@ function editTextbook(book, presetTitle) {
   const host = document.createElement("div");
   host.id = "tb-host";
   $("#dlg-body").appendChild(host);
+  if (book && state.me.migrated) {
+    const hist = document.createElement("div");
+    hist.className = "tb-hist";
+    $("#dlg-body").appendChild(hist);
+    run(db.from("textbook_edits").select("editor_name, summary, created_at").eq("textbook_id", book.id).order("created_at", { ascending: false }).limit(8))
+      .then((rows) => { if (rows.length) hist.innerHTML = `<h4>수정 이력</h4>${rows.map((r) => `<div><span class="muted">${esc(shortDate(r.created_at.slice(0, 10)).replace(/\(.\)/, ""))}</span><b>${esc(r.editor_name)}</b><span>${esc(r.summary)}</span></div>`).join("")}`; })
+      .catch(() => {});
+  }
 
   const leafCount = () => rows.reduce((n, r) => n + (r.children.length ? r.children.length : 1), 0);
   const esc2 = (v) => esc(v);
@@ -5373,7 +5419,7 @@ async function ldSaveDraft(manual) {
       const cards = {};
       dirty.forEach((c) => { cards[c.sid] = ldCardDraft(c); });
       const now = new Date().toISOString();
-      await run(db.from("lesson_drafts").upsert({ lesson_date: ld.date, data: { cards, extras: ld.extras || [] }, updated_at: now }, { onConflict: "owner,lesson_date" }));
+      await run(db.from("lesson_drafts").upsert({ lesson_date: ld.date, data: { cards, extras: ld.extras || [] }, updated_at: now }, { onConflict: state.me.migrated ? "author,lesson_date" : "owner,lesson_date" }));
       ld.draftAt = now;
     }
     ld.draftErr = false;
@@ -5674,6 +5720,140 @@ function ldBind() {
   main.onchange = onEdit;
 }
 
+
+/* ---------- 여러 선생님 (원장 전용 '선생님 관리' + 공통 도우미) ---------- */
+const isAdmin = () => state.me.role === "admin";
+const T_PERMS = [
+  ["slot_edit", "타임 추가·삭제·시간 변경", "다른 선생님 학생이 있는 타임에도 영향이 가요"],
+  ["book_delete", "사용 중인 교재 삭제", "끄면 아무도 쓰지 않는 교재만 지울 수 있어요"],
+  ["student_manage", "새 학생 등록·퇴원 처리", ""],
+];
+const canSlotEdit = () => isAdmin() || !!(state.me.perms && state.me.perms.slot_edit);
+async function loadMe() {
+  try {
+    const { data, error } = await db.rpc("whoami");
+    if (error) throw error;
+    const r = data && data.role;
+    state.me = { role: r === "teacher" ? "teacher" : r === "suspended" ? "suspended" : "admin", teacher_id: (data && data.teacher_id) || null, name: (data && data.name) || "", perms: (data && data.perms) || {}, migrated: true };
+  } catch {
+    state.me = { role: "admin", teacher_id: null, name: "", perms: {}, migrated: false };   // schema.sql 업그레이드 전에는 예전처럼 동작
+  }
+  applyRole();
+  return state.me.role !== "suspended";
+}
+function applyRole() {
+  const adm = isAdmin();
+  const nt = $("#btn-teachers"); if (nt) nt.hidden = !(adm && state.me.migrated);
+  const bk = $("#btn-backup"); if (bk) bk.hidden = !adm;
+  const ul = $("#user-role"); if (ul) ul.textContent = adm ? "" : ` (${state.me.name || "선생님"})`;
+}
+async function loadTeachers() {
+  state.teachers = [];
+  if (!isAdmin() || !state.me.migrated) return;
+  try { state.teachers = await run(db.from("teachers").select("*").order("created_at")); } catch { state.teachers = []; }
+}
+const teacherName = (tid) => (tid ? ((state.teachers.find((t) => t.id === tid) || {}).name || "선생님") : "원장");
+const teacherCol = (tid) => (tid ? (state.teachers.findIndex((t) => t.id === tid) + 1) % 5 || 5 : 0);   // 0=원장 1~4=선생님 색
+const tfMatch = (st) => { const f = state.schedule.tf; return f === "all" || (f === "admin" ? !st.teacher_id : st.teacher_id === f); };
+async function teacherApi(action, body) {
+  const { data } = await db.auth.getSession();
+  const token = data && data.session && data.session.access_token;
+  if (!token) throw new Error("로그인이 필요해요");
+  let res;
+  try {
+    res = await fetch("/api/teachers", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ action, origin: location.origin + location.pathname, ...body }) });
+  } catch { throw new Error("서버에 연결하지 못했어요"); }
+  const j = await res.json().catch(() => null);
+  if (res.status === 404 || !j) throw new Error("서버(Worker)가 연결되지 않았어요. 배포된 주소에서 사용해 주세요");
+  if (!j.ok) throw new Error(j.error || "처리하지 못했어요");
+  return j;
+}
+const T_STATUS = { "사용 중": "ok", "초대 대기": "wait", "중지": "off" };
+function renderTeachers() {
+  const main = $("#main");
+  if (!state.me.migrated) { main.innerHTML = `<div class="page-head"><h2>선생님 관리</h2></div><div class="card empty">선생님 기능을 쓰려면 최신 <code>schema.sql</code> 을 Supabase SQL Editor에서 한 번 실행하세요.</div>`; return; }
+  const act = state.students.filter((x) => x.active);
+  const cnt = (tid) => act.filter((x) => (x.teacher_id || null) === tid).length;
+  const tab = state.tm.tab;
+  const list = act.filter((x) => tab === "all" || (tab === "admin" ? !x.teacher_id : x.teacher_id === tab)).sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  const opt = (sel) => `<option value="" ${!sel ? "selected" : ""}>원장 (미배정 포함)</option>` + state.teachers.filter((t) => t.status !== "중지" || t.id === sel).map((t) => `<option value="${esc(t.id)}" ${t.id === sel ? "selected" : ""}>${esc(t.name)}</option>`).join("");
+  const rows = state.teachers.map((t) => `<div class="tm-row">
+      <span class="tm-nm"><i class="tm-av tcol-${teacherCol(t.id)}">${esc(t.name.slice(0, 1))}</i><span><b>${esc(t.name)}</b><small>선생님</small></span></span>
+      <span class="tm-em">${esc(t.email)}</span><span class="tm-n">${cnt(t.id)}명</span>
+      <span><span class="tm-pill ${T_STATUS[t.status] || ""}">${esc(t.status)}</span></span>
+      <span class="tm-act"><button type="button" class="btn small" data-tperm="${esc(t.id)}">권한</button>${t.status === "초대 대기" ? `<button type="button" class="btn small" data-tresend="${esc(t.id)}">초대 다시 보내기</button>` : ""}<button type="button" class="btn small ${t.status === "중지" ? "" : "danger"}" data-ttoggle="${esc(t.id)}">${t.status === "중지" ? "다시 사용" : "이용 중지"}</button></span></div>`).join("");
+  const chips = [["all", `전체 ${act.length}`], ["admin", `원장 ${cnt(null)}`], ...state.teachers.map((t) => [t.id, `${t.name} ${cnt(t.id)}`])]
+    .map(([k, l]) => `<button type="button" class="sch-fc ${tab === k ? "on" : ""}" data-tmtab="${esc(k)}" aria-pressed="${tab === k}">${esc(l)}</button>`).join("");
+  main.innerHTML = `<div class="page-head"><h2>선생님 관리</h2><span class="muted">선생님 추가 · 권한 · 학생 배정</span></div>
+    <div class="toolbar"><h3 style="margin:0">선생님 ${state.teachers.length}명</h3><span class="spacer"></span><button class="btn primary" type="button" id="tm-add">+ 선생님 추가</button></div>
+    <div class="card tm-card">
+      <div class="tm-row tm-h"><span>이름</span><span>로그인 이메일</span><span>담당 학생</span><span>상태</span><span></span></div>
+      <div class="tm-row"><span class="tm-nm"><i class="tm-av tcol-0">원</i><span><b>원장</b><small>모든 권한</small></span></span><span class="tm-em">${esc(($("#user-email") || {}).textContent || "")}</span><span class="tm-n">${cnt(null)}명</span><span><span class="tm-pill ok">사용 중</span></span><span></span></div>
+      ${rows || `<div class="tm-empty muted">아직 선생님이 없어요. <b>+ 선생님 추가</b>를 눌러 초대 메일을 보내세요.</div>`}
+    </div>
+    <div class="toolbar" style="margin-top:1.2rem"><h3 style="margin:0">학생 배정</h3><span class="spacer"></span><div class="sch-fchips">${chips}</div></div>
+    <p class="muted" style="font-size:.85rem;margin:.2rem 0 .6rem">학생마다 담당 선생님은 한 명입니다. 바꾸면 이전 선생님 화면에서는 그 학생이 바로 사라지고, 기록은 학생에게 그대로 따라가요.</p>
+    <div class="card tm-card">${list.length ? list.map((x) => `<div class="tm-as"><span><b>${esc(x.name)}</b> <small class="muted">${esc(x.grade || "")}</small></span><select data-assign="${esc(x.id)}" aria-label="${esc(x.name)} 담당 선생님">${opt(x.teacher_id)}</select></div>`).join("") : `<div class="tm-empty muted">해당하는 학생이 없어요.</div>`}</div>`;
+  $("#tm-add").onclick = () => openForm({
+    title: "선생님 추가",
+    submitLabel: "추가하고 초대 메일 보내기",
+    fields: [{ name: "name", label: "이름", required: true, maxlength: 30 }, { name: "email", label: "로그인 이메일 (이 주소로 비밀번호 설정 메일이 가요)", required: true, maxlength: 200 }],
+    onSubmit: async (d) => {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email || "")) throw new Error("이메일 형식을 확인해 주세요.");
+      const r = await teacherApi("invite", { name: d.name, email: d.email });
+      await loadTeachers(); renderTeachers();
+      toast(r.warn || "초대 메일을 보냈어요");
+    },
+  });
+  main.querySelectorAll("[data-tmtab]").forEach((b) => { b.onclick = () => { state.tm.tab = b.dataset.tmtab; renderTeachers(); }; });
+  main.querySelectorAll("[data-assign]").forEach((el) => {
+    el.onchange = async () => {
+      try {
+        await run(db.from("students").update({ teacher_id: el.value || null }).eq("id", el.dataset.assign));
+        const st = state.students.find((x) => x.id === el.dataset.assign); if (st) st.teacher_id = el.value || null;
+        toast(`${(st || {}).name || "학생"} → ${teacherName(el.value || null)} 선생님 담당으로 바꿨어요`.replace("원장 선생님", "원장"));
+        renderTeachers();
+      } catch (e) { fail(e, "배정하지 못했어요"); renderTeachers(); }
+    };
+  });
+  main.querySelectorAll("[data-tperm]").forEach((b) => {
+    b.onclick = () => {
+      const t = state.teachers.find((x) => x.id === b.dataset.tperm); if (!t) return;
+      openForm({
+        title: `${t.name} 선생님 권한`,
+        fields: [{ name: "name", label: "이름", required: true, maxlength: 30 },
+          ...T_PERMS.map(([k, l, h]) => ({ name: k, label: l + (h ? ` — ${h}` : ""), type: "checkbox" })),
+          { name: "_fixed", label: "항상 가능: 내 학생의 진도·수업 기록·시험·라이팅, 시간표 보기와 내 학생 넣고 빼기, 교재 추가·수정", type: "slot" }],
+        values: { name: t.name, ...Object.fromEntries(T_PERMS.map(([k]) => [k, !!(t.perms || {})[k]])) },
+        onSubmit: async (d) => {
+          const perms = Object.fromEntries(T_PERMS.map(([k]) => [k, !!d[k]]));
+          await run(db.from("teachers").update({ name: d.name, perms }).eq("id", t.id));
+          await loadTeachers(); renderTeachers(); toast("저장했습니다");
+        },
+      });
+      const fx = $("#_fixed"); if (fx) { fx.className = "muted"; fx.style.fontSize = ".85rem"; fx.textContent = "항상 가능: 내 학생의 진도·수업 기록·시험·라이팅, 시간표 보기와 내 학생 넣고 빼기, 교재 추가·수정"; }
+    };
+  });
+  main.querySelectorAll("[data-ttoggle]").forEach((b) => {
+    b.onclick = async () => {
+      const t = state.teachers.find((x) => x.id === b.dataset.ttoggle); if (!t) return;
+      const stop = t.status !== "중지";
+      if (stop && !confirm(`${t.name} 선생님의 이용을 중지할까요?\n로그인만 막히고 학생과 기록은 그대로 남아요.`)) return;
+      try {
+        await run(db.from("teachers").update({ status: stop ? "중지" : (t.user_id ? "사용 중" : "초대 대기") }).eq("id", t.id));
+        await loadTeachers(); renderTeachers(); toast(stop ? "이용을 중지했어요" : "다시 사용하도록 바꿨어요");
+      } catch (e) { fail(e, "바꾸지 못했어요"); }
+    };
+  });
+  main.querySelectorAll("[data-tresend]").forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try { await teacherApi("resend", { teacher_id: b.dataset.tresend }); toast("초대 메일을 다시 보냈어요"); } catch (e) { fail(e, "보내지 못했어요"); }
+      b.disabled = false;
+    };
+  });
+}
+
 function bindEvents() {
   const appEl = $("#app-view");
   const setMenu = (open) => {
@@ -5683,7 +5863,7 @@ function bindEvents() {
   };
   $("#btn-menu").onclick = () => setMenu(!appEl.classList.contains("menu-open"));
   $("#sidebar").addEventListener("click", (e) => {
-    if (e.target.closest(".nav-btn, button[data-id], #btn-textbooks, #btn-sched-edit, #btn-kinds, #btn-backup")) setMenu(false);
+    if (e.target.closest(".nav-btn, button[data-id], #btn-textbooks, #btn-sched-edit, #btn-kinds, #btn-backup, #btn-teachers")) setMenu(false);
   });
   document.addEventListener("click", (e) => {
     if (appEl.classList.contains("menu-open") && !e.target.closest("#sidebar, #btn-menu")) setMenu(false);
@@ -5726,6 +5906,11 @@ function bindEvents() {
     state.ld.extras = [];
     state.ld.filter = "all";
     try { await loadLdData(); } catch (e) { return fail(e); }
+    render();
+  };
+  $("#btn-teachers").onclick = () => {
+    state.view = "teachers";
+    state.studentId = null;
     render();
   };
   $("#nav-wa").onclick = async () => {
@@ -5941,6 +6126,11 @@ async function showApp() {
     $("#user-email").textContent = data?.user?.email || "";
   } catch {}
   try {
+    if (!(await loadMe())) {
+      alert("이용이 중지된 계정입니다. 원장님께 문의하세요.");
+      await db.auth.signOut();
+      return;
+    }
     await loadCore();
     render();
   } catch (e) {

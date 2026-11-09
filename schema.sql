@@ -1021,3 +1021,396 @@ drop policy if exists "owner_all" on public.lesson_drafts;
 create policy "owner_all" on public.lesson_drafts for all to authenticated
   using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
 revoke all on public.lesson_drafts from anon;
+
+-- ============================================================
+-- 9. 여러 선생님 (원장 1명 + 선생님 여러 명)
+--  - 모든 데이터의 owner 는 계속 '원장 계정'입니다. (기존 데이터 이전 없음)
+--  - 선생님 계정은 teachers 표에 등록되고, 자기 담당 학생(students.teacher_id)의 기록만 볼 수 있습니다.
+--  - 교재·시험 종류는 모든 선생님이 함께 쓰고, 시간표는 함수(schedule_list / schedule_save)로만 다룹니다.
+--  여러 번 실행해도 안전합니다. 선생님이 없는 지금 상태에서는 화면 동작이 달라지지 않습니다.
+-- ============================================================
+
+-- 9-1. 선생님 표 (계정 생성/초대는 Worker 가 service_role 로 하고, 권한·이름·중지는 원장이 앱에서 바꿉니다)
+create table if not exists public.teachers (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null default auth.uid() references auth.users(id) on delete cascade,   -- 원장 계정
+  user_id     uuid unique references auth.users(id) on delete cascade,                          -- 선생님 로그인 계정
+  name        text not null check (char_length(name) between 1 and 30),
+  email       text not null check (char_length(email) between 3 and 200),
+  status      text not null default '초대 대기' check (status in ('초대 대기','사용 중','중지')),
+  perms       jsonb not null default '{"slot_edit":true,"book_delete":false,"student_manage":true}'::jsonb
+              check (jsonb_typeof(perms) = 'object'),
+  created_at  timestamptz not null default now()
+);
+create unique index if not exists teachers_owner_email_uq on public.teachers (owner, lower(email));
+
+-- 9-2. 학생의 담당 선생님 (비어 있으면 원장 담당)
+alter table public.students add column if not exists teacher_id uuid references public.teachers(id) on delete set null;
+create index if not exists students_teacher_idx on public.students (teacher_id);
+
+-- 9-3. 현재 로그인한 사람이 누구인지 알려 주는 함수들 (RLS 가 사용)
+--  current_owner(): 원장은 자기 id, 선생님은 원장 id, 중지된 선생님은 아무 데이터도 못 보는 빈 id
+create or replace function public.current_owner()
+returns uuid language sql stable security definer set search_path = '' as $$
+  select case
+           when u.uid is null then null
+           when t.id is null then u.uid
+           when t.status = '중지' then '00000000-0000-0000-0000-000000000000'::uuid
+           else t.owner end
+    from (select auth.uid() as uid) u
+    left join public.teachers t on t.user_id = u.uid
+$$;
+
+create or replace function public.is_admin()
+returns boolean language sql stable security definer set search_path = '' as $$
+  select coalesce(public.current_owner() = auth.uid(), false)
+$$;
+
+create or replace function public.my_teacher_id()
+returns uuid language sql stable security definer set search_path = '' as $$
+  select t.id from public.teachers t where t.user_id = auth.uid() and t.status <> '중지'
+$$;
+
+create or replace function public.has_perm(p_key text)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select case
+           when public.is_admin() then true
+           else coalesce((select (t.perms ->> p_key)::boolean from public.teachers t
+                           where t.user_id = auth.uid() and t.status <> '중지'), false)
+         end
+$$;
+
+create or replace function public.can_see_student(p_sid uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.students s
+     where s.id = p_sid and s.owner = public.current_owner()
+       and (public.is_admin() or s.teacher_id = public.my_teacher_id()))
+$$;
+
+-- 앱이 시작할 때 부르는 함수: 역할/이름/권한을 돌려주고, 처음 로그인한 선생님은 '사용 중'으로 바꿉니다.
+create or replace function public.whoami()
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare t public.teachers;
+begin
+  if auth.uid() is null then return jsonb_build_object('role', 'none'); end if;
+  select * into t from public.teachers where user_id = auth.uid();
+  if not found then return jsonb_build_object('role', 'admin'); end if;
+  if t.status = '초대 대기' then
+    update public.teachers set status = '사용 중' where id = t.id;
+    t.status := '사용 중';
+  end if;
+  return jsonb_build_object('role', case when t.status = '중지' then 'suspended' else 'teacher' end,
+                            'teacher_id', t.id, 'name', t.name, 'perms', t.perms);
+end $$;
+
+revoke all on function public.current_owner(), public.is_admin(), public.my_teacher_id(),
+  public.has_perm(text), public.can_see_student(uuid), public.whoami() from public, anon;
+grant execute on function public.current_owner(), public.is_admin(), public.my_teacher_id(),
+  public.has_perm(text), public.can_see_student(uuid), public.whoami() to authenticated;
+
+-- 9-4. 새 행의 owner 기본값: 선생님이 만들어도 원장 id 가 들어가게
+do $$
+declare t text;
+begin
+  foreach t in array array['students','textbooks','progress','lessons','tests','test_kinds','recommendations','report_logs',
+                           'monthly_evaluations','schedule_slots','makeups','makeup_quota','writings'] loop
+    execute format('alter table public.%I alter column owner set default public.current_owner()', t);
+  end loop;
+end $$;
+
+-- 9-5. 보안 규칙(RLS) 교체
+alter table public.teachers enable row level security;
+drop policy if exists "teachers_select" on public.teachers;
+drop policy if exists "teachers_update" on public.teachers;
+create policy "teachers_select" on public.teachers for select to authenticated
+  using (owner = (select auth.uid()) or user_id = (select auth.uid()));
+create policy "teachers_update" on public.teachers for update to authenticated
+  using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
+revoke all on public.teachers from anon;
+revoke insert, delete on public.teachers from authenticated;
+
+-- (a) 학생
+drop policy if exists "owner_all" on public.students;
+drop policy if exists "students_select" on public.students;
+drop policy if exists "students_insert" on public.students;
+drop policy if exists "students_update" on public.students;
+drop policy if exists "students_delete" on public.students;
+create policy "students_select" on public.students for select to authenticated
+  using (owner = (select public.current_owner())
+         and ((select public.is_admin()) or teacher_id = (select public.my_teacher_id())));
+create policy "students_insert" on public.students for insert to authenticated
+  with check (owner = (select public.current_owner())
+              and ((select public.is_admin())
+                   or ((select public.has_perm('student_manage')) and teacher_id = (select public.my_teacher_id()))));
+create policy "students_update" on public.students for update to authenticated
+  using (owner = (select public.current_owner())
+         and ((select public.is_admin()) or teacher_id = (select public.my_teacher_id())))
+  with check (owner = (select public.current_owner())
+              and ((select public.is_admin()) or teacher_id = (select public.my_teacher_id())));
+create policy "students_delete" on public.students for delete to authenticated
+  using (owner = (select public.current_owner()) and (select public.is_admin()));
+
+-- 선생님이 학생을 만들면 담당이 자동으로 본인이 되고, 담당 변경·퇴원 처리는 권한이 있을 때만
+create or replace function public._students_guard()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if public.my_teacher_id() is null then return new; end if;   -- 원장·시스템은 제한 없음
+  if tg_op = 'INSERT' then
+    new.teacher_id := public.my_teacher_id();
+  else
+    new.teacher_id := old.teacher_id;
+    if new.active is distinct from old.active and not public.has_perm('student_manage') then
+      raise exception '퇴원·복귀 처리 권한이 없습니다' using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists students_guard on public.students;
+create trigger students_guard before insert or update on public.students
+  for each row execute function public._students_guard();
+
+-- (b) 학생에 딸린 기록: 내가 볼 수 있는 학생의 것만
+do $$
+declare t text;
+begin
+  foreach t in array array['progress','lessons','tests','recommendations','report_logs','monthly_evaluations','writings','makeups'] loop
+    execute format('drop policy if exists "owner_all" on public.%I', t);
+    execute format('drop policy if exists "scoped_all" on public.%I', t);
+    execute format(
+      'create policy "scoped_all" on public.%I for all to authenticated
+         using (owner = (select public.current_owner()) and ((select public.is_admin()) or public.can_see_student(student_id)))
+         with check (owner = (select public.current_owner()) and ((select public.is_admin()) or public.can_see_student(student_id)))', t);
+  end loop;
+end $$;
+
+-- 월 기본 보강 횟수: 전체 기본(학생 없음)은 모두 읽고 원장만 바꿈, 학생별 값은 담당 선생님도 가능
+drop policy if exists "owner_all" on public.makeup_quota;
+drop policy if exists "scoped_all" on public.makeup_quota;
+drop policy if exists "quota_select" on public.makeup_quota;
+drop policy if exists "quota_write" on public.makeup_quota;
+create policy "quota_select" on public.makeup_quota for select to authenticated
+  using (owner = (select public.current_owner())
+         and (student_id is null or (select public.is_admin()) or public.can_see_student(student_id)));
+create policy "quota_write" on public.makeup_quota for all to authenticated
+  using (owner = (select public.current_owner())
+         and ((select public.is_admin()) or (student_id is not null and public.can_see_student(student_id))))
+  with check (owner = (select public.current_owner())
+              and ((select public.is_admin()) or (student_id is not null and public.can_see_student(student_id))));
+
+-- (c) 시험 종류: 모든 선생님이 함께 사용
+drop policy if exists "owner_all" on public.test_kinds;
+drop policy if exists "shared_all" on public.test_kinds;
+create policy "shared_all" on public.test_kinds for all to authenticated
+  using (owner = (select public.current_owner())) with check (owner = (select public.current_owner()));
+
+-- (d) 시간표: 표를 직접 읽거나 쓰는 것은 원장만. 선생님은 아래 함수로만 접근합니다.
+drop policy if exists "owner_all" on public.schedule_slots;
+drop policy if exists "admin_all" on public.schedule_slots;
+create policy "admin_all" on public.schedule_slots for all to authenticated
+  using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
+
+-- (e) 교재: 모든 선생님이 추가·수정. 삭제는 원장, 삭제 권한이 있는 선생님, 또는 아무도 쓰지 않는 교재일 때
+alter table public.textbooks add column if not exists updated_at timestamptz;
+alter table public.textbooks add column if not exists updated_by uuid;
+alter table public.textbooks add column if not exists updated_by_name text;
+
+create or replace function public.textbook_in_use(p_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.progress p where p.owner = public.current_owner() and (p.textbook_id = p_id or p.next_textbook_id = p_id))
+      or exists (select 1 from public.lessons l where l.owner = public.current_owner() and l.textbook_id = p_id)
+      or exists (select 1 from public.lessons l, jsonb_array_elements(l.extra_books) e
+                  where l.owner = public.current_owner() and e ->> 'textbook_id' = p_id::text)
+$$;
+-- 이 교재를 쓰는 학생 수(전체 합계만. 누구인지는 알려주지 않음)
+create or replace function public.textbook_student_count(p_id uuid)
+returns integer language sql stable security definer set search_path = '' as $$
+  select count(distinct p.student_id)::integer from public.progress p
+   where p.owner = public.current_owner() and p.textbook_id = p_id
+$$;
+revoke all on function public.textbook_in_use(uuid), public.textbook_student_count(uuid) from public, anon;
+grant execute on function public.textbook_in_use(uuid), public.textbook_student_count(uuid) to authenticated;
+
+drop policy if exists "owner_all" on public.textbooks;
+drop policy if exists "textbooks_select" on public.textbooks;
+drop policy if exists "textbooks_insert" on public.textbooks;
+drop policy if exists "textbooks_update" on public.textbooks;
+drop policy if exists "textbooks_delete" on public.textbooks;
+create policy "textbooks_select" on public.textbooks for select to authenticated
+  using (owner = (select public.current_owner()));
+create policy "textbooks_insert" on public.textbooks for insert to authenticated
+  with check (owner = (select public.current_owner()));
+create policy "textbooks_update" on public.textbooks for update to authenticated
+  using (owner = (select public.current_owner())) with check (owner = (select public.current_owner()));
+create policy "textbooks_delete" on public.textbooks for delete to authenticated
+  using (owner = (select public.current_owner())
+         and ((select public.has_perm('book_delete')) or not public.textbook_in_use(id)));
+
+-- 교재 수정 이력 (누가 언제 무엇을 바꿨는지). 기록은 아래 트리거만 남깁니다.
+create table if not exists public.textbook_edits (
+  id             uuid primary key default gen_random_uuid(),
+  owner          uuid not null,
+  textbook_id    uuid not null,
+  textbook_title text not null,
+  editor_id      uuid,
+  editor_name    text not null,
+  summary        text not null,
+  created_at     timestamptz not null default now()
+);
+create index if not exists textbook_edits_book_idx on public.textbook_edits (textbook_id, created_at desc);
+alter table public.textbook_edits enable row level security;
+drop policy if exists "edits_select" on public.textbook_edits;
+create policy "edits_select" on public.textbook_edits for select to authenticated
+  using (owner = (select public.current_owner()));
+revoke all on public.textbook_edits from anon;
+revoke insert, update, delete on public.textbook_edits from authenticated;
+
+create or replace function public._editor_name()
+returns text language sql stable security definer set search_path = '' as $$
+  select case
+           when auth.uid() is null then '시스템'
+           else coalesce((select t.name from public.teachers t where t.user_id = auth.uid()), '원장')
+         end
+$$;
+
+create or replace function public._textbooks_stamp()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare v_name text := public._editor_name(); v_sum text[] := '{}';
+begin
+  if tg_op = 'DELETE' then
+    insert into public.textbook_edits (owner, textbook_id, textbook_title, editor_id, editor_name, summary)
+    values (old.owner, old.id, old.title, auth.uid(), v_name, '교재 삭제');
+    return old;
+  end if;
+  new.updated_at := now();
+  new.updated_by := auth.uid();
+  new.updated_by_name := v_name;
+  if tg_op = 'INSERT' then
+    insert into public.textbook_edits (owner, textbook_id, textbook_title, editor_id, editor_name, summary)
+    values (new.owner, new.id, new.title, auth.uid(), v_name, '교재 등록');
+  else
+    if new.title is distinct from old.title then v_sum := v_sum || format('이름 "%s" → "%s"', old.title, new.title); end if;
+    if new.total_units is distinct from old.total_units then v_sum := v_sum || format('총 단원 수 %s → %s', old.total_units, new.total_units); end if;
+    if new.unit_label is distinct from old.unit_label then v_sum := v_sum || format('단위 이름 "%s" → "%s"', old.unit_label, new.unit_label); end if;
+    if new.structure is distinct from old.structure then v_sum := v_sum || '단원 구조 변경'::text; end if;
+    if array_length(v_sum, 1) > 0 then
+      insert into public.textbook_edits (owner, textbook_id, textbook_title, editor_id, editor_name, summary)
+      values (new.owner, new.id, new.title, auth.uid(), v_name, array_to_string(v_sum, ', '));
+    end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists textbooks_stamp on public.textbooks;
+create trigger textbooks_stamp before insert or update or delete on public.textbooks
+  for each row execute function public._textbooks_stamp();
+
+-- 9-6. 시간표 함수 (선생님은 내 학생만 보이고, 내 학생만 넣고 뺄 수 있음)
+create or replace function public.schedule_list()
+returns table (id uuid, weekday smallint, slot_order smallint, label text, start_time time, end_time time, student_ids uuid[])
+language plpgsql stable security definer set search_path = '' as $$
+declare v_co uuid := public.current_owner(); v_admin boolean := public.is_admin(); v_tid uuid := public.my_teacher_id();
+begin
+  if v_co is null then return; end if;
+  return query
+    select s.id, s.weekday, s.slot_order, s.label, s.start_time, s.end_time,
+           case when v_admin then s.student_ids
+                else coalesce((select array_agg(x) from unnest(s.student_ids) x
+                                where x in (select st.id from public.students st where st.owner = v_co and st.teacher_id = v_tid)), '{}'::uuid[])
+           end
+      from public.schedule_slots s
+     where s.owner = v_co
+     order by s.weekday, s.slot_order;
+end $$;
+
+-- p_slots: [{id, weekday, slot_order, label, start_time, end_time, student_ids}] (화면에 보이는 전체 타임)
+create or replace function public.schedule_save(p_slots jsonb)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_co     uuid := public.current_owner();
+  v_admin  boolean := public.is_admin();
+  v_tid    uuid := public.my_teacher_id();
+  v_struct boolean := public.has_perm('slot_edit');
+  v_mine   uuid[];
+  e        jsonb;
+  v_id     uuid;
+  v_ids    uuid[];
+  cur      public.schedule_slots;
+  v_keep   uuid[] := '{}';
+  r        record;
+begin
+  if v_co is null or v_co = '00000000-0000-0000-0000-000000000000'::uuid then
+    raise exception 'unauthorized' using errcode = '42501';
+  end if;
+  if jsonb_typeof(p_slots) is distinct from 'array' then raise exception 'invalid input'; end if;
+  v_mine := coalesce((select array_agg(st.id) from public.students st where st.owner = v_co and st.teacher_id = v_tid), '{}');
+
+  for e in select * from jsonb_array_elements(p_slots) loop
+    v_id := nullif(e ->> 'id', '')::uuid;
+    v_ids := coalesce((select array_agg(x::uuid) from jsonb_array_elements_text(coalesce(e -> 'student_ids', '[]'::jsonb)) x), '{}');
+    cur := null;
+    if v_id is not null then select * into cur from public.schedule_slots where id = v_id and owner = v_co; end if;
+
+    if cur.id is not null then
+      if v_admin then
+        update public.schedule_slots set weekday = (e ->> 'weekday')::smallint, slot_order = coalesce((e ->> 'slot_order')::smallint, 0),
+               label = coalesce(e ->> 'label', ''), start_time = nullif(e ->> 'start_time', '')::time,
+               end_time = nullif(e ->> 'end_time', '')::time, student_ids = v_ids
+         where id = cur.id;
+      else
+        update public.schedule_slots set
+               student_ids = coalesce((select array_agg(x) from unnest(cur.student_ids) x where not x = any(v_mine)), '{}')
+                          || coalesce((select array_agg(x) from unnest(v_ids) x where x = any(v_mine)), '{}')
+         where id = cur.id;
+        if v_struct then
+          update public.schedule_slots set weekday = (e ->> 'weekday')::smallint, slot_order = coalesce((e ->> 'slot_order')::smallint, 0),
+                 label = coalesce(e ->> 'label', ''), start_time = nullif(e ->> 'start_time', '')::time,
+                 end_time = nullif(e ->> 'end_time', '')::time
+           where id = cur.id;
+        end if;
+      end if;
+      v_keep := v_keep || cur.id;
+    else
+      if not v_struct then raise exception '타임을 추가할 권한이 없습니다' using errcode = '42501'; end if;
+      insert into public.schedule_slots (id, owner, weekday, slot_order, label, start_time, end_time, student_ids)
+      values (coalesce(v_id, gen_random_uuid()), v_co, (e ->> 'weekday')::smallint, coalesce((e ->> 'slot_order')::smallint, 0),
+              coalesce(e ->> 'label', ''), nullif(e ->> 'start_time', '')::time, nullif(e ->> 'end_time', '')::time,
+              case when v_admin then v_ids else coalesce((select array_agg(x) from unnest(v_ids) x where x = any(v_mine)), '{}') end)
+      returning id into v_id;
+      v_keep := v_keep || v_id;
+    end if;
+  end loop;
+
+  -- 화면에서 빠진 타임 삭제
+  for r in select * from public.schedule_slots where owner = v_co and not id = any(v_keep) loop
+    if not v_admin then
+      if not v_struct then raise exception '타임을 삭제할 권한이 없습니다' using errcode = '42501'; end if;
+      if exists (select 1 from unnest(r.student_ids) x where not x = any(v_mine)) then
+        raise exception '다른 선생님 학생이 있는 타임은 삭제할 수 없습니다' using errcode = '42501';
+      end if;
+    end if;
+    delete from public.schedule_slots where id = r.id;
+  end loop;
+end $$;
+
+revoke all on function public.schedule_list(), public.schedule_save(jsonb) from public, anon;
+grant execute on function public.schedule_list(), public.schedule_save(jsonb) to authenticated;
+
+-- 9-7. 수업기록 임시저장: 작성자별로 따로 (원장·선생님이 같은 날짜에 각자 임시저장 가능)
+alter table public.lesson_drafts add column if not exists author uuid not null default auth.uid() references auth.users(id) on delete cascade;
+alter table public.lesson_drafts alter column owner set default public.current_owner();
+alter table public.lesson_drafts drop constraint if exists lesson_drafts_owner_lesson_date_key;
+create unique index if not exists lesson_drafts_author_date_uq on public.lesson_drafts (author, lesson_date);
+drop policy if exists "owner_all" on public.lesson_drafts;
+drop policy if exists "author_all" on public.lesson_drafts;
+create policy "author_all" on public.lesson_drafts for all to authenticated
+  using (author = (select auth.uid()) and owner = (select public.current_owner()))
+  with check (author = (select auth.uid()) and owner = (select public.current_owner()));
+
+-- 9-8. 라이팅 사진 보관함: 본인 폴더 + (원장은) 자기 선생님들의 폴더
+drop policy if exists "writings_owner_all" on storage.objects;
+create policy "writings_owner_all" on storage.objects for all to authenticated
+  using (bucket_id = 'writings' and (
+           (storage.foldername(name))[1] = (select auth.uid())::text
+           or ((select public.is_admin()) and (storage.foldername(name))[1] in
+                 (select t.user_id::text from public.teachers t where t.owner = (select auth.uid()) and t.user_id is not null))))
+  with check (bucket_id = 'writings' and (storage.foldername(name))[1] = (select auth.uid())::text);

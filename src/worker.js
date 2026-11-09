@@ -190,6 +190,84 @@ async function handleCorrect(request, env) {
   return json({ ok: true, data: { model, result: tool.input } });
 }
 
+// ---- 선생님 계정 초대 (원장 전용) ----------------------------------------------
+// 계정 생성에는 Supabase service_role 키가 필요합니다. 이 키는 Worker 비밀값(SUPABASE_SERVICE_KEY)으로만 두고
+// 브라우저에는 절대 내려가지 않습니다. 호출한 사람이 '원장'인지(선생님 표에 없는 계정인지) 먼저 확인합니다.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+async function sbAdmin(env, path, init = {}) {
+  return fetch(`${SUPABASE_URL}${path}`, {
+    ...init,
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "content-type": "application/json", ...(init.headers || {}) },
+  });
+}
+async function handleTeachers(request, env) {
+  if (request.method !== "POST") return json({ ok: false, error: "method not allowed" }, 405);
+  if (!env.SUPABASE_SERVICE_KEY) return json({ ok: false, error: "서버에 SUPABASE_SERVICE_KEY 설정이 필요해요 (Cloudflare 설정 > 변수 및 비밀)" }, 503);
+  const m = (request.headers.get("authorization") || "").match(/^Bearer\s+([\w-]+\.[\w-]+\.[\w-]+)$/);
+  if (!m) return json({ ok: false, error: "unauthorized" }, 401);
+  let me;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: SUPABASE_KEY, authorization: `Bearer ${m[1]}` } });
+    if (!r.ok) return json({ ok: false, error: "unauthorized" }, 401);
+    me = await r.json();
+  } catch { return json({ ok: false, error: "auth unreachable" }, 502); }
+  if (!me || !me.id) return json({ ok: false, error: "unauthorized" }, 401);
+  const raw = await request.text();
+  if (raw.length > 4096) return json({ ok: false, error: "body too large" }, 413);
+  let b; try { b = JSON.parse(raw); } catch { return json({ ok: false, error: "bad json" }, 400); }
+  // 선생님 계정이면 거절 (원장만 가능)
+  const own = await sbAdmin(env, `/rest/v1/teachers?user_id=eq.${encodeURIComponent(me.id)}&select=id`);
+  if (!own.ok) return json({ ok: false, error: "database error" }, 502);
+  if ((await own.json()).length) return json({ ok: false, error: "원장만 할 수 있어요" }, 403);
+
+  const origin = typeof b.origin === "string" && /^https?:\/\/[^\s]+$/.test(b.origin) ? b.origin : null;
+  const sendReset = async (email) => {
+    const q = origin ? `?redirect_to=${encodeURIComponent(origin)}` : "";
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/recover${q}`, { method: "POST", headers: { apikey: SUPABASE_KEY, "content-type": "application/json" }, body: JSON.stringify({ email }) });
+    return r.ok;
+  };
+
+  if (b.action === "resend") {
+    const id = String(b.teacher_id || "");
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return json({ ok: false, error: "bad request" }, 400);
+    const r = await sbAdmin(env, `/rest/v1/teachers?id=eq.${id}&owner=eq.${encodeURIComponent(me.id)}&select=email,status`);
+    const rows = r.ok ? await r.json() : [];
+    if (!rows.length) return json({ ok: false, error: "선생님을 찾지 못했어요" }, 404);
+    if (rows[0].status === "중지") return json({ ok: false, error: "이용이 중지된 계정이에요" }, 400);
+    return (await sendReset(rows[0].email)) ? json({ ok: true }) : json({ ok: false, error: "메일을 보내지 못했어요. 잠시 뒤 다시 해 주세요" }, 502);
+  }
+
+  if (b.action !== "invite") return json({ ok: false, error: "bad request" }, 400);
+  const name = String(b.name || "").trim().slice(0, 30);
+  const email = String(b.email || "").trim().toLowerCase().slice(0, 200);
+  if (!name || !EMAIL_RE.test(email)) return json({ ok: false, error: "이름과 이메일을 확인해 주세요" }, 400);
+
+  const dup = await sbAdmin(env, `/rest/v1/teachers?owner=eq.${encodeURIComponent(me.id)}&email=ilike.${encodeURIComponent(email)}&select=id`);
+  if (dup.ok && (await dup.json()).length) return json({ ok: false, error: "이미 추가한 선생님이에요" }, 409);
+
+  // 로그인 계정 만들기 (비밀번호는 임의 값. 선생님이 메일 링크에서 직접 정합니다)
+  const pw = Array.from(crypto.getRandomValues(new Uint8Array(24)), (x) => x.toString(16).padStart(2, "0")).join("");
+  const cu = await sbAdmin(env, "/auth/v1/admin/users", { method: "POST", body: JSON.stringify({ email, password: pw, email_confirm: true }) });
+  if (!cu.ok) {
+    const j = await cu.json().catch(() => ({}));
+    const msg = String(j.msg || j.message || j.error_description || "");
+    if (/already|registered|exists/i.test(msg)) return json({ ok: false, error: "이미 다른 용도로 가입된 이메일이에요. 다른 이메일을 써 주세요" }, 409);
+    return json({ ok: false, error: "계정을 만들지 못했어요" }, 502);
+  }
+  const user = await cu.json();
+  const ins = await sbAdmin(env, "/rest/v1/teachers", {
+    method: "POST",
+    headers: { prefer: "return=minimal" },
+    body: JSON.stringify({ owner: me.id, user_id: user.id, name, email, status: "초대 대기" }),
+  });
+  if (!ins.ok) {
+    await sbAdmin(env, `/auth/v1/admin/users/${user.id}`, { method: "DELETE" });   // 반쪽 상태로 남지 않게 되돌림
+    return json({ ok: false, error: "선생님을 등록하지 못했어요" }, 502);
+  }
+  if (!(await sendReset(email))) return json({ ok: true, warn: "계정은 만들었지만 메일 발송에 실패했어요. '초대 다시 보내기'를 눌러 주세요" });
+  return json({ ok: true });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -198,6 +276,8 @@ export default {
     if (!path.startsWith("/api/")) {
       return env.ASSETS.fetch(request);
     }
+
+    if (path === "/api/teachers") return handleTeachers(request, env);
 
     // 라이팅 첨삭 (Claude 세션용, 토큰): 학생 찾기 → 원문 저장 → 첨삭 결과 저장
     if (path === "/api/writing/student") {
