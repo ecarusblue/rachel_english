@@ -1010,7 +1010,7 @@ function scheduleHtml() {
   if (sc.fsel && !pool.some((x) => x.id === sc.fsel)) sc.fsel = pool.length ? pool[0].id : null;
   const sel = sc.fsel && pool.some((x) => x.id === sc.fsel) ? sc.fsel : null;
   const selSt = sel ? pool.find((x) => x.id === sel) : null;
-  const head = `<div class="sch-head"><h3>수업 시간표</h3><span class="muted">매주 반복 · 이름을 누르면 학생 화면으로 이동</span><span class="spacer"></span>${sc.missing || !sc.slots.length ? "" : `<div class="rc-seg" role="group" aria-label="시간표 보기 방식"><button type="button" data-schmode="all" class="${sel ? "" : "on"}" aria-pressed="${!sel}">전체 보기</button><button type="button" data-schmode="student" class="${sel ? "on" : ""}" aria-pressed="${!!sel}">학생별 보기</button></div><button class="btn small" id="sch-print" type="button">${selSt ? esc(selSt.name) + " 시간표 미리보기" : "시간표 미리보기"}</button>`}</div>`;
+  const head = `<div class="sch-head"><h3>수업 시간표</h3><span class="muted">매주 반복 · 이름을 누르면 학생 화면으로 이동</span><span class="spacer"></span>${sc.missing || !sc.slots.length ? "" : `<div class="rc-seg" role="group" aria-label="시간표 보기 방식"><button type="button" data-schmode="all" class="${sel ? "" : "on"}" aria-pressed="${!sel}">전체 보기</button><button type="button" data-schmode="student" class="${sel ? "on" : ""}" aria-pressed="${!!sel}">학생별 보기</button></div><button class="btn small" id="sch-print" type="button">${selSt ? esc(selSt.name) + " 시간표 미리보기" : sc.tf !== "all" && state.teachers.length && isAdmin() ? esc(sc.tf === "admin" ? "원장" : teacherName(sc.tf) + " 선생님") + " 시간표 미리보기" : "시간표 미리보기"}</button>`}</div>`;
   if (sc.missing) return `<section class="sch">${head}<div class="card empty">시간표를 쓰려면 최신 <code>schema.sql</code> 을 Supabase SQL Editor에서 한 번 실행하세요.</div></section>`;
   const days = groupDays(sc.slots);
   if (!days.length) return `<section class="sch">${head}<div class="sch-empty"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><div><strong>아직 시간표가 없어요</strong><div class="muted">요일과 시간을 만들면 학생 이름이 여기에 시간순으로 나와요.</div></div><button class="btn primary" id="sch-new" type="button">시간표 만들기</button></div></section>`;
@@ -1072,11 +1072,13 @@ function scheduleHtml() {
 function schedulePrintHtml(orient = "p", zoom = 1, sid = null) {
   const zs = zoom < 1 ? ` style="zoom:${zoom}"` : "";
   let days = groupDays(state.schedule.slots);
-  const active = state.students.filter((s) => s.active && (!sid || s.id === sid));
-  const who = sid ? (state.students.find((s) => s.id === sid) || {}).name || "" : "";
-  const title = who ? `${esc(who)} 수업 시간표` : "수업 시간표";
+  const tfOn = !sid && state.schedule.tf !== "all" && state.teachers.length > 0 && isAdmin();   // 담당 선생님 필터가 켜져 있으면 그 선생님 학생만 출력
+  const active = state.students.filter((s) => s.active && (sid ? s.id === sid : !tfOn || tfMatch(s)));
+  const who = sid ? (state.students.find((s) => s.id === sid) || {}).name || "" : tfOn ? (state.schedule.tf === "admin" ? "원장" : `${teacherName(state.schedule.tf)} 선생님`) : "";
+  const title = who ? `${esc(who)}${tfOn ? " 담당 " : " "}수업 시간표` : "수업 시간표";
   // 학생 한 명만 출력할 때: 가로는 격자를 유지하고 이름만 걸러 내고, 세로는 그 학생의 수업이 있는 칸만 남깁니다.
   if (sid && orient !== "l") days = days.map((d) => ({ wd: d.wd, slots: d.slots.filter((sl) => (sl.student_ids || []).includes(sid)) })).filter((d) => d.slots.length);
+  else if (tfOn && orient !== "l") { const ids = new Set(active.map((s) => s.id)); days = days.map((d) => ({ wd: d.wd, slots: d.slots.filter((sl) => (sl.student_ids || []).some((x) => ids.has(x))) })).filter((d) => d.slots.length); }
   const namesOf = (sl) => active.filter((s) => (sl.student_ids || []).includes(s.id));
   const chips = (names) => names.length ? names.map((s) => `<span class="tp-name">${esc(s.name)}</span>`).join("") : `<span class="tp-empty">-</span>`;
   const foot = `<div class="rp-foot"><span>${esc(ACADEMY_NAME)}</span><span>${shortDate(todayStr())} 출력</span></div>`;
