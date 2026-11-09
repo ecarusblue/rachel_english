@@ -1005,8 +1005,11 @@ function groupDays(slots) {
 function scheduleHtml() {
   const sc = state.schedule;
   const activeAll = state.students.filter((x) => x.active);
-  const sel = sc.fsel && activeAll.some((x) => x.id === sc.fsel) ? sc.fsel : null;
-  const selSt = sel ? activeAll.find((x) => x.id === sel) : null;
+  // 학생별 보기의 학생 선택은 선택한 담당 선생님 학생만. 지금 고른 학생이 그 밖이면 목록의 첫 학생으로 옮김
+  const pool = activeAll.filter(tfMatch);
+  if (sc.fsel && !pool.some((x) => x.id === sc.fsel)) sc.fsel = pool.length ? pool[0].id : null;
+  const sel = sc.fsel && pool.some((x) => x.id === sc.fsel) ? sc.fsel : null;
+  const selSt = sel ? pool.find((x) => x.id === sel) : null;
   const head = `<div class="sch-head"><h3>수업 시간표</h3><span class="muted">매주 반복 · 이름을 누르면 학생 화면으로 이동</span><span class="spacer"></span>${sc.missing || !sc.slots.length ? "" : `<div class="rc-seg" role="group" aria-label="시간표 보기 방식"><button type="button" data-schmode="all" class="${sel ? "" : "on"}" aria-pressed="${!sel}">전체 보기</button><button type="button" data-schmode="student" class="${sel ? "on" : ""}" aria-pressed="${!!sel}">학생별 보기</button></div><button class="btn small" id="sch-print" type="button">${selSt ? esc(selSt.name) + " 시간표 미리보기" : "시간표 미리보기"}</button>`}</div>`;
   if (sc.missing) return `<section class="sch">${head}<div class="card empty">시간표를 쓰려면 최신 <code>schema.sql</code> 을 Supabase SQL Editor에서 한 번 실행하세요.</div></section>`;
   const days = groupDays(sc.slots);
@@ -1056,8 +1059,8 @@ function scheduleHtml() {
   if (sel) {
     const mySlots = days.flatMap((d) => d.slots.filter((sl) => (sl.student_ids || []).includes(sel)).map((sl) => ({ d, sl })));
     const lbl = mySlots.map(({ d, sl }) => `${DAY_NAME[d.wd]} ${timeText(sl.start_time, sl.end_time) || ""}`.trim()).join(" · ");
-    const opts = activeAll.slice().sort((a, b) => a.name.localeCompare(b.name, "ko")).map((x) => `<option value="${esc(x.id)}" ${x.id === sel ? "selected" : ""}>${esc(x.name)}${x.grade ? " (" + esc(x.grade) + ")" : ""}</option>`).join("");
-    const chips = activeAll.slice().sort((a, b) => a.name.localeCompare(b.name, "ko")).map((x) => `<button type="button" class="sch-fc ${x.id === sel ? "on" : ""}" data-sch-pick="${esc(x.id)}" aria-pressed="${x.id === sel}">${esc(x.name)}</button>`).join("");
+    const opts = pool.slice().sort((a, b) => a.name.localeCompare(b.name, "ko")).map((x) => `<option value="${esc(x.id)}" ${x.id === sel ? "selected" : ""}>${esc(x.name)}${x.grade ? " (" + esc(x.grade) + ")" : ""}</option>`).join("");
+    const chips = pool.slice().sort((a, b) => a.name.localeCompare(b.name, "ko")).map((x) => `<button type="button" class="sch-fc ${x.id === sel ? "on" : ""}" data-sch-pick="${esc(x.id)}" aria-pressed="${x.id === sel}">${esc(x.name)}</button>`).join("");
     fbar = `<div class="sch-fchips">${chips}</div><select class="sch-fsel" id="sch-fsel" aria-label="학생 선택">${opts}</select>
       <div class="sch-sum"><span class="rc-av" aria-hidden="true">${esc(selSt.name.trim().slice(0, 1))}</span><div class="sch-sum-t"><b>${esc(selSt.name)}</b> <span class="muted">${esc(selSt.grade || "")}${mySlots.length ? ` · 매주 ${mySlots.length}회` : ""}</span><div class="sch-sum-s">${mySlots.length ? esc(lbl) : '<span class="muted">배정된 정규 수업이 없어요</span>'}</div></div>
       ${mkWeek.length ? `<span class="sch-sum-mk">이번 주 보강 ${mkWeek.length}건 · ${mkWeek.map((r) => `${shortDate(r.planned_date)}${r.planned_start ? " " + hhmm(r.planned_start) : ""}`).join(", ")}</span>` : ""}</div>`;
@@ -1131,7 +1134,7 @@ function bindSchedule() {
   if (pb) {
     pb.onclick = () => openSchedPreview(pb, schedOrient(), state.schedule.fsel);
   }
-  const first = () => state.students.filter((x) => x.active).slice().sort((a, b) => a.name.localeCompare(b.name, "ko"))[0];
+  const first = () => state.students.filter((x) => x.active && tfMatch(x)).slice().sort((a, b) => a.name.localeCompare(b.name, "ko"))[0];
   $("#main").querySelectorAll("[data-schmode]").forEach((b) => {
     b.onclick = () => {
       const sc = state.schedule;
