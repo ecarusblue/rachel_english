@@ -536,7 +536,7 @@ async function completeMakeupFor(studentId, lessonId, date, makeupId) {
 
 function makeupForm({ student, absence, row, date = null }) {
   const mk = state.makeup;
-  const active = state.students.filter((s) => s.active);
+  const active = state.students.filter((s) => s.active && tfMatch(s));
   const tomorrow = addDays(todayStr(), 1);
   const fields = [];
   if (!student) fields.push({ name: "student_id", label: "학생", type: "select", required: true, options: active.map((s) => [s.id, `${s.name}${s.grade ? " (" + s.grade + ")" : ""}`]) });
@@ -638,7 +638,7 @@ function makeupForm({ student, absence, row, date = null }) {
 function makeupSettings() {
   const mk = state.makeup;
   const month = todayStr().slice(0, 7);
-  const active = state.students.filter((s) => s.active);
+  const active = state.students.filter((s) => s.active && tfMatch(s));
   const stuRow = (sid, mo) => mk.quotas.find((x) => x.student_id === sid && (x.month || null) === mo);
   const gRow = mk.quotas.find((x) => !x.student_id && !x.month);
   openForm({
@@ -5687,10 +5687,10 @@ function ldBind() {
     if (act === "draftsave") return ldSaveDraft(true);
     if (act === "draftapply") { ldApplyDraft(); renderLessonDay(); return ldSchedule(); }
     if (act === "draftdrop") { try { await run(db.from("lesson_drafts").delete().eq("lesson_date", ld.date)); } catch { /* 무시 */ } ld.draft = null; ld.draftPending = false; ld.draftAt = null; return ldChrome(); }
-    if (act === "allpresent") { ld.order.forEach((id) => { const x = ld.cards[id]; if (x && !x.lessonId && !x.att) { x.att = "출석"; x.dirty = true; } }); renderLessonDay(); return ldSchedule(); }
+    if (act === "allpresent") { ld.order.forEach((id) => { const x = ld.cards[id]; if (x && tfOk(id) && !x.lessonId && !x.att) { x.att = "출석"; x.dirty = true; } }); renderLessonDay(); return ldSchedule(); }
     if (act === "fillrec") {
       let n = 0;
-      ld.order.forEach((id) => { const x = ld.cards[id]; if (!x || x.lessonId || x.att === "결석") return; x.blocks.forEach((bl) => { const r = x.recMap[bl.textbook_id]; if (r && (bl.from_unit !== r.from_unit || bl.to_unit !== r.to_unit)) { bl.from_unit = r.from_unit; bl.to_unit = r.to_unit; x.dirty = true; if (!x.att) x.att = "출석"; n++; } else if (r && bl.to_unit == null) { bl.to_unit = r.to_unit; x.dirty = true; n++; } }); });
+      ld.order.forEach((id) => { const x = ld.cards[id]; if (!x || !tfOk(id) || x.lessonId || x.att === "결석") return; x.blocks.forEach((bl) => { const r = x.recMap[bl.textbook_id]; if (r && (bl.from_unit !== r.from_unit || bl.to_unit !== r.to_unit)) { bl.from_unit = r.from_unit; bl.to_unit = r.to_unit; x.dirty = true; if (!x.att) x.att = "출석"; n++; } else if (r && bl.to_unit == null) { bl.to_unit = r.to_unit; x.dirty = true; n++; } }); });
       renderLessonDay(); if (n) ldSchedule(); else toast("채울 추천 단원이 없어요"); return;
     }
     if (!c) return;
