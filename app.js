@@ -1312,7 +1312,9 @@ function renderOverview() {
     return;
   }
 
-  const rows = students.map((s) => {
+  // 담당 선생님 필터: 시간표와 아래 학생 표에 같이 적용
+  const shown = students.filter(tfMatch);
+  const rows = shown.map((s) => {
     const lessons = state.recentLessons.filter((l) => l.student_id === s.id);
     const last = lessons.reduce((m, l) => (l.lesson_date > m ? l.lesson_date : m), "");
     const sortedL = [...lessons].sort((a, b) => b.lesson_date.localeCompare(a.lesson_date));
@@ -1347,7 +1349,7 @@ function renderOverview() {
         : `<span class="muted">배정된 교재 없음</span>`;
       const dl = r.delta == null || r.delta === 0 ? "" : `<div class="delta ${r.delta > 0 ? "up" : "down"}"><span aria-hidden="true">${r.delta > 0 ? "▲" : "▼"}</span> ${Math.abs(r.delta)}<span class="sr-only">${r.delta > 0 ? " 올랐어요" : " 내렸어요"}</span></div>`;
       return `<tr class="clickable" data-id="${esc(r.s.id)}">
-        <td class="c-name"><strong>${esc(r.s.name)}</strong><div class="muted">${esc(r.s.grade || "")}</div></td>
+        <td class="c-name"><strong>${esc(r.s.name)}</strong><div class="muted">${esc(r.s.grade || "")}</div>${state.teachers.length && isAdmin() ? `<div class="ov-tch"><i class="tdot tcol-${teacherCol(r.s.teacher_id)}"></i>${esc(teacherName(r.s.teacher_id) || "원장")}</div>` : ""}</td>
         <td class="c-books">${books}</td>
         <td class="c-last" data-l="최근 수업">${lastCell}</td>
         <td class="c-next" data-l="다음 수업">${r.lastCovered && coverText(r.lastCovered) ? esc(coverText(r.lastCovered)) + `<div class="muted">${fmtDate(r.lastCovered.lesson_date)}</div>` : '<span class="muted">-</span>'}${r.nextPlan ? `<div class="next-plan">다음: ${esc(r.nextPlan)}</div>` : ""}</td>
@@ -1360,13 +1362,13 @@ function renderOverview() {
 
   if (state.schedule.draft) return renderScheduleEdit();
   main.innerHTML = `
-    <div class="page-head"><h2>전체 현황</h2><span class="muted">재원생 ${students.length}명</span>
+    <div class="page-head"><h2>전체 현황</h2><span class="muted">재원생 ${shown.length}${shown.length !== students.length ? ` / ${students.length}` : ""}명</span>
       ${stale ? `<span class="badge warn">30일간 수업 기록이 없는 학생 ${stale}명</span>` : ""}</div>
     ${scheduleHtml()}
     <div class="card table-wrap">
       <table class="ov-table">
         <thead><tr><th>학생</th><th>교재 진도</th><th>최근 수업</th><th>수업 진도 · 다음 예정</th><th class="num">30일 출석</th><th class="num">90일 시험 평균</th><th class="go"></th></tr></thead>
-        <tbody>${body}</tbody>
+        <tbody>${body || `<tr><td colspan="7" class="muted" style="text-align:center;padding:1.6rem">이 선생님에게 배정된 재원생이 없어요.</td></tr>`}</tbody>
       </table>
     </div>
     <p class="muted" style="margin-top:.8rem;font-size:.85rem">행을 누르면 학생 상세로 이동합니다. 시험 평균은 점수를 100점 만점으로 환산한 값이고, ▲▼는 최근 30일 평균이 그 이전(31~90일)보다 얼마나 올랐는지 내렸는지입니다.</p>
