@@ -3219,7 +3219,7 @@ function dateRecsPrintHtml(date, recs) {
   };
   return `<div class="rp-page pl-page dp-page">
     <div class="pl-hd"><div class="pl-br pv-row">${LOGO_SVG}<span>${esc(ACADEMY_NAME).toUpperCase()}</span></div><h1>${d.getMonth() + 1}월 ${d.getDate()}일 (${DAY_NAME[d.getDay()]}) 수업 추천</h1>
-      <div class="pl-who"><span><b>${rows.length}명 · 교재 ${nBooks}개</b></span><span>출력일 ${shortDate(todayStr())}</span></div></div>
+      <div class="pl-who">${tfLabel() ? `<span><b>${esc(tfLabel())}</b></span>` : ""}<span><b>${rows.length}명 · 교재 ${nBooks}개</b></span><span>출력일 ${shortDate(todayStr())}</span></div></div>
     <div class="pl-bd">
       ${rows.length ? `<div class="dp-cols"><span>학생</span><span>교재</span><span>추천 범위</span><span>현재 진도</span><span>수업 후 기록</span></div>` : `<p class="pl-empty">이 날 인쇄할 추천이 없습니다.</p>`}
       ${rows.map((x) => `<div class="dp-st"><div class="dp-nm"><b>${esc(x.st.name)}</b><small>${esc(x.st.grade || "")}</small></div><div class="dp-bks">${x.items.map(bk(x.st)).join("")}</div></div>`).join("")}
@@ -5784,6 +5784,8 @@ function tfBarHtml() {
   return `<div class="sch-tf" role="group" aria-label="담당 선생님으로 걸러 보기"><span class="muted">담당 선생님</span>${items
     .map(([k, l, c]) => `<button type="button" class="sch-fc ${cur === k ? "on" : ""}" data-schtf="${esc(k)}" aria-pressed="${cur === k}">${c >= 0 ? `<i class="tdot tcol-${c}"></i>` : ""}${esc(l)}</button>`).join("")}</div>`;
 }
+// 출력물 제목에 붙이는 담당 선생님 표시 (필터가 꺼져 있거나 선생님 계정이면 빈 문자열)
+const tfLabel = () => (state.teachers.length && isAdmin() && state.schedule.tf !== "all" ? (state.schedule.tf === "admin" ? "원장" : `${teacherName(state.schedule.tf)} 선생님`) + " 담당" : "");
 const tfOk = (sid) => { const st = state.students.find((x) => x.id === sid); return st ? tfMatch(st) : state.schedule.tf === "all"; };
 const tfMatch = (st) => { const f = state.schedule.tf; return f === "all" || (f === "admin" ? !st.teacher_id : st.teacher_id === f); };
 async function teacherApi(action, body) {
