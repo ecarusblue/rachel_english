@@ -1508,3 +1508,15 @@ body.rc-lock { overflow: hidden; }
 
 /* 전체 현황 학생 표: 담당 선생님 */
 .ov-tch { display: flex; align-items: center; margin-top: 2px; font-size: .78rem; color: var(--muted); }
+
+/* 왼쪽 메뉴 학생 검색 */
+.side-q { position: relative; margin: .5rem 0 .3rem; }
+.side-q svg { position: absolute; left: .65rem; top: 50%; transform: translateY(-50%); color: var(--side-muted); pointer-events: none; }
+.side-q input { width: 100%; box-sizing: border-box; font: inherit; font-size: .9rem; color: #fff; background: rgba(255, 255, 255, .09); border: 1px solid rgba(255, 255, 255, .16); border-radius: 9px; padding: .45rem 1.9rem .45rem 2rem; }
+.side-q input::placeholder { color: var(--side-muted); }
+.side-q input:focus { background: rgba(255, 255, 255, .15); }
+.side-q input::-webkit-search-cancel-button { display: none; }
+.side-q button { position: absolute; right: .25rem; top: 50%; transform: translateY(-50%); border: 0; background: none; color: var(--side-muted); font-size: 1rem; padding: .25rem .5rem; border-radius: 6px; cursor: pointer; }
+.side-q button:hover { color: #fff; }
+.student-list mark.hit { background: #f4d97a; color: #1b2a2c; border-radius: 3px; padding: 0 1px; }
+@media (max-width: 800px) { .side-q input { min-height: 40px; font-size: 16px; } }

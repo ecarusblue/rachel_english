@@ -695,18 +695,34 @@ function renderSidebar() {
   $("#nav-ld").classList.toggle("active", state.view === "ld");
   $("#btn-kinds").classList.toggle("active", state.view === "kinds");
   const bkb = $("#btn-backup"); if (bkb) bkb.classList.toggle("active", state.view === "backup");
-  const list = state.students.filter((s) => s.active || state.showInactive);
+  const all = state.students.filter((s) => s.active || state.showInactive);
+  const q = (state.studentQ || "").trim();
+  const list = q ? all.filter((s) => tfMatch(s) && studentHit(s, q)) : all;
   const nAct = state.students.filter((s) => s.active).length;
   const cnt = $("#student-count");
-  if (cnt) { cnt.textContent = `${list.length}명`; cnt.title = state.showInactive ? `재원 ${nAct}명 · 퇴원/휴원 ${state.students.length - nAct}명` : "재원생"; }
+  const qx = $("#student-q-x"); if (qx) qx.hidden = !q;
+  if (cnt) { cnt.textContent = q ? `${list.length} / ${all.length}명` : `${list.length}명`; cnt.title = state.showInactive ? `재원 ${nAct}명 · 퇴원/휴원 ${state.students.length - nAct}명` : "재원생"; }
   $("#student-list").innerHTML = list.length
     ? list
         .map(
           (s) => `<li><button data-id="${esc(s.id)}" class="${s.id === state.studentId && state.view === "student" ? "active" : ""} ${s.active ? "" : "inactive"}">
-            ${esc(s.name)}<span class="sub">${esc(s.grade || "")}</span></button></li>`
+            ${hitHtml(s.name, q)}<span class="sub">${hitHtml(s.grade || "", q)}</span></button></li>`
         )
         .join("")
+    : q ? `<li class="muted" style="padding:.5em .7em;font-size:.85rem">'${esc(q)}'와 맞는 학생이 없어요.</li>`
     : `<li class="muted" style="padding:.5em .7em;font-size:.85rem">학생을 추가하세요.</li>`;
+}
+/* 학생 검색: 이름·학년, 초성(ㅎㄹ)으로도 찾음 */
+const CHO_LIST = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
+const choOf = (t) => [...String(t)].map((c) => { const n = c.charCodeAt(0) - 44032; return n >= 0 && n < 11172 ? CHO_LIST[Math.floor(n / 588)] : c; }).join("");
+function studentHit(s, q) {
+  const ql = q.toLowerCase();
+  if (/^[ㄱ-ㅎ]+$/.test(q)) return choOf(s.name).includes(q);
+  return String(s.name).toLowerCase().includes(ql) || String(s.grade || "").toLowerCase().includes(ql);
+}
+function hitHtml(t, q) {
+  const i = q && !/^[ㄱ-ㅎ]+$/.test(q) ? String(t).toLowerCase().indexOf(q.toLowerCase()) : -1;
+  return i < 0 ? esc(t) : `${esc(t.slice(0, i))}<mark class="hit">${esc(t.slice(i, i + q.length))}</mark>${esc(t.slice(i + q.length))}`;
 }
 
 /* 진행 중인 교재(완료하지 않은 것). done=true 면 완료한 교재, "all" 이면 전부 */
@@ -5940,6 +5956,13 @@ function bindEvents() {
     const b = e.target.closest("button[data-id]");
     if (b) selectStudent(b.dataset.id);
   };
+  const sq = $("#student-q");
+  sq.oninput = () => { state.studentQ = sq.value; renderSidebar(); };
+  sq.onkeydown = (e) => {
+    if (e.key === "Escape") { sq.value = ""; state.studentQ = ""; renderSidebar(); }
+    else if (e.key === "Enter") { const b = $("#student-list button[data-id]"); if (b) { e.preventDefault(); selectStudent(b.dataset.id); } }
+  };
+  $("#student-q-x").onclick = () => { sq.value = ""; state.studentQ = ""; renderSidebar(); sq.focus(); };
   $("#show-inactive").onchange = (e) => {
     state.showInactive = e.target.checked;
     renderSidebar();
