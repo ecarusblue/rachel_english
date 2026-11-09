@@ -5745,7 +5745,7 @@ function applyRole() {
   const adm = isAdmin();
   const nt = $("#btn-teachers"); if (nt) nt.hidden = !(adm && state.me.migrated);
   const bk = $("#btn-backup"); if (bk) bk.hidden = !adm;
-  const ul = $("#user-role"); if (ul) ul.textContent = adm ? "" : ` (${state.me.name || "선생님"})`;
+  const ul = $("#user-role"); if (ul) ul.textContent = adm ? " (원장)" : ` (${state.me.name || "선생님"})`;
 }
 async function loadTeachers() {
   state.teachers = [];
