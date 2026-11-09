@@ -706,7 +706,7 @@ function renderSidebar() {
             ${esc(s.name)}<span class="sub">${esc(s.grade || "")}</span></button></li>`
         )
         .join("")
-    : `<li class="muted" style="padding:.5em .7em;font-size:.85rem">${isAdmin() ? "학생을 추가하세요." : "배정된 학생이 없어요. 원장님께 배정을 요청하세요."}</li>`;
+    : `<li class="muted" style="padding:.5em .7em;font-size:.85rem">학생을 추가하세요.</li>`;
 }
 
 /* 진행 중인 교재(완료하지 않은 것). done=true 면 완료한 교재, "all" 이면 전부 */
@@ -1308,7 +1308,7 @@ function renderOverview() {
   const students = state.students.filter((s) => s.active);
   if (!students.length) {
     main.innerHTML = `<div class="page-head"><h2>전체 현황</h2></div>
-      ${isAdmin() ? `<div class="card empty">아직 학생이 없습니다. 왼쪽의 <strong>+ 추가</strong>로 학생을 등록하고, <strong>교재 관리</strong>에서 교재를 먼저 만들어 보세요.</div>` : `<div class="card empty">아직 배정된 학생이 없어요. 원장님께 학생 배정을 요청하세요.</div>`}`;
+      <div class="card empty">아직 학생이 없습니다. 왼쪽의 <strong>+ 추가</strong>로 학생을 등록하고, <strong>교재 관리</strong>에서 교재를 먼저 만들어 보세요.</div>`;
     return;
   }
 
@@ -5728,7 +5728,7 @@ const isAdmin = () => state.me.role === "admin";
 const T_PERMS = [
   ["slot_edit", "타임 추가·삭제·시간 변경", "다른 선생님 학생이 있는 타임에도 영향이 가요"],
   ["book_delete", "사용 중인 교재 삭제", "끄면 아무도 쓰지 않는 교재만 지울 수 있어요"],
-  ["student_manage", "퇴원·복귀 처리", "끄면 원장님만 처리할 수 있어요"],
+  ["student_manage", "새 학생 등록·퇴원 처리", ""],
 ];
 const canSlotEdit = () => isAdmin() || !!(state.me.perms && state.me.perms.slot_edit);
 async function loadMe() {
@@ -5747,7 +5747,6 @@ function applyRole() {
   const adm = isAdmin();
   const nt = $("#btn-teachers"); if (nt) nt.hidden = !(adm && state.me.migrated);
   const bk = $("#btn-backup"); if (bk) bk.hidden = !adm;
-  const ab = $("#btn-add-student"); if (ab) ab.hidden = !adm;   // 학생 등록은 원장만
   const ul = $("#user-role"); if (ul) ul.textContent = adm ? " (원장)" : ` (${state.me.name || "선생님"})`;
 }
 async function loadTeachers() {

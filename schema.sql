@@ -1140,7 +1140,9 @@ create policy "students_select" on public.students for select to authenticated
   using (owner = (select public.current_owner())
          and ((select public.is_admin()) or teacher_id = (select public.my_teacher_id())));
 create policy "students_insert" on public.students for insert to authenticated
-  with check (owner = (select public.current_owner()) and (select public.is_admin()));   -- 학생 등록은 원장만
+  with check (owner = (select public.current_owner())
+              and ((select public.is_admin())
+                   or ((select public.has_perm('student_manage')) and teacher_id = (select public.my_teacher_id()))));
 create policy "students_update" on public.students for update to authenticated
   using (owner = (select public.current_owner())
          and ((select public.is_admin()) or teacher_id = (select public.my_teacher_id())))
@@ -1149,7 +1151,7 @@ create policy "students_update" on public.students for update to authenticated
 create policy "students_delete" on public.students for delete to authenticated
   using (owner = (select public.current_owner()) and (select public.is_admin()));
 
--- 학생 등록은 원장만. 선생님은 담당 변경을 못 하고, 퇴원·복귀 처리(student_manage 권한)만 할 수 있음
+-- 선생님이 학생을 만들면 담당이 자동으로 본인이 되고, 담당 변경·퇴원 처리는 권한이 있을 때만
 create or replace function public._students_guard()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
