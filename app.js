@@ -324,19 +324,19 @@ function renderMakeup() {
   }
   if (!mk.calMonth) mk.calMonth = month;
   const viewMonth = mk.calMonth; // 월 필터: 요약·세 탭·보강 달력이 모두 이 월 기준
-  const needAll = pendingAbsences();
+  const needAll = pendingAbsences().filter((a) => tfOk(a.student_id));
   const need = needAll.filter((a) => (a.lesson_date || "").slice(0, 7) === viewMonth);
   const needOther = needAll.length - need.length;
   const needStudents = new Set(need.map((a) => a.student_id));
   const old = need.filter((a) => daysBetween(a.lesson_date) >= 7).length;
-  const planned = mk.rows.filter((r) => r.status === "예정").sort((a, b) => (a.planned_date || "").localeCompare(b.planned_date || "") || (a.planned_start || "").localeCompare(b.planned_start || ""));
+  const planned = mk.rows.filter((r) => r.status === "예정" && tfOk(r.student_id)).sort((a, b) => (a.planned_date || "").localeCompare(b.planned_date || "") || (a.planned_start || "").localeCompare(b.planned_start || ""));
   const wk = periodRange("thisWeek");
   const weekPlan = planned.filter((r) => r.planned_date && r.planned_date >= wk.start && r.planned_date <= wk.end);
   const nextP = weekPlan[0];
-  const monthRows = mk.rows.filter((r) => r.status !== "제외" && makeupMonth(r) === viewMonth);
+  const monthRows = mk.rows.filter((r) => r.status !== "제외" && makeupMonth(r) === viewMonth && tfOk(r.student_id));
   const base = monthRows.filter((r) => r.kind === "기본").length;
   const extra = monthRows.length - base;
-  const finished = mk.rows.filter((r) => r.status !== "planned" && (r.status === "완료" || r.status === "제외")).sort((a, b) => (b.done_date || b.created_at || "").localeCompare(a.done_date || a.created_at || "")).slice(0, 60);
+  const finished = mk.rows.filter((r) => tfOk(r.student_id) && (r.status === "완료" || r.status === "제외")).sort((a, b) => (b.done_date || b.created_at || "").localeCompare(a.done_date || a.created_at || "")).slice(0, 60);
 
   // 보강 예정·완료/제외 목록은 보강달력에 표시된 월 기준으로만 보여 줌
   const inView = (r) => (r.status === "완료" ? r.done_date || r.planned_date : r.planned_date || r.done_date || r.created_at || "").slice(0, 7) === viewMonth;
@@ -410,7 +410,7 @@ function renderMakeup() {
           : `<div class="empty">${Number(viewMonth.slice(5))}월에 완료하거나 제외한 보강이 없어요.</div>`;
   }
 
-  main.innerHTML = head + monthBar + cards + tabs + `<div class="card mk-list">${list}</div>
+  main.innerHTML = head + tfBarHtml() + monthBar + cards + tabs + `<div class="card mk-list">${list}</div>
     ${makeupCalHtml()}
     <div class="mk-note"><b>기본 횟수를 넘겨도 막지 않아요.</b> 월 기본 횟수를 다 쓴 뒤의 보강은 "추가 보강"으로 표시만 해서 언제든 잡을 수 있어요. 기본 횟수는 학생마다 따로 정하고, 특정 달만 바꿀 수도 있어요.
       <br>결석은 수업 기록에서 출결을 "결석"으로 저장하면 이 목록에 올라오고, 보강 수업을 기록하면 자동으로 완료돼요. 결석한 지 ${MK_WINDOW_DAYS}일이 지난 건은 목록에 올리지 않아요.</div>`;
@@ -439,7 +439,7 @@ function makeupCalHtml() {
   const today = todayStr();
   if (!mk.calMonth) mk.calMonth = today.slice(0, 7);
   const [Y, M] = mk.calMonth.split("-").map(Number);
-  const items = mk.rows.filter((r) => r.status !== "제외" && makeupCalDate(r) && makeupCalDate(r).slice(0, 7) === mk.calMonth)
+  const items = mk.rows.filter((r) => r.status !== "제외" && tfOk(r.student_id) && makeupCalDate(r) && makeupCalDate(r).slice(0, 7) === mk.calMonth)
     .sort((a, b) => (a.planned_start || "99").localeCompare(b.planned_start || "99"));
   const by = new Map();
   items.forEach((r) => { const d = makeupCalDate(r); if (!by.has(d)) by.set(d, []); by.get(d).push(r); });
@@ -1003,9 +1003,7 @@ function scheduleHtml() {
   const chipOf = (st) => !sel ? `<button type="button" class="sch-chip${tc(st)}" data-sch-sid="${esc(st.id)}">${esc(st.name)}</button>`
     : st.id === sel ? `<button type="button" class="sch-chip on${tc(st)}" data-sch-sid="${esc(st.id)}">${esc(st.name)}</button>`
     : `<button type="button" class="sch-chip dim${tc(st)}" data-sch-pick="${esc(st.id)}" title="${esc(st.name)} 시간표 보기">${esc(st.name)}</button>`;
-  const tfBar = state.teachers.length && isAdmin()
-    ? `<div class="sch-tf" role="group" aria-label="담당 선생님으로 걸러 보기"><span class="muted">담당 선생님</span>${[["all", "전체", -1], ["admin", "원장", 0], ...state.teachers.filter((t) => t.status !== "중지").map((t) => [t.id, t.name, teacherCol(t.id)])]
-        .map(([k, l, c]) => `<button type="button" class="sch-fc ${state.schedule.tf === k ? "on" : ""}" data-schtf="${esc(k)}" aria-pressed="${state.schedule.tf === k}">${c >= 0 ? `<i class="tdot tcol-${c}"></i>` : ""}${esc(l)}</button>`).join("")}</div>` : "";
+  const tfBar = tfBarHtml();
   // 이번 주 보강(날짜가 정해진 것) → 시간이 맞는 칸에 표시
   const wkr = periodRange("thisWeek");
   const mkWeek = sel && !state.makeup.missing ? state.makeup.rows.filter((r) => r.student_id === sel && r.status === "예정" && r.planned_date && r.planned_date >= wkr.start && r.planned_date <= wkr.end).sort((a, b) => a.planned_date.localeCompare(b.planned_date) || (a.planned_start || "").localeCompare(b.planned_start || "")) : [];
@@ -2382,7 +2380,7 @@ function renderEvals() {
     if (s) return renderEvalDetail(s, d, head, bind);
     ev.studentId = null;
   }
-  const students = state.students.filter((s) => s.active);
+  const students = state.students.filter((s) => s.active && tfMatch(s));
   const done = students.filter((s) => (d.rows.find((r) => r.student_id === s.id) || {}).status === "완료").length;
   const rows = students.map((s) => {
     const row = d.rows.find((r) => r.student_id === s.id);
@@ -2395,12 +2393,12 @@ function renderEvals() {
       <td class="num">${sm.r.testAvg == null ? "-" : sm.r.testAvg.toFixed(0) + "점"}</td>
       <td class="ev-act">${evalActionCell(row, sm)}</td></tr>`;
   });
-  main.innerHTML = head + (students.length
+  main.innerHTML = head + tfBarHtml() + (students.length
     ? `<div class="ev-prog"><div class="ev-prog-t"><span>작성 현황</span><strong>${students.length}명 중 ${done}명 완료</strong></div><div class="bar" role="img" aria-label="${Math.round((done / students.length) * 100)}% 완료"><span style="width:${Math.round((done / students.length) * 100)}%"></span></div></div>
       <div class="card table-wrap"><table>
         <thead><tr><th>학생</th><th class="num">수업</th><th class="num">출석률</th><th class="num">숙제 완료율</th><th class="num">시험 평균</th><th class="num">평가서</th></tr></thead>
         <tbody>${rows.join("")}</tbody></table></div>`
-    : `<div class="card empty">재원 중인 학생이 없습니다.</div>`);
+    : `<div class="card empty">${state.schedule.tf === "all" ? "재원 중인 학생이 없습니다." : "이 선생님에게 배정된 재원생이 없어요."}</div>`);
   bind();
   main.querySelectorAll("tr[data-eid]").forEach((tr) => {
     tr.onclick = () => { ev.studentId = tr.dataset.eid; renderEvals(); window.scrollTo(0, 0); };
@@ -3180,7 +3178,7 @@ const printRc = (html) => {
 function thisWeekRecs() {
   const wk = periodRange("thisWeek");
   const activeIds = new Set(state.students.filter((s) => s.active).map((s) => s.id));
-  return state.allRecs.filter((r) => activeIds.has(r.student_id) && recDate(r) >= wk.start && recDate(r) <= wk.end);
+  return state.allRecs.filter((r) => activeIds.has(r.student_id) && tfOk(r.student_id) && recDate(r) >= wk.start && recDate(r) <= wk.end);
 }
 // 인쇄할 추천: 아직 '제안'이고 그날 수업 기록이 없는 것
 const printableOn = (recs, date) => recs.filter((r) => r.status === "제안" && recDate(r) === date && !recLessonOn(r.student_id, r));
@@ -3328,7 +3326,7 @@ function recsByStudentHtml(recs) {
 function renderAllRecs() {
   const wk = periodRange("thisWeek");
   const activeIds = new Set(state.students.filter((s) => s.active).map((s) => s.id)); // 퇴원/휴원 학생은 제외
-  const recs = state.allRecs.filter((r) => activeIds.has(r.student_id) && recDate(r) >= wk.start && recDate(r) <= wk.end);
+  const recs = state.allRecs.filter((r) => activeIds.has(r.student_id) && tfOk(r.student_id) && recDate(r) >= wk.start && recDate(r) <= wk.end);
   const name = (id) => (state.students.find((s) => s.id === id) || {}).name || "(삭제된 학생)";
   const pending = recs.filter((r) => r.status === "제안");
   const row = (r) => {
@@ -3396,10 +3394,10 @@ function renderAllRecs() {
   const seg = `<div class="rc-seg" role="group" aria-label="보기 방식"><button type="button" data-rcmode="student" class="${ui.mode === "student" ? "on" : ""}" aria-pressed="${ui.mode === "student"}">학생별</button><button type="button" data-rcmode="date" class="${ui.mode === "date" ? "on" : ""}" aria-pressed="${ui.mode === "date"}">날짜별</button></div>`;
   const head = `<div class="page-head"><h2>수업 추천</h2><span class="muted">이번 주 ${shortDate(wk.start)} ~ ${shortDate(wk.end)} · 학생별 다음 수업 진도 추천</span><span class="spacer"></span>${ui.mode === "date" ? `<button type="button" class="btn" id="rc-print-date">인쇄 미리보기</button>` : ""}${seg}</div>`;
   if (ui.mode === "student") {
-    $("#main").innerHTML = head + recsByStudentHtml(recs);
+    $("#main").innerHTML = head + tfBarHtml() + recsByStudentHtml(recs);
   } else {
     $("#main").innerHTML = `
-    ${head}
+    ${head}${tfBarHtml()}
     ${pending.length ? `
       <div class="rc-div"><b>수업 기록 없음</b><span class="n">${noLesson.length}건</span></div>
       ${noLesson.length ? table(noLesson, sortKey) : `<div class="card empty">수업 기록이 없는 추천이 없습니다.</div>`}
@@ -5240,7 +5238,7 @@ function renderWritingAnalysis() {
     return;
   }
   const inMonth = (r, mm) => (r.written_on || "").slice(0, 7) === mm;
-  const list = state.students.filter((s) => s.active || state.showInactive);
+  const list = state.students.filter((s) => (s.active || state.showInactive) && tfMatch(s));
   const info = list.map((s) => {
     const rs = wa.rows.filter((r) => r.student_id === s.id && inMonth(r, m));
     const done = rs.filter((r) => wrAvg(r) != null);
@@ -5308,7 +5306,7 @@ function renderWritingAnalysis() {
         <div class="card"><h3>이달의 첨삭 기록 ${it.rs.length}편</h3><div class="wa-wl">${recs}</div></div>`;
     }
   }
-  main.innerHTML = head + monthBar + `<div class="wa-split"><div class="wa-sl"><div class="wa-sh"><span>학생 ${info.length}명</span><span>글 수</span></div>${slist}</div><div class="wa-det">${det}</div></div>`;
+  main.innerHTML = head + tfBarHtml() + monthBar + `<div class="wa-split"><div class="wa-sl"><div class="wa-sh"><span>학생 ${info.length}명</span><span>글 수</span></div>${slist}</div><div class="wa-det">${det}</div></div>`;
 
   main.querySelectorAll("[data-wanav]").forEach((b) => (b.onclick = async () => {
     const n = Number(b.dataset.wanav);
@@ -5533,18 +5531,19 @@ function ldRepaint(c) {
 }
 function ldVisible(c) {
   const f = state.ld.filter;
+  if (!tfOk(c.sid)) return false;
   return f === "todo" ? !c.lessonId && !c.dirty : f === "saved" ? !!c.lessonId : true;
 }
 function ldChromeHtml() {
   const ld = state.ld;
-  const cards = ld.order.map((id) => ld.cards[id]).filter(Boolean);
+  const cards = ld.order.map((id) => ld.cards[id]).filter((c) => c && tfOk(c.sid));
   const nTodo = cards.filter((c) => !c.lessonId && !c.dirty).length, nSaved = cards.filter((c) => c.lessonId).length;
-  const dirty = cards.filter((c) => c.dirty).length;
+  const dirty = ld.order.map((id) => ld.cards[id]).filter((c) => c && c.dirty).length;   // 저장 대기는 걸러진 학생까지 모두 셉니다
   const done = cards.filter((c) => c.lessonId || c.dirty).length;
   const pct = cards.length ? Math.round((done / cards.length) * 100) : 0;
   const fchip = (k, t, n) => `<button type="button" class="ld-fchip ${ld.filter === k ? "on" : ""}" data-ld="filter" data-v="${k}">${t} ${n}</button>`;
-  const rest = state.students.filter((s) => s.active && !ld.order.includes(s.id)).sort((a, b) => a.name.localeCompare(b.name, "ko"));
-  const dbar = `<div class="ld-dbar"><button class="btn small" type="button" data-ld="nav" data-v="-1" aria-label="전날">‹</button><b class="ld-dt">${esc(shortDate(ld.date))}</b><button class="btn small" type="button" data-ld="nav" data-v="1" aria-label="다음날">›</button><button class="btn small" type="button" data-ld="nav" data-v="0">오늘</button><input type="date" id="ld-date" value="${esc(ld.date)}" aria-label="날짜 고르기"><span class="ld-sp"></span><span class="muted ld-help">시간표 기준 ${ld.scheduled}명 · 입력 ${done}명</span><div class="ld-prog" aria-hidden="true"><i style="width:${pct}%"></i></div></div>`;
+  const rest = state.students.filter((s) => s.active && tfMatch(s) && !ld.order.includes(s.id)).sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  const dbar = `<div class="ld-dbar"><button class="btn small" type="button" data-ld="nav" data-v="-1" aria-label="전날">‹</button><b class="ld-dt">${esc(shortDate(ld.date))}</b><button class="btn small" type="button" data-ld="nav" data-v="1" aria-label="다음날">›</button><button class="btn small" type="button" data-ld="nav" data-v="0">오늘</button><input type="date" id="ld-date" value="${esc(ld.date)}" aria-label="날짜 고르기"><span class="ld-sp"></span><span class="muted ld-help">시간표 기준 ${state.schedule.tf === "all" ? ld.scheduled : cards.filter((c) => ld.times[c.sid] !== undefined).length}명 · 입력 ${done}명</span><div class="ld-prog" aria-hidden="true"><i style="width:${pct}%"></i></div></div>`;
   const chips = `<div class="ld-chips">${fchip("all", "전체", cards.length)}${fchip("todo", "입력 전", nTodo)}${fchip("saved", "저장됨", nSaved)}<select id="ld-extra" aria-label="시간표에 없는 학생 추가"><option value="">+ 시간표에 없는 학생</option>${rest.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}${s.grade ? " (" + esc(s.grade) + ")" : ""}</option>`).join("")}</select><span class="ld-sp"></span><button class="btn small" type="button" data-ld="allpresent">전원 출석으로</button><button class="btn small" type="button" data-ld="fillrec">추천 단원으로 채우기</button></div>`;
   const draftBanner = ld.draftPending ? `<div class="ld-rb"><b>임시저장된 내용이 있어요</b><span>${esc(new Date(ld.draftAt).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }))}에 ${Object.keys(ld.draft.data.cards).length}명 분량을 임시저장했어요.</span><span class="ld-sp"></span><button class="btn small" type="button" data-ld="draftdrop">버리기</button><button class="btn small primary" type="button" data-ld="draftapply">이어서 입력</button></div>` : "";
   const t = ld.draftAt ? new Date(ld.draftAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) : "";
@@ -5563,7 +5562,7 @@ function renderLessonDay() {
   const head = `<div class="page-head"><h2>수업 기록</h2><span class="muted">날짜를 고르면 그날 수업한 학생의 기록을 한 번에 입력해요</span></div>`;
   const h = ldChromeHtml();
   const vis = ld.order.map((id) => ld.cards[id]).filter((c) => c && ldVisible(c));
-  main.innerHTML = head + `<div id="ld-dbar">${h.dbar}</div><div id="ld-chips">${h.chips}</div><div id="ld-banner">${h.draftBanner}</div>
+  main.innerHTML = head + tfBarHtml() + `<div id="ld-dbar">${h.dbar}</div><div id="ld-chips">${h.chips}</div><div id="ld-banner">${h.draftBanner}</div>
     <div class="ld-list" id="ld-list">${vis.length ? vis.map(ldCardHtml).join("") : `<div class="card empty">${ld.order.length ? "이 조건에 맞는 학생이 없어요." : "이 날은 시간표에 수업이 없어요. 위에서 '+ 시간표에 없는 학생'으로 학생을 더할 수 있어요."}</div>`}</div>
     <div id="ld-foot">${h.foot}</div>`;
 }
@@ -5756,6 +5755,15 @@ async function loadTeachers() {
 }
 const teacherName = (tid) => (tid ? ((state.teachers.find((t) => t.id === tid) || {}).name || "선생님") : "원장");
 const teacherCol = (tid) => (tid ? (state.teachers.findIndex((t) => t.id === tid) + 1) % 5 || 5 : 0);   // 0=원장 1~4=선생님 색
+/* 담당 선생님 필터(원장 전용): 전체 현황·결석보강·월말평가서·수업 추천·수업 기록·라이팅 분석이 같은 선택을 공유 */
+function tfBarHtml() {
+  if (!state.teachers.length || !isAdmin()) return "";
+  const cur = state.schedule.tf;
+  const items = [["all", "전체", -1], ["admin", "원장", 0], ...state.teachers.filter((t) => t.status !== "중지").map((t) => [t.id, t.name, teacherCol(t.id)])];
+  return `<div class="sch-tf" role="group" aria-label="담당 선생님으로 걸러 보기"><span class="muted">담당 선생님</span>${items
+    .map(([k, l, c]) => `<button type="button" class="sch-fc ${cur === k ? "on" : ""}" data-schtf="${esc(k)}" aria-pressed="${cur === k}">${c >= 0 ? `<i class="tdot tcol-${c}"></i>` : ""}${esc(l)}</button>`).join("")}</div>`;
+}
+const tfOk = (sid) => { const st = state.students.find((x) => x.id === sid); return st ? tfMatch(st) : state.schedule.tf === "all"; };
 const tfMatch = (st) => { const f = state.schedule.tf; return f === "all" || (f === "admin" ? !st.teacher_id : st.teacher_id === f); };
 async function teacherApi(action, body) {
   const { data } = await db.auth.getSession();
@@ -5857,6 +5865,13 @@ function renderTeachers() {
 }
 
 function bindEvents() {
+  // 담당 선생님 필터(여러 화면 공용)
+  $("#main").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-schtf]");
+    if (!b || b.closest(".sch")) return;   // 전체 현황은 자체 처리
+    state.schedule.tf = b.dataset.schtf;
+    render();
+  });
   const appEl = $("#app-view");
   const setMenu = (open) => {
     appEl.classList.toggle("menu-open", open);
