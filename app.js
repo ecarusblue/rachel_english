@@ -697,7 +697,7 @@ function renderSidebar() {
   const bkb = $("#btn-backup"); if (bkb) bkb.classList.toggle("active", state.view === "backup");
   const all = state.students.filter((s) => s.active || state.showInactive);
   const q = (state.studentQ || "").trim();
-  const list = q ? all.filter((s) => tfMatch(s) && studentHit(s, q)) : all;
+  const list = q ? all.filter((s) => studentHit(s, q)) : all;
   const nAct = state.students.filter((s) => s.active).length;
   const cnt = $("#student-count");
   const qx = $("#student-q-x"); if (qx) qx.hidden = !q;
