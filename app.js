@@ -999,8 +999,11 @@ async function loadSchedule() {
     state.schedule.missing = true; // schema.sql 업그레이드 전
   }
 }
+// 타임 순서: 시작 시간이 빠른 순, 시간이 없는 타임은 뒤(기존 순서 유지)
+const slotKey = (t) => String(t || "").slice(0, 5) || "99:99";
+const slotCmp = (a, b) => slotKey(a.start_time).localeCompare(slotKey(b.start_time)) || (a.slot_order || 0) - (b.slot_order || 0);
 function groupDays(slots) {
-  return SCH_ORDER.map((wd) => ({ wd, slots: slots.filter((s) => s.weekday === wd).sort((a, b) => (a.slot_order || 0) - (b.slot_order || 0)) })).filter((d) => d.slots.length);
+  return SCH_ORDER.map((wd) => ({ wd, slots: slots.filter((s) => s.weekday === wd).sort(slotCmp) })).filter((d) => d.slots.length);
 }
 function scheduleHtml() {
   const sc = state.schedule;
@@ -1222,7 +1225,7 @@ function bindScheduleEdit() {
     el.onchange = () => { dr.days[+el.dataset.dayset].wd = Number(el.value); dr.days.sort((a, b) => SCH_ORDER.indexOf(a.wd) - SCH_ORDER.indexOf(b.wd)); dr.pop = null; re(); };
   });
   main.querySelectorAll("[data-addslot]").forEach((el) => {
-    el.onclick = () => { const d = dr.days[+el.dataset.addslot]; d.slots.push({ id: null, label: `타임 ${d.slots.length + 1}`, start: "", end: "", students: [] }); re(); };
+    el.onclick = () => { const d = dr.days[+el.dataset.addslot]; const n = d.slots.length + 1; const alt = d.slots.some((x) => /^\d+타임$/.test((x.label || "").trim())); d.slots.push({ id: null, label: alt ? `${n}타임` : `타임 ${n}`, start: "", end: "", students: [] }); re(); };
   });
   main.querySelectorAll("[data-delslot]").forEach((el) => {
     el.onclick = () => {
@@ -1290,6 +1293,9 @@ async function saveSchedule() {
   const btn = $("#sch-save");
   const rows = [];
   for (const d of dr.days) {
+    // 시작 시간이 빠른 타임이 앞에 오도록 정렬 (시간 없는 타임은 뒤, 기존 순서 유지). 자동 이름("타임 N")은 새 순서로 다시 붙임
+    d.slots = d.slots.map((x, k) => ({ x, k })).sort((a, b) => slotKey(a.x.start).localeCompare(slotKey(b.x.start)) || a.k - b.k).map(({ x }) => x);
+    d.slots.forEach((x, k) => { const l = (x.label || "").trim(); if (/^\d+타임$/.test(l)) x.label = `${k + 1}타임`; else if (/^타임 \d+$/.test(l)) x.label = `타임 ${k + 1}`; });
     for (let i = 0; i < d.slots.length; i++) {
       const s = d.slots[i];
       if (s.start && s.end && s.end <= s.start) {
@@ -5396,7 +5402,7 @@ async function loadLdData(keep) {
   const wd = ldWd(d);
   const order = [];
   const times = {};
-  state.schedule.slots.filter((x) => x.weekday === wd).sort((a, b) => a.slot_order - b.slot_order || String(a.start_time || "").localeCompare(String(b.start_time || ""))).forEach((sl) => {
+  state.schedule.slots.filter((x) => x.weekday === wd).sort((a, b) => slotCmp(a, b) || String(a.start_time || "").localeCompare(String(b.start_time || ""))).forEach((sl) => {
     (sl.student_ids || []).forEach((id) => { if (state.students.some((s) => s.id === id && s.active) && !order.includes(id)) { order.push(id); times[id] = hhmm(sl.start_time); } });
   });
   lessons.forEach((l) => { if (!order.includes(l.student_id) && state.students.some((s) => s.id === l.student_id && s.active)) order.push(l.student_id); });
