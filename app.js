@@ -1002,6 +1002,23 @@ async function loadSchedule() {
 // 타임 순서: 시작 시간이 빠른 순, 시간이 없는 타임은 뒤(기존 순서 유지)
 const slotKey = (t) => String(t || "").slice(0, 5) || "99:99";
 const slotCmp = (a, b) => slotKey(a.start_time).localeCompare(slotKey(b.start_time)) || (a.slot_order || 0) - (b.slot_order || 0);
+// 격자(표)용 줄 만들기: 요일별 "몇 번째 타임"이 아니라 시간(시작~종료)이 같은 타임끼리 한 줄로 묶고, 시간이 빠른 줄이 위로 옵니다.
+// 같은 요일에 시간이 같은 타임이 둘 이상이면 서로 다른 줄로 나눕니다. 시간이 없는 타임은 맨 아래, 요일별 순서대로.
+function timeRows(days) {
+  const rows = new Map();
+  days.forEach((d, di) => {
+    const seen = {};
+    d.slots.forEach((sl, i) => {
+      const tm = timeText(sl.start_time, sl.end_time);
+      const base = tm ? `${slotKey(sl.start_time)}|${tm}` : "~";
+      const n = (seen[base] = (seen[base] || 0) + 1);
+      const key = `${base}#${n}`;
+      if (!rows.has(key)) rows.set(key, { key, time: tm, first: sl, cells: days.map(() => null) });
+      rows.get(key).cells[di] = sl;
+    });
+  });
+  return [...rows.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
 function groupDays(slots) {
   return SCH_ORDER.map((wd) => ({ wd, slots: slots.filter((s) => s.weekday === wd).sort(slotCmp) })).filter((d) => d.slots.length);
 }
@@ -1042,20 +1059,18 @@ function scheduleHtml() {
       <td class="sch-cnt">${cntOf(names)}명</td></tr>`;
   }).join("")).join("");
   // 넓은 화면: 요일을 열로 펼친 격자 / 좁은 화면: 위의 요일별 목록
-  const rowsN = Math.max(...days.map((d) => d.slots.length));
-  const grid = Array.from({ length: rowsN }, (_, i) => {
-    const first = (days.find((d) => d.slots[i]) || { slots: [] }).slots[i];
-    const same = days.every((d) => !d.slots[i] || timeText(d.slots[i].start_time, d.slots[i].end_time) === timeText(first.start_time, first.end_time));
-    const rtime = same ? timeText(first.start_time, first.end_time) : "";
-    const cells = days.map((d) => {
-      const sl = d.slots[i];
+  const grid = timeRows(days).map((tr, i) => {
+    const first = tr.first;
+    const rtime = tr.time;
+    const cells = days.map((d, di) => {
+      const sl = tr.cells[di];
       const cls = d.wd === today ? "today" : "";
       if (!sl) return `<td class="off ${cls}"></td>`;
       const names = active.filter((s) => (sl.student_ids || []).includes(s.id));
       const tm = rtime ? "" : timeText(sl.start_time, sl.end_time);
       return `<td class="${cls} ${mine(names) || mkIn(sl).length ? "mine" : ""}"><div class="sg-top"><span>${esc(tm)}</span><span>${cntOf(names)}명</span></div><div class="sg-chips">${names.length || mkIn(sl).length ? names.map(chipOf).join("") + mkChips(sl) : `<span class="muted">-</span>`}</div></td>`;
     }).join("");
-    return `<tr><th class="sg-rt" scope="row"><b>${esc(first.label || "타임 " + (i + 1))}</b>${rtime ? `<span>${rtime}</span>` : ""}</th>${cells}</tr>`;
+    return `<tr><th class="sg-rt" scope="row"><b>${esc(rtime || first.label || "타임 " + (i + 1))}</b></th>${cells}</tr>`;
   }).join("");
   const gridHead = days.map((d) => `<th scope="col" class="${d.wd === today ? "today" : ""}">${DAY_NAME[d.wd]}${d.wd === today ? "<em>오늘</em>" : ""}</th>`).join("");
   let fbar = "";
@@ -1086,17 +1101,10 @@ function schedulePrintHtml(orient = "p", zoom = 1, sid = null) {
   const chips = (names) => names.length ? names.map((s) => `<span class="tp-name">${esc(s.name)}</span>`).join("") : `<span class="tp-empty">-</span>`;
   const foot = `<div class="rp-foot"><span>${esc(ACADEMY_NAME)}</span><span>${shortDate(todayStr())} 출력</span></div>`;
   if (orient === "l") {
-    const rowsN = Math.max(...days.map((d) => d.slots.length));
-    const rowHead = Array.from({ length: rowsN }, (_, i) => {
-      const sl = (days.find((d) => d.slots[i]) || { slots: [] }).slots[i];
-      const same = days.every((d) => !d.slots[i] || timeText(d.slots[i].start_time, d.slots[i].end_time) === timeText(sl.start_time, sl.end_time));
-      return { label: (sl && sl.label) || "타임 " + (i + 1), time: same && sl ? timeText(sl.start_time, sl.end_time) : "" };
-    });
-    const body = rowHead.map((rh, i) => `<tr><th class="tl-t"><b>${esc(rh.label)}</b>${rh.time ? `<span>${rh.time}</span>` : ""}</th>${days.map((d) => {
-      const sl = d.slots[i];
+    const body = timeRows(days).map((tr) => `<tr><th class="tl-t"><b>${esc(tr.time || tr.first.label || "")}</b></th>${days.map((d, di) => {
+      const sl = tr.cells[di];
       if (!sl) return `<td class="tl-off"></td>`;
-      const tm = rh.time ? "" : timeText(sl.start_time, sl.end_time);
-      return `<td>${tm ? `<div class="tl-tm">${tm}</div>` : ""}<div class="tl-n">${chips(namesOf(sl))}</div></td>`;
+      return `<td><div class="tl-n">${chips(namesOf(sl))}</div></td>`;
     }).join("")}</tr>`).join("");
     return `<div class="rp-page tp-page tp-land">
       <div class="tl-hd"><div><div class="pl-br pv-row">${LOGO_SVG}<span>${esc(ACADEMY_NAME).toUpperCase()}</span></div><h1>${title}</h1></div><span>매주 반복</span></div>
