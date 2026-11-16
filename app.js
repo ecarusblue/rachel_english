@@ -5516,11 +5516,11 @@ function ldTestHtml(c, t, i) {
   if (t.kind && !kinds.includes(t.kind)) kinds.push(t.kind);
   const a = `data-sid="${esc(c.sid)}" data-ti="${i}"`;
   const pc = t.score != null && t.max > 0 ? Math.round((t.score / t.max) * 100) + "%" : "";
-  return `<div class="ld-ts"><select ${a} data-tk="kind" aria-label="시험 종류">${kinds.map((k) => `<option value="${esc(k)}" ${t.kind === k ? "selected" : ""}>${esc(k)}</option>`).join("")}</select>
-    <input type="text" ${a} data-tk="title" maxlength="100" placeholder="시험 이름 (예: Day 5)" value="${esc(t.title || "")}">
+  return `<div class="ld-ts"><select ${a} data-tk="kind" aria-label="시험 종류" title="${esc(t.kind || "")}">${kinds.map((k) => `<option value="${esc(k)}" ${t.kind === k ? "selected" : ""}>${esc(k)}</option>`).join("")}</select><button type="button" class="btn small ld-x" data-ld="deltest" data-sid="${esc(c.sid)}" data-ti="${i}" aria-label="시험 지우기">✕</button>
+    <div class="ld-ts2"><input type="text" ${a} data-tk="title" maxlength="100" placeholder="시험 이름 (예: Day 5)" value="${esc(t.title || "")}">
     <input type="number" ${a} data-tk="score" min="0" step="any" inputmode="decimal" placeholder="점수" value="${t.score == null || Number.isNaN(t.score) ? "" : esc(t.score)}"><span>/</span>
     <input type="number" ${a} data-tk="max" min="1" step="any" inputmode="decimal" placeholder="만점" value="${t.max == null || Number.isNaN(t.max) ? "" : esc(t.max)}">
-    <span class="ld-pc" data-pc="${esc(c.sid)}:${i}">${pc}</span><button type="button" class="btn small" data-ld="deltest" data-sid="${esc(c.sid)}" data-ti="${i}" aria-label="시험 지우기">✕</button></div>`;
+    <span class="ld-pc" data-pc="${esc(c.sid)}:${i}">${pc}</span></div></div>`;
 }
 function ldCardHtml(c) {
   const s = state.students.find((x) => x.id === c.sid);

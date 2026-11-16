@@ -1451,11 +1451,13 @@ body.rc-lock { overflow: hidden; }
 .ld-two { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: .5rem; }
 .ld-add { font: inherit; font-size: .82rem; color: var(--accent); background: transparent; border: 1px dashed var(--accent); border-radius: 9px; padding: .35rem .7rem; cursor: pointer; justify-self: start; }
 .ld-tests { display: grid; gap: .45rem; }
-.ld-ts { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; border: 1px solid var(--border); border-radius: 10px; padding: .35rem .45rem; }
-.ld-ts select { width: 96px; flex: none; }
-.ld-ts input[type="text"] { flex: 1 1 130px; width: auto; }
-.ld-ts input[type="number"] { flex: none; font: inherit; font-size: .85rem; text-align: center; border: 1px solid var(--border); border-radius: 8px; padding: .25rem; background: var(--surface); color: var(--text); width: 64px; min-width: 0; }
-.ld-pc { font-weight: 800; color: var(--accent); font-size: .8rem; }
+.ld-ts { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .35rem .4rem; align-items: center; border: 1px solid var(--border); border-radius: 10px; padding: .4rem .45rem; }
+.ld-ts > select { width: 100%; min-width: 0; font-weight: 700; text-overflow: ellipsis; }
+.ld-ts .ld-x { width: 32px; height: 32px; padding: 0; }
+.ld-ts2 { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) 62px auto 62px 3.2rem; gap: .3rem; align-items: center; }
+.ld-ts2 input[type="text"] { width: 100%; min-width: 0; }
+.ld-ts2 input[type="number"] { font: inherit; font-size: .85rem; text-align: right; border: 1px solid var(--border); border-radius: 8px; padding: .25rem .35rem; background: var(--surface); color: var(--text); width: 100%; min-width: 0; }
+.ld-pc { font-weight: 800; color: var(--accent); font-size: .8rem; text-align: right; }
 .ld-sum { display: flex; gap: .9rem; flex-wrap: wrap; padding: .5rem .85rem; font-size: .85rem; }
 .ld-pk { border: 1px solid var(--accent); border-radius: 10px; padding: .5rem; display: grid; gap: .3rem; background: var(--surface); }
 .ld-pkh { display: flex; gap: .4rem; }
