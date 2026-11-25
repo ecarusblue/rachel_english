@@ -677,6 +677,7 @@ function render() {
   else if (state.view === "recs") renderAllRecs();
   else if (state.view === "kinds") renderKinds();
   else if (state.view === "backup") renderBackup();
+  else if (state.view === "sid") renderStudentIds();
   else if (state.view === "makeup") renderMakeup();
   else if (state.view === "wa") renderWritingAnalysis();
   else if (state.view === "teachers") renderTeachers();
@@ -695,6 +696,7 @@ function renderSidebar() {
   $("#nav-ld").classList.toggle("active", state.view === "ld");
   $("#btn-kinds").classList.toggle("active", state.view === "kinds");
   const bkb = $("#btn-backup"); if (bkb) bkb.classList.toggle("active", state.view === "backup");
+  $("#btn-sid").classList.toggle("active", state.view === "sid");
   const all = state.students.filter((s) => s.active || state.showInactive);
   const q = (state.studentQ || "").trim();
   const list = q ? all.filter((s) => studentHit(s, q)) : all;
@@ -4420,6 +4422,64 @@ function backupName() {
   const d = new Date(), p = (n) => String(n).padStart(2, "0");
   return `rachel-backup-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.xlsx`;
 }
+/* ---------- 학생 ID 관리 ---------- */
+const sidMark = (t, q) => {
+  const i = q ? String(t).toLowerCase().indexOf(q) : -1;
+  return i < 0 ? esc(t) : `${esc(t.slice(0, i))}<mark>${esc(t.slice(i, i + q.length))}</mark>${esc(t.slice(i + q.length))}`;
+};
+function sidFiltered() {
+  const q = (state.sidQ || "").trim().toLowerCase();
+  const list = state.students.filter((s) => (s.active || state.sidInactive) && (!q || `${s.name} ${s.grade || ""} ${s.id}`.toLowerCase().includes(q)));
+  return { q, list: list.slice().sort((a, b) => a.name.localeCompare(b.name, "ko")) };
+}
+function sidCopy(text, msg) {
+  const done = () => toast(msg);
+  const fallback = () => {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand("copy"); } catch { /* 무시 */ }
+    ta.remove();
+    toast(ok ? msg : "복사가 막혀 있어요. 직접 선택해서 복사해 주세요");
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
+  else fallback();
+}
+function sidList() {
+  const { q, list } = sidFiltered();
+  $("#sid-cnt").textContent = `${list.length}명`;
+  $("#sid-rows").innerHTML = list.length
+    ? list.map((s) => `<tr><td><b>${sidMark(s.name, q)}</b></td><td>${sidMark(s.grade || "", q)}</td><td><span class="sid-pill ${s.active ? "" : "off"}">${s.active ? "재원" : "퇴원/휴원"}</span></td><td class="sid-id"><b>${sidMark(s.id.slice(0, 8), q)}</b>${sidMark(s.id.slice(8), q)}</td><td><button type="button" class="btn small" data-sidcopy="${esc(s.id)}">ID 복사</button></td></tr>`).join("")
+    : `<tr><td colspan="5" class="muted sid-empty">맞는 학생이 없어요. 이름이나 학년을 다시 확인해 주세요.</td></tr>`;
+}
+function sidRev() {
+  const ids = ($("#sid-rev").value || "").split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+  $("#sid-revrows").innerHTML = ids.length
+    ? ids.map((i) => { const s = state.students.find((x) => x.id === i.toLowerCase());
+        return `<tr><td class="sid-id">${esc(i)}</td><td>${s ? `<b class="sid-ok">${esc(s.name)}</b> · ${esc(s.grade || "")}${s.active ? "" : " · 퇴원/휴원"}` : `<b class="sid-no">없는 ID</b> 학생이 삭제됐거나 ID가 잘못됐어요`}</td></tr>`; }).join("")
+    : `<tr><td colspan="2" class="muted sid-empty">ID를 붙여 넣으면 결과가 여기에 나와요.</td></tr>`;
+}
+function renderStudentIds() {
+  $("#main").innerHTML = `
+    <div class="page-head"><h2>학생 ID 관리</h2><span class="muted">학생마다 앱이 붙인 고유 ID예요. 학부모 페이지, 챗봇 같은 다른 프로그램에서 학생을 가리킬 때 이 ID를 씁니다</span></div>
+    <div class="card sid-card"><strong>이름으로 ID 찾기</strong>
+      <div class="sid-bar"><input type="search" id="sid-q" placeholder="이름, 학년, ID 일부로 검색" aria-label="학생 검색" autocomplete="off" value="${esc(state.sidQ || "")}">
+        <label class="check small-check"><input type="checkbox" id="sid-inact" ${state.sidInactive ? "checked" : ""}> 퇴원/휴원 포함</label>
+        <button type="button" class="btn" id="sid-copyall">목록 복사 (이름, ID)</button></div>
+      <div class="muted" id="sid-cnt"></div>
+      <div class="sid-tw"><table class="sid-t"><thead><tr><th>이름</th><th>학년</th><th>상태</th><th>학생 ID</th><th></th></tr></thead><tbody id="sid-rows"></tbody></table></div></div>
+    <div class="card sid-card"><strong>ID로 이름 찾기</strong>
+      <span class="muted">다른 프로그램에서 가져온 ID를 붙여 넣으면 어느 학생인지 알려줘요. 여러 개는 줄바꿈으로 구분합니다.</span>
+      <textarea id="sid-rev" rows="3" aria-label="학생 ID 붙여넣기" placeholder="예) 3f6c1a52-8d0b-4c2e-9a71-5e0b7d2c4f10">${esc(state.sidRev || "")}</textarea>
+      <div class="sid-tw"><table class="sid-t"><thead><tr><th>입력한 ID</th><th>결과</th></tr></thead><tbody id="sid-revrows"></tbody></table></div></div>`;
+  sidList(); sidRev();
+  $("#sid-q").oninput = (e) => { state.sidQ = e.target.value; sidList(); };
+  $("#sid-inact").onchange = (e) => { state.sidInactive = e.target.checked; sidList(); };
+  $("#sid-rev").oninput = (e) => { state.sidRev = e.target.value; sidRev(); };
+  $("#sid-rows").onclick = (e) => { const b = e.target.closest("button[data-sidcopy]"); if (b) sidCopy(b.dataset.sidcopy, "ID를 복사했어요"); };
+  $("#sid-copyall").onclick = () => sidCopy(sidFiltered().list.map((s) => `${s.name}\t${s.id}`).join("\n"), "목록을 복사했어요");
+}
+
 function renderBackup() {
   const main = $("#main");
   main.innerHTML = `
@@ -5917,7 +5977,7 @@ function bindEvents() {
   };
   $("#btn-menu").onclick = () => setMenu(!appEl.classList.contains("menu-open"));
   $("#sidebar").addEventListener("click", (e) => {
-    if (e.target.closest(".nav-btn, button[data-id], #btn-textbooks, #btn-sched-edit, #btn-kinds, #btn-backup, #btn-teachers")) setMenu(false);
+    if (e.target.closest(".nav-btn, button[data-id], #btn-textbooks, #btn-sched-edit, #btn-kinds, #btn-sid, #btn-backup, #btn-teachers")) setMenu(false);
   });
   document.addEventListener("click", (e) => {
     if (appEl.classList.contains("menu-open") && !e.target.closest("#sidebar, #btn-menu")) setMenu(false);
@@ -5994,6 +6054,11 @@ function bindEvents() {
     state.view = "kinds";
     state.studentId = null;
     try { await loadKindCounts(); } catch (e) { return fail(e); }
+    render();
+  };
+  $("#btn-sid").onclick = () => {
+    state.view = "sid";
+    state.studentId = null;
     render();
   };
   if ($("#btn-backup")) $("#btn-backup").onclick = () => {
