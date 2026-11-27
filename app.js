@@ -4430,7 +4430,7 @@ const sidMark = (t, q) => {
 };
 function sidFiltered() {
   const q = (state.sidQ || "").trim().toLowerCase();
-  const list = state.students.filter((s) => (s.active || state.sidInactive) && (!q || `${sidNo(s)} ${s.name} ${s.grade || ""} ${s.id}`.toLowerCase().includes(q)));
+  const list = state.students.filter((s) => (s.active || state.sidInactive) && (!q || `${sidNo(s)} ${s.name} ${s.grade || ""}`.toLowerCase().includes(q)));
   return { q, list: list.slice().sort((a, b) => (a.student_no || 1e9) - (b.student_no || 1e9) || a.name.localeCompare(b.name, "ko")) };
 }
 function sidCopy(text, msg) {
@@ -4450,12 +4450,12 @@ function sidList() {
   const { q, list } = sidFiltered();
   $("#sid-cnt").textContent = `${list.length}명`;
   $("#sid-rows").innerHTML = list.length
-    ? list.map((s) => `<tr><td class="sid-no"><b>${sidMark(sidNo(s), q)}</b></td><td><b>${sidMark(s.name, q)}</b></td><td>${sidMark(s.grade || "", q)}</td><td><span class="sid-pill ${s.active ? "" : "off"}">${s.active ? "재원" : "퇴원/휴원"}</span></td><td class="sid-id" title="${esc(s.id)}">${sidMark(s.id.slice(0, 8), q)}…</td><td class="sid-acts"><button type="button" class="btn small" data-sidcopy="${esc(sidNo(s))}">학생 ID 복사</button><button type="button" class="btn small" data-sidcopy="${esc(s.id)}">고유 키 복사</button></td></tr>`).join("")
-    : `<tr><td colspan="6" class="muted sid-empty">맞는 학생이 없어요. 이름이나 학생 ID를 다시 확인해 주세요.</td></tr>`;
+    ? list.map((s) => `<tr><td class="sid-no"><b>${sidMark(sidNo(s), q)}</b></td><td><b>${sidMark(s.name, q)}</b></td><td>${sidMark(s.grade || "", q)}</td><td><span class="sid-pill ${s.active ? "" : "off"}">${s.active ? "재원" : "퇴원/휴원"}</span></td><td class="sid-acts"><button type="button" class="btn small" data-sidcopy="${esc(sidNo(s))}">학생 ID 복사</button></td></tr>`).join("")
+    : `<tr><td colspan="5" class="muted sid-empty">맞는 학생이 없어요. 이름이나 학생 ID를 다시 확인해 주세요.</td></tr>`;
 }
 function sidRev() {
   const ids = ($("#sid-rev").value || "").split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
-  const find = (i) => { const k = i.toLowerCase(); return state.students.find((x) => x.id === k || sidNo(x).toLowerCase() === k || (/^\d+$/.test(k) && x.student_no === +k)); };
+  const find = (i) => { const k = i.toLowerCase(); return state.students.find((x) => sidNo(x).toLowerCase() === k || (/^\d+$/.test(k) && x.student_no === +k)); };
   $("#sid-revrows").innerHTML = ids.length
     ? ids.map((i) => { const s = find(i);
         return `<tr><td class="sid-id">${esc(i)}</td><td>${s ? `<b class="sid-okc">${esc(s.name)}</b> · ${esc(s.grade || "")} · ${esc(sidNo(s))}${s.active ? "" : " · 퇴원/휴원"}` : `<b class="sid-nok">없는 ID</b> 학생이 삭제됐거나 ID가 잘못됐어요`}</td></tr>`; }).join("")
@@ -4469,17 +4469,17 @@ function renderStudentIds() {
         <label class="check small-check"><input type="checkbox" id="sid-inact" ${state.sidInactive ? "checked" : ""}> 퇴원/휴원 포함</label>
         <button type="button" class="btn" id="sid-copyall">목록 복사 (ID, 이름)</button></div>
       <div class="muted" id="sid-cnt"></div>
-      <div class="sid-tw"><table class="sid-t"><thead><tr><th>학생 ID</th><th>이름</th><th>학년</th><th>상태</th><th>고유 키</th><th></th></tr></thead><tbody id="sid-rows"></tbody></table></div></div>
+      <div class="sid-tw"><table class="sid-t"><thead><tr><th>학생 ID</th><th>이름</th><th>학년</th><th>상태</th><th></th></tr></thead><tbody id="sid-rows"></tbody></table></div></div>
     <div class="card sid-card"><strong>ID로 이름 찾기</strong>
-      <span class="muted">S01 같은 학생 ID나 고유 키를 붙여 넣으면 어느 학생인지 알려줘요. 여러 개는 줄바꿈으로 구분합니다.</span>
+      <span class="muted">S01 같은 학생 ID를 붙여 넣으면 어느 학생인지 알려줘요. 여러 개는 줄바꿈으로 구분합니다.</span>
       <textarea id="sid-rev" rows="3" aria-label="학생 ID 붙여넣기" placeholder="예) S03">${esc(state.sidRev || "")}</textarea>
       <div class="sid-tw"><table class="sid-t"><thead><tr><th>입력한 ID</th><th>결과</th></tr></thead><tbody id="sid-revrows"></tbody></table></div></div>`;
   sidList(); sidRev();
   $("#sid-q").oninput = (e) => { state.sidQ = e.target.value; sidList(); };
   $("#sid-inact").onchange = (e) => { state.sidInactive = e.target.checked; sidList(); };
   $("#sid-rev").oninput = (e) => { state.sidRev = e.target.value; sidRev(); };
-  $("#sid-rows").onclick = (e) => { const b = e.target.closest("button[data-sidcopy]"); if (b) sidCopy(b.dataset.sidcopy, `${b.dataset.sidcopy.length > 6 ? "고유 키" : "학생 ID"}를 복사했어요`); };
-  $("#sid-copyall").onclick = () => sidCopy(sidFiltered().list.map((s) => `${sidNo(s)}\t${s.name}\t${s.id}`).join("\n"), "목록을 복사했어요");
+  $("#sid-rows").onclick = (e) => { const b = e.target.closest("button[data-sidcopy]"); if (b) sidCopy(b.dataset.sidcopy, "학생 ID를 복사했어요"); };
+  $("#sid-copyall").onclick = () => sidCopy(sidFiltered().list.map((s) => `${sidNo(s)}\t${s.name}`).join("\n"), "목록을 복사했어요");
 }
 
 function renderBackup() {
