@@ -1528,7 +1528,7 @@ body.rc-lock { overflow: hidden; }
 .sid-bar { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .sid-bar input[type="search"] { flex: 1 1 240px; width: auto; min-width: 0; }
 .sid-tw { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
-.sid-t { min-width: 600px; }
+.sid-t { min-width: 720px; }
 .sid-t th, .sid-t td { text-align: left; padding: .5rem .7rem; vertical-align: middle; }
 .sid-t thead th { background: var(--bg); color: var(--muted); font-size: .78rem; }
 .sid-t tbody td { border-top: 1px solid var(--border); }
@@ -1539,6 +1539,8 @@ body.rc-lock { overflow: hidden; }
 :root[data-theme="dark"] .sid-card mark { background: #5a4d10; }
 .sid-pill { font-size: .72rem; font-weight: 700; border-radius: 999px; padding: .05em .65em; background: var(--accent-soft); color: var(--accent); }
 .sid-pill.off { background: var(--warn-soft); color: var(--warn); }
-.sid-ok { color: var(--good); } .sid-no { color: var(--bad); }
+.sid-okc { color: var(--good); } .sid-nok { color: var(--bad); }
+.sid-no { font-size: 1rem; color: var(--accent); white-space: nowrap; }
+.sid-acts { display: flex; gap: .35rem; justify-content: flex-end; }
 .sid-empty { text-align: center; padding: 1rem !important; }
 .sid-card textarea { width: 100%; font: .8rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; }

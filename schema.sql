@@ -1414,3 +1414,38 @@ create policy "writings_owner_all" on storage.objects for all to authenticated
            or ((select public.is_admin()) and (storage.foldername(name))[1] in
                  (select t.user_id::text from public.teachers t where t.owner = (select auth.uid()) and t.user_id is not null))))
   with check (bucket_id = 'writings' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- 9-9. 학생 ID (S01, S02 ...): 원장별 등록 순서 번호. 지워도 번호는 재사용하지 않고, 한 번 정해지면 바뀌지 않음
+alter table public.students add column if not exists student_no integer;
+with n as (select id, row_number() over (partition by owner order by created_at, id) as rn from public.students where student_no is null)
+  update public.students s set student_no = n.rn from n where s.id = n.id;
+create unique index if not exists students_owner_no_uq on public.students (owner, student_no);
+alter table public.students alter column student_no set not null;
+
+create table if not exists public.student_no_seq (
+  owner uuid primary key references auth.users(id) on delete cascade,
+  last_no integer not null default 0
+);
+alter table public.student_no_seq enable row level security;
+revoke all on public.student_no_seq from anon, authenticated;
+insert into public.student_no_seq (owner, last_no)
+  select owner, max(student_no) from public.students group by owner
+  on conflict (owner) do update set last_no = greatest(public.student_no_seq.last_no, excluded.last_no);
+
+create or replace function public._students_no() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare v int;
+begin
+  if tg_op = 'INSERT' then
+    insert into public.student_no_seq (owner, last_no) values (new.owner, 1)
+      on conflict (owner) do update set last_no = public.student_no_seq.last_no + 1
+      returning last_no into v;
+    new.student_no := v;
+  else
+    new.student_no := old.student_no;
+  end if;
+  return new;
+end $$;
+drop trigger if exists students_no on public.students;
+create trigger students_no before insert or update on public.students
+  for each row execute function public._students_no();
